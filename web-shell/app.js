@@ -1,10 +1,9 @@
-/* MaxCallBridge — طبقة الجسر بين الواجهة و C++ عبر WebView2 */
 'use strict';
 
 /**
- * يرسل رسالة إلى C++ بأمان (WebView2 أو fallback للتصفح العادي).
- * @param {object} msg رسالة بصيغة {action, ...}
- * @returns {boolean} true إذا أُرسلت عبر WebView2
+ * Send a message to C++ via WebView2. Falls back to console.log outside WebView2.
+ * @param {object} msg Message object with an `action` field.
+ * @returns {boolean} True when delivered through WebView2.
  */
 function _postToNative(msg) {
   try {
@@ -12,130 +11,464 @@ function _postToNative(msg) {
       window.chrome.webview.postMessage(msg);
       return true;
     }
-  } catch (e) {
-    console.warn('[MaxCallBridge] postMessage failed:', e);
+  } catch (err) {
+    console.warn('[MaxCallBridge] postMessage failed:', err);
   }
   console.log('[MaxCallBridge:fallback]', JSON.stringify(msg));
   return false;
 }
 
 /**
- * يبث حدث DOM داخلي لتحديث الواجهة.
- * @param {string} name اسم الحدث
- * @param {object} detail بيانات الحدث
+ * Broadcast an internal DOM event for UI updates.
+ * @param {string} name Event short name (suffixed to `maxcall:`).
+ * @param {object} [detail] Event payload.
  */
 function _emit(name, detail) {
-  window.dispatchEvent(new CustomEvent('maxcall:' + name, { detail }));
-  console.log('[MaxCallBridge:rx]', name, detail || {});
+  window.dispatchEvent(new CustomEvent('maxcall:' + name, { detail: detail || {} }));
+}
+
+/** @type {number} Active call id, -1 when idle. */
+let _currentCallId = -1;
+/** @type {boolean} Whether a call is currently in progress. */
+let _inCall = false;
+/** @type {number} Timestamp (ms) when the active state started. */
+let _activeSince = 0;
+/** @type {number|null} Interval id for the duration counter. */
+let _timerId = null;
+/** @type {boolean} Whether the first onRegState has arrived (hides the engine banner). */
+let _gotFirstReg = false;
+/** @type {Array<{name:string,number:string,presence:string}>} Cached contacts. */
+let _contacts = [];
+/** @type {Map<number,{number:string,name:string,direction:string,wasActive:boolean}>} Per-call tracking for log typing. */
+const _callMeta = new Map();
+/** @type {string} Last dialed number (marks direction=out on ended). */
+let _lastDialed = '';
+
+/**
+ * Format seconds as m:ss.
+ * @param {number} secs Elapsed seconds.
+ * @returns {string} Formatted duration.
+ */
+function _fmtDur(secs) {
+  const m = Math.floor(secs / 60);
+  const s = Math.floor(secs % 60);
+  return m + ':' + String(s).padStart(2, '0');
+}
+
+/** Refresh the duration counter display. */
+function _tickTimer() {
+  const el = document.getElementById('acTimer');
+  if (!el || !_activeSince) return;
+  el.textContent = _fmtDur((Date.now() - _activeSince) / 1000);
+}
+
+/** Start the JS-side duration counter. */
+function _startTimer() {
+  _activeSince = Date.now();
+  _tickTimer();
+  if (_timerId !== null) clearInterval(_timerId);
+  _timerId = setInterval(_tickTimer, 500);
+}
+
+/** Stop the JS-side duration counter. */
+function _stopTimer() {
+  if (_timerId !== null) { clearInterval(_timerId); _timerId = null; }
+  _activeSince = 0;
+  const el = document.getElementById('acTimer');
+  if (el) el.textContent = '0:00';
 }
 
 /**
- * جسر MaxCall: إرسال JS->C++ واستقبال C++->JS.
+ * The MaxCall bridge: senders (JS->C++) and receivers (C++->JS).
  */
 const MaxCallBridge = {
-  // ---------- إرسال: JS -> C++ ----------
+  // ---------- Senders: JS -> C++ (via window.chrome.webview.postMessage) ----------
 
   /**
-   * بدء مكالمة صادرة.
-   * @param {{number: string}} p
+   * Notify C++ that the shell is ready; C++ replies with a full snapshot.
+   * @returns {void}
    */
-  makeCall(p) { _postToNative({ action: 'makeCall', number: String((p && p.number) || '') }); },
+  shellReady() { _postToNative({ action: 'shellReady' }); },
 
   /**
-   * إنهاء المكالمة الحالية.
-   * @param {{callId?: number}} p
+   * Request a data snapshot (used by the Retry button).
+   * @returns {void}
    */
-  hangup(p) { _postToNative({ action: 'hangup', callId: (p && p.callId) ?? -1 }); },
+  getData() { _postToNative({ action: 'getData' }); },
 
   /**
-   * الرد على مكالمة واردة.
-   * @param {{callId?: number}} p
+   * Start an outgoing call.
+   * @param {string} number Destination number.
+   * @returns {void}
    */
-  answer(p) { _postToNative({ action: 'answer', callId: (p && p.callId) ?? -1 }); },
-
-  /**
-   * تعليق / استئناف المكالمة.
-   * @param {{callId?: number, on: boolean}} p
-   */
-  hold(p) { _postToNative({ action: 'hold', callId: (p && p.callId) ?? -1, on: !!(p && p.on) }); },
-
-  /**
-   * تحويل المكالمة لرقم آخر.
-   * @param {{callId?: number, target: string}} p
-   */
-  transfer(p) { _postToNative({ action: 'transfer', callId: (p && p.callId) ?? -1, target: String((p && p.target) || '') }); },
-
-  /**
-   * إرسال نغمة DTMF.
-   * @param {{callId?: number, digit: string}} p رقم واحد 0-9/*#
-   */
-  sendDTMF(p) { _postToNative({ action: 'sendDTMF', callId: (p && p.callId) ?? -1, digit: String((p && p.digit) || '') }); },
-
-  /**
-   * تغيير حالة الحضور.
-   * @param {{status: 'available'|'busy'|'away'|'offline'}} p
-   */
-  setPresence(p) { _postToNative({ action: 'setPresence', status: String((p && p.status) || 'available') }); },
-
-  /**
-   * إشعار C++ بأن الواجهة جاهزة لاستقبال اللقطة الأولية.
-   * يرسل تلقائياً عند تحميل الصفحة.
-   */
-  ready() { _postToNative({ action: 'shellReady' }); },
-
-  // ---------- استقبال: C++ -> JS ----------
-
-  /**
-   * مكالمة واردة جديدة (يستدعيها C++ عبر ExecuteScript).
-   * @param {string} number رقم المتصل
-   * @param {string} name اسم المتصل
-   * @param {number} callId معرف المكالمة
-   */
-  onIncomingCall(number, name, callId) {
-    const banner = document.getElementById('incomingBanner');
-    const numEl = document.getElementById('incomingNumber');
-    if (banner) banner.classList.remove('hidden');
-    if (numEl) numEl.textContent = (name ? name + ' • ' : '') + number;
-    _emit('incoming-call', { number, name, callId });
+  makeCall(number) {
+    const num = String(number || '').trim();
+    if (!num) return;
+    _lastDialed = num;
+    _postToNative({ action: 'makeCall', number: num });
   },
 
   /**
-   * تغيّر حالة المكالمة.
-   * @param {number} callId معرف المكالمة
-   * @param {string} state إحدى: idle|calling|ringing|active|held|ended
+   * Hang up a call.
+   * @param {number} [callId] Call id, -1 = current.
+   * @returns {void}
    */
-  onCallState(callId, state) {
-    const label = document.getElementById('callState');
-    const map = { idle: 'جاهز للاتصال', calling: 'جارٍ الاتصال…', ringing: 'يرن…', active: 'مكالمة نشطة', held: 'المكالمة معلّقة', ended: 'انتهت المكالمة' };
-    if (label) label.textContent = map[state] || state;
-    if (state === 'ended') document.getElementById('incomingBanner')?.classList.add('hidden');
-    _emit('call-state', { callId, state });
+  hangup(callId) { _postToNative({ action: 'hangup', callId: callId ?? _currentCallId }); },
+
+  /**
+   * Answer an incoming call.
+   * @param {number} [callId] Call id, -1 = current.
+   * @returns {void}
+   */
+  answer(callId) { _postToNative({ action: 'answer', callId: callId ?? _currentCallId }); },
+
+  /**
+   * Hold or resume a call.
+   * @param {number} [callId] Call id, -1 = current.
+   * @param {boolean} on True = hold, false = resume.
+   * @returns {void}
+   */
+  hold(callId, on) { _postToNative({ action: 'hold', callId: callId ?? _currentCallId, on: !!on }); },
+
+  /**
+   * Blind-transfer a call to another target.
+   * @param {number} [callId] Call id, -1 = current.
+   * @param {string} target Transfer destination.
+   * @returns {void}
+   */
+  transfer(callId, target) {
+    _postToNative({ action: 'transfer', callId: callId ?? _currentCallId, target: String(target || '').trim() });
   },
 
   /**
-   * تغيّر حالة التسجيل في المقسم.
-   * @param {boolean} registered هل الحساب مسجّل؟
-   * @param {string} message رسالة وصفية
+   * Send a DTMF digit on a call.
+   * @param {number} [callId] Call id, -1 = current.
+   * @param {string} digit Single digit 0-9 * #.
+   * @returns {void}
+   */
+  sendDTMF(callId, digit) {
+    _postToNative({ action: 'sendDTMF', callId: callId ?? _currentCallId, digit: String(digit || '') });
+  },
+
+  /**
+   * Change presence status.
+   * @param {string} status One of available|busy|away|offline.
+   * @returns {void}
+   */
+  setPresence(status) { _postToNative({ action: 'setPresence', status: String(status || 'available') }); },
+
+  /**
+   * Ask C++ to open the settings dialog.
+   * @returns {void}
+   */
+  openSettings() { _postToNative({ action: 'openSettings' }); },
+
+  /**
+   * Ask C++ to quit the app.
+   * @returns {void}
+   */
+  quitApp() { _postToNative({ action: 'quitApp' }); },
+
+  /**
+   * Ask C++ to minimize the app window.
+   * @returns {void}
+   */
+  minimizeApp() { _postToNative({ action: 'minimizeApp' }); },
+
+  // ---------- Receivers: C++ -> JS (called via ExecuteScript) ----------
+
+  /**
+   * Registration state changed.
+   * @param {boolean} registered Whether the account is registered.
+   * @param {string} message Human-readable detail.
+   * @returns {void}
    */
   onRegState(registered, message) {
     const dot = document.getElementById('regDot');
     const txt = document.getElementById('regText');
-    if (dot) dot.className = 'h-2.5 w-2.5 rounded-full ' + (registered ? 'bg-emerald-400' : 'bg-rose-400');
-    if (txt) txt.textContent = registered ? 'مسجّل' : 'غير مسجّل';
-    _emit('reg-state', { registered, message });
+    if (dot) dot.className = 'h-2 w-2 rounded-full ' + (registered ? 'bg-emerald-400' : 'bg-rose-400');
+    if (txt) txt.textContent = registered ? 'Registered' : 'Offline';
+    if (!_gotFirstReg) {
+      _gotFirstReg = true;
+      document.getElementById('engineBanner')?.classList.add('hidden');
+    }
+    _emit('reg-state', { registered: !!registered, message: String(message || '') });
   },
 
   /**
-   * رسالة نصية / تنبيه من C++.
-   * @param {string} from المرسل
-   * @param {string} text نص الرسالة
+   * Call state changed.
+   * @param {number} callId Call id.
+   * @param {string} state One of idle|calling|ringing|active|held|ended.
+   * @param {string} [number] Remote number.
+   * @param {string} [name] Remote name.
+   * @returns {void}
    */
-  onMessage(from, text) { _emit('message', { from, text }); },
+  onCallState(callId, state, number, name) {
+    const num = String(number || '');
+    const nm = String(name || '');
+    _currentCallId = Number(callId ?? _currentCallId);
+
+    if (!_callMeta.has(_currentCallId)) {
+      const direction = _lastDialed && num && _lastDialed === num ? 'out' : (_lastDialed ? 'out' : 'in');
+      _callMeta.set(_currentCallId, { number: num, name: nm, direction, wasActive: false });
+    }
+    const meta = _callMeta.get(_currentCallId);
+    if (num) meta.number = num;
+    if (nm) meta.name = nm;
+
+    const bar = document.getElementById('activeCallBar');
+    const acNum = document.getElementById('acNumber');
+    const acName = document.getElementById('acName');
+    const acState = document.getElementById('acState');
+    const holdBtn = document.getElementById('btnHold');
+    if (acNum) acNum.textContent = meta.number || num || '—';
+    if (acName) acName.textContent = meta.name || nm || 'Unknown';
+    if (acState) acState.textContent = state;
+
+    if (state === 'active') {
+      meta.wasActive = true;
+      _inCall = true;
+      bar?.classList.remove('hidden');
+      if (holdBtn) holdBtn.textContent = 'Hold';
+      _startTimer();
+    } else if (state === 'held') {
+      _inCall = true;
+      bar?.classList.remove('hidden');
+      if (holdBtn) holdBtn.textContent = 'Resume';
+    } else if (state === 'calling' || state === 'ringing') {
+      _inCall = true;
+      bar?.classList.remove('hidden');
+    } else if (state === 'ended' || state === 'idle') {
+      _inCall = false;
+      _stopTimer();
+      bar?.classList.add('hidden');
+      document.getElementById('incomingBanner')?.classList.add('hidden');
+      document.getElementById('incomingBanner')?.classList.remove('flex');
+      if (state === 'ended') _appendLog(meta);
+      if (!_inCall) { _currentCallId = -1; _lastDialed = ''; }
+      _callMeta.delete(Number(callId));
+    }
+    _emit('call-state', { callId: _currentCallId, state, number: meta.number, name: meta.name });
+  },
+
+  /**
+   * New incoming call.
+   * @param {string} number Caller number.
+   * @param {string} name Caller name.
+   * @param {number} callId Call id.
+   * @returns {void}
+   */
+  onIncomingCall(number, name, callId) {
+    _currentCallId = Number(callId);
+    _callMeta.set(_currentCallId, { number: String(number || ''), name: String(name || ''), direction: 'in', wasActive: false });
+    const banner = document.getElementById('incomingBanner');
+    const numEl = document.getElementById('incomingNumber');
+    const nameEl = document.getElementById('incomingName');
+    if (numEl) numEl.textContent = String(number || '');
+    if (nameEl) nameEl.textContent = String(name || '');
+    if (banner) { banner.classList.remove('hidden'); banner.classList.add('flex'); }
+    _emit('incoming-call', { number: String(number || ''), name: String(name || ''), callId: _currentCallId });
+  },
+
+  /**
+   * Text message / alert from C++.
+   * @param {string} from Sender.
+   * @param {string} text Message text.
+   * @returns {void}
+   */
+  onMessage(from, text) {
+    const toast = document.getElementById('msgToast');
+    const body = document.getElementById('msgText');
+    if (body) body.textContent = (from ? from + ': ' : '') + String(text || '');
+    if (toast) {
+      toast.classList.remove('hidden');
+      clearTimeout(toast._hideT);
+      toast._hideT = setTimeout(() => toast.classList.add('hidden'), 3500);
+    }
+    _emit('message', { from: String(from || ''), text: String(text || '') });
+  },
+
+  /**
+   * Full contact list snapshot.
+   * @param {string} jsonText JSON array string: [{name,number,presence}].
+   * @returns {void}
+   */
+  onContacts(jsonText) {
+    let arr = [];
+    try { arr = JSON.parse(String(jsonText || '[]')); } catch { arr = []; }
+    if (!Array.isArray(arr)) arr = [];
+    _contacts = arr.map((c) => ({
+      name: String(c && c.name || ''),
+      number: String(c && c.number || ''),
+      presence: String(c && c.presence || ''),
+    }));
+    _renderContacts(document.getElementById('contactSearch')?.value || '');
+    _emit('contacts', { contacts: _contacts });
+  },
+
+  /**
+   * Account identity.
+   * @param {string} user SIP user.
+   * @param {string} domain SIP domain.
+   * @returns {void}
+   */
+  onAccount(user, domain) {
+    const el = document.getElementById('accountLine');
+    if (el) el.textContent = String(user || '') + '@' + String(domain || '');
+    _emit('account', { user: String(user || ''), domain: String(domain || '') });
+  },
 };
 
-// دوال عالمية يستدعيها C++ مباشرة عبر ExecuteScript (نفس أسلوب updateCallerInfo)
-window.onIncomingCall = (...a) => MaxCallBridge.onIncomingCall(...a);
-window.onCallState = (...a) => MaxCallBridge.onCallState(...a);
+/**
+ * Render the contact list, filtered by a query.
+ * @param {string} query Search text.
+ * @returns {void}
+ */
+function _renderContacts(query) {
+  const list = document.getElementById('contactList');
+  const empty = document.getElementById('contactEmpty');
+  const count = document.getElementById('contactCount');
+  if (!list) return;
+  const q = String(query || '').toLowerCase().trim();
+  const shown = _contacts.filter((c) =>
+    !q || c.name.toLowerCase().includes(q) || c.number.replace(/\s/g, '').includes(q.replace(/\s/g, '')));
+  if (count) count.textContent = String(shown.length);
+  list.innerHTML = '';
+  shown.forEach((c) => {
+    const row = document.createElement('div');
+    row.className = 'flex items-center justify-between bg-white p-2.5';
+    const dot = c.presence === 'busy' ? 'bg-rose-400' : c.presence === 'away' ? 'bg-amber-400' : 'bg-emerald-400';
+    row.innerHTML =
+      '<div class="flex min-w-0 items-center gap-2">' +
+      '<span class="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-teal-50 text-xs font-bold text-teal-800">' +
+      '<span></span>' +
+      '<span class="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-white ' + dot + '"></span></div>' +
+      '<div class="min-w-0"><p class="truncate text-xs font-bold"></p><p class="text-[11px] text-slate-400" dir="ltr"></p></div></div>' +
+      '<button class="shrink-0 rounded-full bg-teal-700/10 px-2.5 py-1 text-[11px] font-bold text-teal-800 active:scale-95">Call</button>';
+    row.querySelector('span span').textContent = (c.name || c.number || '?').charAt(0).toUpperCase();
+    row.querySelector('p').textContent = c.name || c.number;
+    row.querySelectorAll('p')[1].textContent = c.number;
+    row.querySelector('button').addEventListener('click', () => {
+      MaxCallBridge.makeCall(c.number);
+      _switchTab('tabDial');
+    });
+    list.appendChild(row);
+  });
+  if (empty) empty.classList.toggle('hidden', shown.length > 0);
+}
+
+/**
+ * Append one row to the JS-side call log.
+ * @param {{number:string,name:string,direction:string,wasActive:boolean}} meta Call metadata.
+ * @returns {void}
+ */
+function _appendLog(meta) {
+  const list = document.getElementById('logList');
+  const empty = document.getElementById('logEmpty');
+  if (!list) return;
+  const type = meta.direction === 'in' && !meta.wasActive ? 'missed' : meta.direction;
+  const time = new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const row = document.createElement('div');
+  const badge = type === 'missed'
+    ? 'bg-rose-50 text-rose-600'
+    : type === 'in' ? 'bg-emerald-50 text-emerald-600' : 'bg-sky-50 text-sky-600';
+  const arrow = type === 'missed' ? '↘' : type === 'in' ? '↙' : '↗';
+  const label = type === 'missed' ? 'Missed' : type === 'in' ? 'Incoming' : 'Outgoing';
+  row.className = 'flex items-center justify-between rounded-2xl border border-slate-100 bg-white p-2.5';
+  row.innerHTML =
+    '<div class="flex min-w-0 items-center gap-2">' +
+    '<span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm ' + badge + '">' + arrow + '</span>' +
+    '<div class="min-w-0"><p class="truncate text-xs font-bold" dir="ltr"></p>' +
+    '<p class="truncate text-[11px] text-slate-400"></p></div></div>' +
+    '<div class="flex shrink-0 items-center gap-1.5">' +
+    '<span class="rounded-full px-2 py-0.5 text-[11px] font-bold ' + badge + '">' + label + '</span>' +
+    '<button class="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600 active:scale-95">Redial</button></div>';
+  row.querySelectorAll('p')[0].textContent = meta.number || 'Unknown';
+  row.querySelectorAll('p')[1].textContent = (meta.name ? meta.name + ' • ' : '') + time + ' • ' + type;
+  row.querySelector('button').addEventListener('click', () => {
+    const input = document.getElementById('dialInput');
+    if (input) input.value = meta.number;
+    MaxCallBridge.makeCall(meta.number);
+    _switchTab('tabDial');
+  });
+  list.prepend(row);
+  if (empty) empty.classList.add('hidden');
+}
+
+/**
+ * Switch visible tab panel.
+ * @param {string} id Panel id: tabDial|tabContacts|tabLog.
+ * @returns {void}
+ */
+function _switchTab(id) {
+  ['tabDial', 'tabContacts', 'tabLog'].forEach((t) => document.getElementById(t)?.classList.add('hidden'));
+  document.getElementById(id)?.classList.remove('hidden');
+  document.querySelectorAll('.tab-btn').forEach((b) => {
+    const active = b.dataset.tab === id;
+    b.classList.toggle('bg-teal-50', active);
+    b.classList.toggle('text-teal-800', active);
+    b.classList.toggle('font-bold', active);
+    b.classList.toggle('text-slate-400', !active);
+  });
+}
+
+/** Wire up all DOM controls. */
+function _wireUI() {
+  document.querySelectorAll('.tab-btn').forEach((b) =>
+    b.addEventListener('click', () => _switchTab(b.dataset.tab)));
+
+  const input = document.getElementById('dialInput');
+  document.getElementById('dialPad')?.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-digit]');
+    if (!b || !input) return;
+    const d = b.dataset.digit;
+    if (_inCall) MaxCallBridge.sendDTMF(undefined, d);
+    else input.value += d;
+  });
+  document.getElementById('btnBackspace')?.addEventListener('click', () => {
+    if (input) input.value = input.value.slice(0, -1);
+  });
+
+  document.getElementById('btnCall')?.addEventListener('click', () =>
+    MaxCallBridge.makeCall(input?.value.trim()));
+  document.getElementById('btnHangup')?.addEventListener('click', () => MaxCallBridge.hangup(undefined));
+  document.getElementById('btnAnswer')?.addEventListener('click', () => MaxCallBridge.answer(undefined));
+  document.getElementById('btnHold')?.addEventListener('click', () => {
+    const holding = document.getElementById('btnHold')?.textContent === 'Hold';
+    MaxCallBridge.hold(undefined, holding);
+  });
+  document.getElementById('btnTransfer')?.addEventListener('click', () =>
+    MaxCallBridge.transfer(undefined, document.getElementById('transferTarget')?.value));
+
+  document.getElementById('btnIncomingAnswer')?.addEventListener('click', () => MaxCallBridge.answer(undefined));
+  document.getElementById('btnIncomingReject')?.addEventListener('click', () => MaxCallBridge.hangup(undefined));
+
+  document.getElementById('presenceSelect')?.addEventListener('change', (e) =>
+    MaxCallBridge.setPresence(e.target.value));
+  document.getElementById('btnSettings')?.addEventListener('click', () => MaxCallBridge.openSettings());
+  document.getElementById('btnMinimize')?.addEventListener('click', () => MaxCallBridge.minimizeApp());
+  document.getElementById('btnQuit')?.addEventListener('click', () => MaxCallBridge.quitApp());
+  document.getElementById('btnRetry')?.addEventListener('click', () => MaxCallBridge.getData());
+
+  document.getElementById('contactSearch')?.addEventListener('input', (e) =>
+    _renderContacts(e.target.value));
+  document.getElementById('btnClearLog')?.addEventListener('click', () => {
+    document.getElementById('logList').innerHTML = '';
+    document.getElementById('logEmpty')?.classList.remove('hidden');
+  });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  _wireUI();
+  _renderContacts('');
+  MaxCallBridge.shellReady();
+});
+
+// Global entry points called by C++ via ExecuteScript.
 window.onRegState = (...a) => MaxCallBridge.onRegState(...a);
+window.onCallState = (...a) => MaxCallBridge.onCallState(...a);
+window.onIncomingCall = (...a) => MaxCallBridge.onIncomingCall(...a);
 window.onMessage = (...a) => MaxCallBridge.onMessage(...a);
+window.onContacts = (...a) => MaxCallBridge.onContacts(...a);
+window.onAccount = (...a) => MaxCallBridge.onAccount(...a);
 window.MaxCallBridge = MaxCallBridge;

@@ -144,6 +144,7 @@ MainShellDlg::MainShellDlg(CWnd* pParent)
 	m_webView = nullptr;
 	m_env = nullptr;
 	m_pageReady = false;
+	m_lastCallId = PJSUA_INVALID_ID;
 }
 
 MainShellDlg::~MainShellDlg(void)
@@ -326,9 +327,26 @@ void MainShellDlg::ProcessShellMessage(CString& message)
 	}
 	CString action = JsStringToCString(root["action"]);
 
-	if (action == _T("shellReady")) {
+	FILE* dbg = fopen("maxcall_debug.log", "a");
+	if (dbg) { fprintf(dbg, "shell: %ls\n", (LPCTSTR)action); fclose(dbg); }
+
+	if (action == _T("shellReady") || action == _T("getData")) {
 		m_pageReady = true;
 		PushSnapshot();
+		PushContacts();
+		PushAccount();
+		return;
+	}
+	if (action == _T("openSettings")) {
+		mainDlg->OnMenuSettings();
+		return;
+	}
+	if (action == _T("quitApp")) {
+		mainDlg->OnMenuExit();
+		return;
+	}
+	if (action == _T("minimizeApp")) {
+		ShowWindow(SW_MINIMIZE);
 		return;
 	}
 	if (action == _T("makeCall")) {
@@ -432,10 +450,28 @@ void MainShellDlg::PushIncomingCall(const CString& number, const CString& name, 
 	ExecuteShellScript(js);
 }
 
-void MainShellDlg::PushCallState(pjsua_call_id call_id, const CString& state)
+void MainShellDlg::PushCallState(pjsua_call_id call_id, const CString& state, const CString& number, const CString& name)
 {
+	// تخزين مؤقت: أحداث التعليق تصل بلا رقم/اسم فنعيد استخدام آخر قيم معروفة
+	if (!number.IsEmpty()) {
+		m_lastCallId = call_id;
+		m_lastNumber = number;
+		m_lastName = name;
+	}
+	CString showNumber = number;
+	CString showName = name;
+	if (showNumber.IsEmpty() && call_id == m_lastCallId) {
+		showNumber = m_lastNumber;
+		showName = m_lastName;
+	}
+	if (state == _T("ended") && call_id == m_lastCallId) {
+		m_lastCallId = PJSUA_INVALID_ID;
+		m_lastNumber.Empty();
+		m_lastName.Empty();
+	}
 	CString js;
-	js.Format(_T("onCallState(%d, '%s')"), call_id, state);
+	js.Format(_T("onCallState(%d, '%s', '%s', '%s')"),
+		call_id, state, EscapeJs(showNumber), EscapeJs(showName));
 	ExecuteShellScript(js);
 }
 
@@ -443,6 +479,75 @@ void MainShellDlg::PushMessage(const CString& from, const CString& text)
 {
 	CString js;
 	js.Format(_T("onMessage('%s', '%s')"), EscapeJs(from), EscapeJs(text));
+	ExecuteShellScript(js);
+}
+
+void MainShellDlg::PushContacts()
+{
+	if (!mainDlg || !IsWindow(mainDlg->m_hWnd) || !mainDlg->pageContacts) {
+		return;
+	}
+	Json::Value arr(Json::arrayValue);
+	POSITION pos = mainDlg->pageContacts->contacts.GetHeadPosition();
+	while (pos) {
+		Contact* c = mainDlg->pageContacts->contacts.GetNext(pos);
+		if (!c) {
+			continue;
+		}
+		CString number = c->number;
+		if (number.IsEmpty()) {
+			number = c->phone;
+		}
+		if (number.IsEmpty()) {
+			number = c->mobile;
+		}
+		if (number.IsEmpty()) {
+			continue;
+		}
+		CString name = c->name;
+		if (name.IsEmpty()) {
+			name = number;
+		}
+		Json::Value item;
+		std::string u8num = CT2A(number, CP_UTF8);
+		std::string u8name = CT2A(name, CP_UTF8);
+		item["number"] = u8num;
+		item["name"] = u8name;
+		item["presence"] = c->presence ? true : false;
+		arr.append(item);
+	}
+	Json::FastWriter writer;
+	std::string json = writer.write(arr);
+	// JSON مبني بـ UTF-8 — نحوّله لـ Unicode قبل الحقن في السكربت
+	wchar_t* ucs2 = NULL;
+	Utf8DecodeCP((char*)json.c_str(), CP_UTF8, &ucs2);
+	CString js;
+	if (ucs2) {
+		js.Format(_T("onContacts('%s')"), EscapeJs(CString(ucs2)));
+		free(ucs2);
+		ExecuteShellScript(js);
+	}
+}
+
+void MainShellDlg::PushAccount()
+{
+	if (pjsua_var.state != PJSUA_STATE_RUNNING || !pjsua_acc_is_valid(account)) {
+		return;
+	}
+	pjsua_acc_info info;
+	if (pjsua_acc_get_info(account, &info) != PJ_SUCCESS) {
+		return;
+	}
+	CString uri = MSIP::PjToStr(&info.acc_uri, TRUE);
+	SIPURI sipuri;
+	MSIP::ParseSIPURI(uri, &sipuri);
+	CString user = sipuri.user;
+	CString domain = MSIP::RemovePort(sipuri.domain);
+	if (user.IsEmpty()) {
+		return;
+	}
+	CString js;
+	js.Format(_T("onAccount('%s', '%s')"), EscapeJs(user), EscapeJs(domain));
 	ExecuteShellScript(js);
 }
 
@@ -466,22 +571,30 @@ void MainShellDlg::PushSnapshot()
 			}
 		}
 		PushRegState(registered, registered ? _T("Registered") : _T("Not registered"));
+		PushAccount();
+		PushContacts();
 		// المكالمة النشطة الحالية إن وجدت (مع حالة التعليق الفعلية)
 		pjsua_call_id current = mainDlg->CurrentCallId();
 		if (current != PJSUA_INVALID_ID && pjsua_call_is_active(current)) {
 			pjsua_call_info info;
 			if (pjsua_call_get_info(current, &info) == PJ_SUCCESS) {
+				CString num = MSIP::PjToStr(&info.remote_info, TRUE);
+				SIPURI sipuri;
+				MSIP::ParseSIPURI(num, &sipuri);
+				CString shellNum = !sipuri.user.IsEmpty() ? sipuri.user : sipuri.domain;
+				CString shellName = mainDlg->pageContacts
+					? mainDlg->pageContacts->GetNameByNumber(shellNum) : _T("");
 				if (info.state == PJSIP_INV_STATE_CONFIRMED) {
 					if (info.media_status == PJSUA_CALL_MEDIA_LOCAL_HOLD
 						|| info.media_status == PJSUA_CALL_MEDIA_NONE) {
-						PushCallState(current, _T("held"));
+						PushCallState(current, _T("held"), shellNum, shellName);
 					}
 					else {
-						PushCallState(current, _T("active"));
+						PushCallState(current, _T("active"), shellNum, shellName);
 					}
 				}
 				else {
-					PushCallState(current, _T("ringing"));
+					PushCallState(current, _T("ringing"), shellNum, shellName);
 				}
 			}
 		}
@@ -498,12 +611,19 @@ void MainShellDlg::Restore()
 void MainShellDlg::OnClose()
 {
 	ShowWindow(SW_HIDE);
+	// أمان: لا نترك المستخدم بلا أي نافذة — أعد الكلاسيكية إن كانت مخفية
+	if (mainDlg && IsWindow(mainDlg->m_hWnd) && !mainDlg->IsWindowVisible()) {
+		mainDlg->ShowWindow(SW_SHOW);
+	}
 }
 
 void MainShellDlg::OnSysCommand(UINT nID, LPARAM lParam)
 {
 	if ((nID & 0xFFF0) == SC_CLOSE) {
 		ShowWindow(SW_HIDE);
+		if (mainDlg && IsWindow(mainDlg->m_hWnd) && !mainDlg->IsWindowVisible()) {
+			mainDlg->ShowWindow(SW_SHOW);
+		}
 		return;
 	}
 	CBaseDialog::OnSysCommand(nID, lParam);

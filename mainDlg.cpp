@@ -678,14 +678,14 @@ LRESULT CmainDlg::onCallMediaState(WPARAM wParam, LPARAM lParam)
 		onRefreshLevels(0, 0);
 	}
 
-	//-- modern shell: hold / resume
+	//-- modern shell: hold / resume (number/name cached inside shell)
 	if (mainShellDlg && IsWindow(mainShellDlg->m_hWnd) && mainShellDlg->IsWebViewReady()) {
 		if (call_info->media_status == PJSUA_CALL_MEDIA_LOCAL_HOLD
 			|| call_info->media_status == PJSUA_CALL_MEDIA_NONE) {
-			mainShellDlg->PushCallState(call_info->id, _T("held"));
+			mainShellDlg->PushCallState(call_info->id, _T("held"), _T(""), _T(""));
 		}
 		else if (call_info->media_status == PJSUA_CALL_MEDIA_ACTIVE) {
-			mainShellDlg->PushCallState(call_info->id, _T("active"));
+			mainShellDlg->PushCallState(call_info->id, _T("active"), _T(""), _T(""));
 		}
 	}
 
@@ -2223,6 +2223,10 @@ void CmainDlg::OnCreated()
 	//-- modern WebView2 shell (independent repo: maxcall-new)
 	if (accountSettings.modernUI) {
 		ShowMainShell();
+		if (mainShellDlg && IsWindow(mainShellDlg->m_hWnd)) {
+			// القشرة هي الواجهة الأساسية — نخفي النافذة الكلاسيكية (تبقى في الـ Tray)
+			ShowWindow(SW_HIDE);
+		}
 	}
 	//--
 	WM_SHELLHOOKMESSAGE = RegisterWindowMessage(_T("SHELLHOOK"));
@@ -5754,6 +5758,9 @@ void CmainDlg::OnMenuModernUI()
 	}
 	else if (mainShellDlg && IsWindow(mainShellDlg->m_hWnd)) {
 		mainShellDlg->ShowWindow(SW_HIDE);
+		if (!IsWindowVisible()) {
+			ShowWindow(SW_SHOW);
+		}
 	}
 }
 
@@ -5797,7 +5804,12 @@ void CmainDlg::PushCallToShell(pjsua_call_info* call_info)
 		state = _T("idle");
 		break;
 	}
-	mainShellDlg->PushCallState(call_info->id, state);
+	CString number = MSIP::PjToStr(&call_info->remote_info, TRUE);
+	SIPURI sipuri;
+	MSIP::ParseSIPURI(number, &sipuri);
+	CString shellNumber = !sipuri.user.IsEmpty() ? sipuri.user : sipuri.domain;
+	CString shellName = pageContacts ? pageContacts->GetNameByNumber(shellNumber) : _T("");
+	mainShellDlg->PushCallState(call_info->id, state, shellNumber, shellName);
 }
 
 void CmainDlg::ShowRingingDialogs()

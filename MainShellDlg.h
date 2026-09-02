@@ -30,8 +30,10 @@ public:
 	// دفع الأحداث من CmainDlg (تعمل على خيط الواجهة دائماً)
 	void PushRegState(bool registered, const CString& message);
 	void PushIncomingCall(const CString& number, const CString& name, pjsua_call_id call_id);
-	void PushCallState(pjsua_call_id call_id, const CString& state);
+	void PushCallState(pjsua_call_id call_id, const CString& state, const CString& number, const CString& name);
 	void PushMessage(const CString& from, const CString& text);
+	void PushContacts();
+	void PushAccount();
 	void PushSnapshot();
 
 	bool IsWebViewReady() const { return m_webView != NULL && m_pageReady; }
@@ -58,6 +60,9 @@ public:
 
 private:
 	bool m_pageReady;
+	pjsua_call_id m_lastCallId;
+	CString m_lastNumber;
+	CString m_lastName;
 
 	void InitWebView2();
 	void ExecuteShellScript(const CString& js);

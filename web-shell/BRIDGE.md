@@ -21,6 +21,10 @@
 | `sendDTMF` | `callId?`, `digit` | `number`, `string` (`0-9*#`) | نغمة أثناء المكالمة |
 | `setPresence` | `status` | `'available' \| 'busy' \| 'away' \| 'offline'` | حالة الحضور (انظر التعيين أدناه) |
 | `shellReady` | — | — | ترسلها الواجهة تلقائياً عند التحميل؛ يرد C++ بلقطة كاملة |
+| `getData` | — | — | طلب اللقطة الكاملة يدوياً (زر Retry): جهات + حساب + تسجيل + مكالمة |
+| `openSettings` | — | — | فتح نافذة الإعدادات الأصلية |
+| `quitApp` | — | — | خروج من التطبيق |
+| `minimizeApp` | — | — | تصغير نافذة القشرة |
 
 > `setPresence` يُعيَّن في `MainShellDlg::ProcessShellMessage` كالتالي:
 > `available/away` → إلغاء DND + نشر متاح، `busy` → تفعيل DND + نشر متاح،
@@ -43,9 +47,11 @@ window.chrome.webview.postMessage({ action: 'hold', callId: -1, on: true });
 | الدالة | التوقيع | الوصف |
 |---|---|---|
 | `onIncomingCall` | `(number: string, name: string, callId: number)` | إظهار بانر الواردة |
-| `onCallState` | `(callId: number, state: 'idle' \| 'calling' \| 'ringing' \| 'active' \| 'held' \| 'ended')` | تحديث `#callState` |
-| `onRegState` | `(registered: boolean, message: string)` | تحديث `#regDot` / `#regText` |
+| `onCallState` | `(callId: number, state: 'idle' \| 'calling' \| 'ringing' \| 'active' \| 'held' \| 'ended', number: string, name: string)` | تحديث شريط المكالمة (الرقم/الاسم فارغان في أحداث التعليق — تُعاد القيم المخزنة) |
+| `onRegState` | `(registered: boolean, message: string)` | تحديث `#regDot` / `#regText` + إخفاء بانر المحرك |
 | `onMessage` | `(from: string, text: string)` | تنبيه / رسالة نصية |
+| `onContacts` | `(jsonText: string)` | مصفوفة JSON `[{name, number, presence}]` من دفتر `pageContacts` |
+| `onAccount` | `(user: string, domain: string)` | سطر الحساب في الهيدر |
 
 مثال من C++ (نفس نمط `UpdateWebView` / `OnCrmSaveResult`):
 
