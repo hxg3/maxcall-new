@@ -12,6 +12,7 @@ tailwind.config={theme:{extend:{colors:{teal:"#087B78","teal-dark":"#075B59","te
 *{font-family:'Segoe UI',system-ui,sans-serif}
 body{background:#F8FAFA;margin:0;padding:0}
 input:focus,textarea:focus{outline:none;box-shadow:0 0 0 2px rgba(8,123,120,0.15);border-color:#087B78}
+#toast{transition:opacity 0.3s ease}
 </style>
 </head>
 <body>
@@ -38,14 +39,21 @@ input:focus,textarea:focus{outline:none;box-shadow:0 0 0 2px rgba(8,123,120,0.15
 <!-- Notes -->
 <div class="px-4 pb-3">
   <label class="text-[11px] font-semibold text-ink-sec uppercase tracking-wide block mb-1.5">Notes</label>
-  <textarea id="notes" rows="3" placeholder="Notes about this caller..."
+  <textarea id="notesInput" rows="3" placeholder="Notes about this caller..."
     class="w-full px-3 py-2 border border-border rounded-lg text-sm text-ink bg-white resize-none transition"></textarea>
 </div>
 
-<!-- Save -->
-<div class="px-4 pb-4">
+<!-- Toast feedback -->
+<div id="toast" class="hidden mx-4 mb-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-center"></div>
+
+<!-- Buttons -->
+<div class="px-4 pb-4 flex gap-2">
+  <button id="dismissBtn" onclick="dismiss()"
+    class="flex-1 bg-white border border-border hover:bg-surface text-ink-sec font-semibold py-2 rounded-lg transition text-sm">
+    Dismiss
+  </button>
   <button id="saveBtn" onclick="save()"
-    class="w-full bg-teal hover:bg-teal-dark text-white font-semibold py-2 rounded-lg transition text-sm">
+    class="flex-1 bg-teal hover:bg-teal-dark text-white font-semibold py-2 rounded-lg transition text-sm">
     Save
   </button>
 </div>
@@ -56,10 +64,14 @@ let callerData = {number:'', name:'', notes:'', callId:-1};
 function updateCallerInfo(number, name, notes, callId) {
   callerData = {number, name: name || 'Unknown', notes: notes || '', callId};
   document.getElementById('callerName').textContent = callerData.name;
-  document.getElementById('callerNumber').textContent = callerData.number;
+  document.getElementById('callerNumber').textContent = callerData.number || '-';
   document.getElementById('callerNameInput').value = callerData.name !== 'Unknown' ? callerData.name : '';
-  document.getElementById('notes').value = callerData.notes;
-  document.getElementById('avatar').textContent = callerData.name.charAt(0).toUpperCase();
+  document.getElementById('notesInput').value = callerData.notes;
+  document.getElementById('avatar').textContent = (callerData.name || '?').charAt(0).toUpperCase();
+
+  const btn = document.getElementById('saveBtn');
+  if (btn) { btn.textContent = 'Save'; btn.disabled = false; }
+  hideToast();
 
   const badge = document.getElementById('statusBadge');
   if (callerData.name && callerData.name !== 'Unknown' && callerData.name !== 'New Caller') {
@@ -71,20 +83,53 @@ function updateCallerInfo(number, name, notes, callId) {
   }
 }
 
+function showToast(msg, isError) {
+  const t = document.getElementById('toast');
+  t.className = 'mx-4 mb-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-center ' +
+    (isError ? 'bg-red-50 text-error' : 'bg-teal-soft text-teal');
+  t.textContent = msg;
+}
+
+function hideToast() {
+  const t = document.getElementById('toast');
+  t.className = 'hidden mx-4 mb-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-center';
+}
+
+function notifySaveResult(ok) {
+  const btn = document.getElementById('saveBtn');
+  if (ok) {
+    showToast('Saved successfully', false);
+    if (btn) { btn.textContent = 'Save'; btn.disabled = false; }
+  } else {
+    showToast('Save failed — check connection', true);
+    if (btn) { btn.textContent = 'Retry'; btn.disabled = false; }
+  }
+}
+
 function save() {
   var name = document.getElementById('callerNameInput').value.trim();
-  var notes = document.getElementById('notes').value.trim();
+  var notes = document.getElementById('notesInput').value.trim();
   var btn = document.getElementById('saveBtn');
   btn.textContent = 'Saving...';
   btn.disabled = true;
+  hideToast();
 
   try {
     if (window.chrome && window.chrome.webview) {
       window.chrome.webview.postMessage(JSON.stringify({action:'save', name:name, notes:notes}));
     }
   } catch(e) {
-    console.error('postMessage failed:', e);
+    btn.textContent = 'Save';
+    btn.disabled = false;
   }
+}
+
+function dismiss() {
+  try {
+    if (window.chrome && window.chrome.webview) {
+      window.chrome.webview.postMessage(JSON.stringify({action:'dismiss'}));
+    }
+  } catch(e) {}
 }
 
 updateCallerInfo('', 'New Caller', '', -1);
