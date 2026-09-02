@@ -91,6 +91,7 @@ struct AccountSettings {
 
 	int activeTab;
 	bool alwaysOnTop;
+	bool modernUI;
 	bool multiMonitor;
 
 	int mainX;

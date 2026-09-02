@@ -77,6 +77,12 @@ const MaxCallBridge = {
    */
   setPresence(p) { _postToNative({ action: 'setPresence', status: String((p && p.status) || 'available') }); },
 
+  /**
+   * إشعار C++ بأن الواجهة جاهزة لاستقبال اللقطة الأولية.
+   * يرسل تلقائياً عند تحميل الصفحة.
+   */
+  ready() { _postToNative({ action: 'shellReady' }); },
+
   // ---------- استقبال: C++ -> JS ----------
 
   /**

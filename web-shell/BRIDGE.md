@@ -19,7 +19,15 @@
 | `hold` | `callId?`, `on` | `number`, `boolean` | تعليق (`true`) / استئناف (`false`) |
 | `transfer` | `callId?`, `target` | `number`, `string` | تحويل blind لرقم |
 | `sendDTMF` | `callId?`, `digit` | `number`, `string` (`0-9*#`) | نغمة أثناء المكالمة |
-| `setPresence` | `status` | `'available' \| 'busy' \| 'away' \| 'offline'` | حالة الحضور |
+| `setPresence` | `status` | `'available' \| 'busy' \| 'away' \| 'offline'` | حالة الحضور (انظر التعيين أدناه) |
+| `shellReady` | — | — | ترسلها الواجهة تلقائياً عند التحميل؛ يرد C++ بلقطة كاملة |
+
+> `setPresence` يُعيَّن في `MainShellDlg::ProcessShellMessage` كالتالي:
+> `available/away` → إلغاء DND + نشر متاح، `busy` → تفعيل DND + نشر متاح،
+> `offline` → نشر غير متصل. (لا توجد واجهة Away مميزة في PJSUA.)
+>
+> `shellReady` → يستدعي `PushSnapshot()` التي ترسل `onRegState` الحالية
+> ثم حالة المكالمة النشطة إن وجدت.
 
 مثال:
 
@@ -62,3 +70,13 @@ js.Format(_T("onCallState(%d, '%s')"), call_id, _T("active"));
 1. توسيع `ProcessWebViewMessage` بشروط `action == "makeCall" | "hangup" | ...` بنفس أسلوب `save/dismiss`.
 2. `EscapeJson` لأي `string` يُحقن في `ExecuteScript` (أرقام/أسماء عربية).
 3. إرسال `onRegState` عند تغيّر التسجيل و`onCallState` مع كل انتقال PJSUA.
+
+## 5) التضمين في الـ exe (مطبَّق)
+
+* المصدر الوحيد هو `web-shell/` — لا تعدّل `res/main_shell.bin` يدوياً.
+* التوليد: `python3 tools/build_shell_bin.py` (يدمج `app.js` داخل `index.html`
+  ويضيف إشعار `shellReady` التلقائي) → يكتب `res/main_shell.bin`.
+* `res/embedded.rc2` يضمّنه كمورد `IDR_MAIN_SHELL_HTML`، وخط الـ CI يعيد
+  توليده قبل كل بناء (`Build Web Shell bundle`).
+* المضيف: `MainShellDlg` (نافذة `IDD_MAIN_SHELL`) — يفتح تلقائياً عند الإقلاع
+  إذا `modernUI=1` (الافتراضي للثبيتات الجديدة)، ويُبدَّل من قائمة `Modern UI`.

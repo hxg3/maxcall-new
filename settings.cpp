@@ -743,6 +743,11 @@ void AccountSettings::Init()
 	alwaysOnTop = _wtoi(str);
 
 	ptr = str.GetBuffer(255);
+	GetPrivateProfileString(section, _T("modernUI"), NULL, ptr, 256, iniFile);
+	str.ReleaseBuffer();
+	modernUI = str.IsEmpty() ? true : (_wtoi(str) != 0);
+
+	ptr = str.GetBuffer(255);
 	GetPrivateProfileString(section, _T("multiMonitor"), NULL, ptr, 256, iniFile);
 	str.ReleaseBuffer();
 	multiMonitor = _wtoi(str);
@@ -1181,6 +1186,7 @@ void AccountSettings::SettingsSave()
 	WritePrivateProfileString(section, _T("DND"), DND ? _T("1") : _T("0"), iniFile);
 	str.Format(_T("%d"), alwaysOnTop);
 	WritePrivateProfileString(section, _T("alwaysOnTop"), str, iniFile);
+	WritePrivateProfileString(section, _T("modernUI"), modernUI ? _T("1") : _T("0"), iniFile);
 	str.Format(_T("%d"), multiMonitor);
 	WritePrivateProfileString(section, _T("multiMonitor"), str, iniFile);
 

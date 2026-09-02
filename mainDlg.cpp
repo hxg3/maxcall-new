@@ -142,6 +142,11 @@ LRESULT CmainDlg::onRegState2(WPARAM wParam, LPARAM lParam)
 
 	UpdateWindowText(headerError, IDI_DEFAULT, true);
 
+	//-- modern shell: registration state
+	if (mainShellDlg && IsWindow(mainShellDlg->m_hWnd) && mainShellDlg->IsWebViewReady()) {
+		mainShellDlg->PushRegState(code == 200, headerError);
+	}
+
 	return 0;
 }
 
@@ -557,6 +562,9 @@ LRESULT CmainDlg::onCallState(WPARAM wParam, LPARAM lParam)
 
 	user_data->CS.Unlock();
 
+	//-- modern shell: call state (call_info still valid here)
+	PushCallToShell(call_info);
+
 	// --delete user data
 	if (call_info->state == PJSIP_INV_STATE_DISCONNECTED) {
 		if (user_data) {
@@ -668,6 +676,17 @@ LRESULT CmainDlg::onCallMediaState(WPARAM wParam, LPARAM lParam)
 		|| call_info->media_status == PJSUA_CALL_MEDIA_REMOTE_HOLD
 		) {
 		onRefreshLevels(0, 0);
+	}
+
+	//-- modern shell: hold / resume
+	if (mainShellDlg && IsWindow(mainShellDlg->m_hWnd) && mainShellDlg->IsWebViewReady()) {
+		if (call_info->media_status == PJSUA_CALL_MEDIA_LOCAL_HOLD
+			|| call_info->media_status == PJSUA_CALL_MEDIA_NONE) {
+			mainShellDlg->PushCallState(call_info->id, _T("held"));
+		}
+		else if (call_info->media_status == PJSUA_CALL_MEDIA_ACTIVE) {
+			mainShellDlg->PushCallState(call_info->id, _T("active"));
+		}
 	}
 
 	delete call_info;
@@ -1032,6 +1051,12 @@ LRESULT CmainDlg::onIncomingCall(WPARAM wParam, LPARAM lParam)
 	}
 	if (accountSettings.localDTMF && playBeep) {
 		onPlayerPlay(MSIP_SOUND_RINGIN2, 0);
+	}
+
+	//-- modern shell: incoming banner
+	if (mainShellDlg && IsWindow(mainShellDlg->m_hWnd) && mainShellDlg->IsWebViewReady()) {
+		CString shellNumber = !sipuri.user.IsEmpty() ? sipuri.user : sipuri.domain;
+		mainShellDlg->PushIncomingCall(shellNumber, user_data->name, call_info->id);
 	}
 
 	user_data->CS.Unlock();
@@ -1649,6 +1674,7 @@ BEGIN_MESSAGE_MAP(CmainDlg, CBaseDialog)
 	ON_COMMAND(ID_SETTINGS, OnMenuSettings)
 	ON_COMMAND(ID_SHORTCUTS, OnMenuShortcuts)
 	ON_COMMAND(ID_ALWAYS_ON_TOP, OnMenuAlwaysOnTop)
+	ON_COMMAND(ID_MODERN_UI, OnMenuModernUI)
 	ON_COMMAND(ID_LOG, OnMenuLog)
 	ON_COMMAND(ID_EXIT, OnMenuExit)
 	ON_NOTIFY(TCN_SELCHANGE, IDC_MAIN_TAB, &CmainDlg::OnTcnSelchangeTab)
@@ -1918,6 +1944,7 @@ BOOL CmainDlg::OnInitDialog()
 	transferDlg = NULL;
 	accountDlg = NULL;
 	crmPopupDlg = NULL;
+	mainShellDlg = NULL;
 
 	m_lastInputTime = 0;
 	m_idleCounter = 0;
@@ -2193,6 +2220,10 @@ void CmainDlg::OnCreated()
 		theApp.m_lpCmdLine = NULL;
 	}
 	PJAccountAdd();
+	//-- modern WebView2 shell (independent repo: maxcall-new)
+	if (accountSettings.modernUI) {
+		ShowMainShell();
+	}
 	//--
 	WM_SHELLHOOKMESSAGE = RegisterWindowMessage(_T("SHELLHOOK"));
 	if (WM_SHELLHOOKMESSAGE) {
@@ -2464,6 +2495,8 @@ void CmainDlg::MainPopupMenu(bool isMenuButton)
 	CMenu menu;
 	menu.CreatePopupMenu();
 	menu.AppendMenu(MF_STRING | (accountSettings.alwaysOnTop ? MF_CHECKED : 0), ID_ALWAYS_ON_TOP, Translate(_T("Always on Top")));
+	bool shellOpen = mainShellDlg && IsWindow(mainShellDlg->m_hWnd) && mainShellDlg->IsWindowVisible();
+	menu.AppendMenu(MF_STRING | (shellOpen ? MF_CHECKED : 0), ID_MODERN_UI, Translate(_T("Modern UI")));
 	menu.AppendMenu(MF_SEPARATOR);
 	menu.AppendMenu(MF_STRING, ID_EXIT, Translate(_T("Exit")));
 
@@ -2575,6 +2608,10 @@ LRESULT CmainDlg::onPager(WPARAM wParam, LPARAM lParam)
 	if (messagesContact) {
 		messagesDlg->AddMessage(messagesContact, *message, MSIP_MESSAGE_TYPE_REMOTE);
 		onPlayerPlay(MSIP_SOUND_MESSAGE_IN, 0);
+		//-- modern shell: incoming text message
+		if (mainShellDlg && IsWindow(mainShellDlg->m_hWnd) && mainShellDlg->IsWebViewReady()) {
+			mainShellDlg->PushMessage(*number, *message);
+		}
 	}
 	delete number;
 	delete message;
@@ -5706,6 +5743,61 @@ void CmainDlg::ShowCrmPopup(CString number, CString name, pjsua_call_id call_id)
 	crmPopupDlg->call_id = call_id;
 	crmPopupDlg->Create(CrmPopupDlg::IDD, this);
 	crmPopupDlg->ShowWindow(SW_SHOWNORMAL);
+}
+
+void CmainDlg::OnMenuModernUI()
+{
+	accountSettings.modernUI = !accountSettings.modernUI;
+	AccountSettingsPendingSave();
+	if (accountSettings.modernUI) {
+		ShowMainShell();
+	}
+	else if (mainShellDlg && IsWindow(mainShellDlg->m_hWnd)) {
+		mainShellDlg->ShowWindow(SW_HIDE);
+	}
+}
+
+void CmainDlg::ShowMainShell()
+{
+	if (mainShellDlg && IsWindow(mainShellDlg->m_hWnd)) {
+		mainShellDlg->Restore();
+		return;
+	}
+	mainShellDlg = new MainShellDlg(this);
+	if (!mainShellDlg->Create(MainShellDlg::IDD, this)) {
+		delete mainShellDlg;
+		mainShellDlg = NULL;
+		return;
+	}
+	mainShellDlg->ShowWindow(SW_SHOWNORMAL);
+}
+
+void CmainDlg::PushCallToShell(pjsua_call_info* call_info)
+{
+	if (!mainShellDlg || !IsWindow(mainShellDlg->m_hWnd) || !mainShellDlg->IsWebViewReady()) {
+		return;
+	}
+	CString state;
+	switch (call_info->state) {
+	case PJSIP_INV_STATE_CALLING:
+	case PJSIP_INV_STATE_CONNECTING:
+		state = _T("calling");
+		break;
+	case PJSIP_INV_STATE_INCOMING:
+	case PJSIP_INV_STATE_EARLY:
+		state = _T("ringing");
+		break;
+	case PJSIP_INV_STATE_CONFIRMED:
+		state = _T("active");
+		break;
+	case PJSIP_INV_STATE_DISCONNECTED:
+		state = _T("ended");
+		break;
+	default:
+		state = _T("idle");
+		break;
+	}
+	mainShellDlg->PushCallState(call_info->id, state);
 }
 
 void CmainDlg::ShowRingingDialogs()

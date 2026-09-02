@@ -231,6 +231,7 @@
     <ClCompile Include="ButtonEx.cpp" />
     <ClCompile Include="Calls.cpp" />
     <ClCompile Include="CrmPopupDlg.cpp" />
+    <ClCompile Include="MainShellDlg.cpp" />
     <ClCompile Include="CListCtrl_Sortable.cpp" />
     <ClCompile Include="CListCtrl_SortItemsEx.cpp" />
     <ClCompile Include="ClosableTabCtrl.cpp" />
@@ -286,6 +287,7 @@
     <ClInclude Include="ButtonEx.h" />
     <ClInclude Include="Calls.h" />
     <ClInclude Include="CrmPopupDlg.h" />
+    <ClInclude Include="MainShellDlg.h" />
     <ClInclude Include="CListCtrl_Sortable.h" />
     <ClInclude Include="CListCtrl_SortItemsEx.h" />
     <ClInclude Include="ClosableTabCtrl.h" />
@@ -358,6 +360,7 @@
     <None Include="res\main.rc2" />
     <None Include="res\menu.rc2" />
     <None Include="res\crm_popup.bin" />
+    <None Include="res\main_shell.bin" />
     <None Include="res\ring_embed.bin" />
   </ItemGroup>
   <ItemGroup>

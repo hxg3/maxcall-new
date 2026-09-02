@@ -58,6 +58,7 @@
 #include "Transfer.h"
 #include "StatusBar.h"
 #include "CrmPopupDlg.h"
+#include "MainShellDlg.h"
 
 // CmainDlg dialog
 class CmainDlg : public CBaseDialog
@@ -83,6 +84,7 @@ public:
 	Transfer* transferDlg;
 	AccountDlg* accountDlg;
 	CrmPopupDlg* crmPopupDlg;
+	MainShellDlg* mainShellDlg;
 
 	Dialer* pageDialer;
 	Contacts* pageContacts;
@@ -172,6 +174,8 @@ public:
 	void UpdateSoundDevicesIds();
 	void PlayerStop();
 	void ShowCrmPopup(CString number, CString name, pjsua_call_id call_id);
+	void ShowMainShell();
+	void PushCallToShell(pjsua_call_info* call_info);
 	void ShowRingingDialogs();
 #ifdef _GLOBAL_VIDEO
 	Preview* previewWin;
@@ -255,6 +259,7 @@ public:
 	afx_msg void OnMenuAccountLocalEdit();
 	afx_msg void OnMenuCustomRange(UINT nID);
 	afx_msg void OnMenuSettings();
+	afx_msg void OnMenuModernUI();
 	afx_msg void OnMenuShortcuts();
 	afx_msg void OnMenuAlwaysOnTop();
 	afx_msg void OnMenuLog();

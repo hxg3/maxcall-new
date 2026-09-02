@@ -94,6 +94,12 @@ jobs:
           Write-Host "  $($_.Name) ($([math]::Round($_.Length/1KB)) KB)"
         }
 
+    - name: Build Web Shell bundle
+      shell: pwsh
+      run: |
+        python tools/build_shell_bin.py
+        if ($LASTEXITCODE -ne 0) { throw "Web shell bundle failed" }
+
     - name: Build MaxCall
       shell: pwsh
       run: |
