@@ -1,0 +1,41 @@
+# Build outputs
+*.exe
+*.dll
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.idb
+*.cache
+*.tlog
+*.log
+*.FileListAbsolute.txt
+
+# VS files
+.vs/
+*.suo
+*.user
+*.ncb
+*.sdf
+*.opensdf
+Debug/
+Release/
+x64/
+Win32/
+ipch/
+packages/
+
+# PJSIP (downloaded at build time)
+pjlib/
+pjsip/
+pjmedia/
+pjnath/
+pjlib-util/
+pjproject/
+lib/*.lib
+third_party/
+
+# Temp
+*.tmp
+*.bak
+*.swp

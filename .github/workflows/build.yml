@@ -1,0 +1,143 @@
+name: Build MaxCall
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Setup NuGet
+      uses: nuget/setup-nuget@v2
+
+    - name: Restore NuGet Packages
+      shell: pwsh
+      run: |
+        nuget restore microsip.sln
+        Write-Host "NuGet packages restored"
+
+    - name: Download and Prepare PJSIP
+      shell: pwsh
+      run: |
+        $url = "https://github.com/pjsip/pjproject/archive/refs/tags/2.14.1.tar.gz"
+        Invoke-WebRequest -Uri $url -OutFile pjsip.tar.gz -UseBasicParsing
+        tar -xzf pjsip.tar.gz
+        Rename-Item pjproject-2.14.1 pjproject
+        Remove-Item pjsip.tar.gz
+
+        $lines = @("#define PJMEDIA_HAS_VIDEO 1", "#include <pj/config_site_sample.h>")
+        $path = "pjproject/pjlib/include/pj/config_site.h"
+        $lines | Set-Content -Path $path -Encoding UTF8
+
+        $dirs = @("pjlib", "pjsip", "pjmedia", "pjnath", "pjlib-util")
+        foreach ($d in $dirs) {
+          if (Test-Path "pjproject/$d") {
+            Copy-Item "pjproject/$d" "$d" -Recurse -Force
+            $target = "$d/include/pj/config_site.h"
+            $dir = Split-Path $target
+            if (-not (Test-Path $dir)) {
+              New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            }
+            $lines | Set-Content -Path $target -Encoding UTF8
+          }
+        }
+
+        New-Item -ItemType Directory -Path "lib" -Force | Out-Null
+        Write-Host "PJSIP ready"
+
+    - name: Build PJSIP
+      shell: pwsh
+      run: |
+        msbuild pjproject/pjproject-vs14.sln `
+          /p:Configuration=Release-Static `
+          /p:Platform=Win32 `
+          /p:PlatformToolset=v143 `
+          /verbosity:minimal `
+          /nologo
+        if ($LASTEXITCODE -ne 0) { throw "PJSIP build failed" }
+
+    - name: Collect PJSIP Libraries
+      shell: pwsh
+      run: |
+        $src = "pjproject/lib"
+        if (Test-Path $src) {
+          Get-ChildItem "$src/*.lib" | Where-Object { $_.Length -gt 1024 } | ForEach-Object {
+            Write-Host "  $($_.Name) ($([math]::Round($_.Length/1KB)) KB)"
+            Copy-Item $_.FullName "lib/" -Force
+          }
+        }
+
+        Get-ChildItem "pjproject" -Recurse -Filter "*.lib" |
+          Where-Object { $_.Length -gt 1024 -and $_.DirectoryName -match "(build|lib)$" } |
+          ForEach-Object {
+            if (-not (Test-Path "lib/$($_.Name)")) {
+              Write-Host "  (extra) $($_.Name)"
+              Copy-Item $_.FullName "lib/" -Force
+            }
+          }
+
+        Write-Host "`nAll libraries:"
+        Get-ChildItem "lib/*.lib" | ForEach-Object {
+          Write-Host "  $($_.Name) ($([math]::Round($_.Length/1KB)) KB)"
+        }
+
+    - name: Build MaxCall
+      shell: pwsh
+      run: |
+        msbuild microsip.sln `
+          /p:Configuration=Release `
+          /p:Platform=Win32 `
+          /p:PlatformToolset=v143 `
+          /verbosity:minimal `
+          /nologo
+        if ($LASTEXITCODE -ne 0) { throw "MaxCall build failed" }
+
+    - name: Package
+      shell: pwsh
+      run: |
+        $exe = Get-ChildItem -Path "." -Recurse -Filter "MaxCall.exe" |
+          Where-Object { $_.FullName -notmatch "pjproject" } |
+          Select-Object -First 1
+
+        if (-not $exe) {
+          Write-Host "ERROR: MaxCall.exe not found"
+          Get-ChildItem -Recurse -Filter "*.exe" | ForEach-Object { Write-Host "  $($_.FullName)" }
+          exit 1
+        }
+
+        $sizeMB = [math]::Round($exe.Length / 1MB, 2)
+        Write-Host "SUCCESS: $($exe.FullName) ($sizeMB MB)"
+
+        New-Item -ItemType Directory -Path "MaxCall" -Force | Out-Null
+        Copy-Item $exe.FullName "MaxCall/MaxCall.exe" -Force
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: MaxCall
+        path: MaxCall
+        retention-days: 30
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        name: ${{ startsWith(github.ref, 'refs/tags/') && format('MaxCall {0}', github.ref_name) || 'MaxCall Latest Build' }}
+        tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'latest' }}
+        files: |
+          MaxCall/MaxCall.exe
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

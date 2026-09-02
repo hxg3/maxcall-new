@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Caller Info</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config={theme:{extend:{colors:{teal:"#087B78","teal-dark":"#075B59","teal-light":"#0A9D98",gold:"#D6A62A","gold-soft":"#F4E7BF",surface:"#F8FAFA",white:"#FFFFFF","teal-soft":"#DDF2F0",ink:"#1F2929","ink-sec":"#3D4B4B",muted:"#718080",border:"#E7ECEC",success:"#218A67",error:"#C94A4A",warning:"#D49A24"}}}}
+</script>
+<style>
+*{font-family:'Segoe UI',system-ui,sans-serif}
+body{background:#F8FAFA;margin:0;padding:0}
+input:focus,textarea:focus{outline:none;box-shadow:0 0 0 2px rgba(8,123,120,0.15);border-color:#087B78}
+#toast{transition:opacity 0.3s ease}
+</style>
+</head>
+<body>
+
+<!-- Caller Card -->
+<div class="px-4 py-3 bg-white border-b border-border">
+  <div class="flex items-center gap-3">
+    <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-teal to-teal-dark text-white flex items-center justify-center text-sm font-bold" id="avatar">?</div>
+    <div class="flex-1 min-w-0">
+      <div class="text-sm font-semibold text-ink truncate" id="callerName">Loading...</div>
+      <div class="text-xs text-muted font-mono mt-0.5" id="callerNumber">-</div>
+    </div>
+    <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold" id="statusBadge">-</span>
+  </div>
+</div>
+
+<!-- Name Input -->
+<div class="px-4 pt-3 pb-2">
+  <label class="text-[11px] font-semibold text-ink-sec uppercase tracking-wide block mb-1.5">Name</label>
+  <input type="text" id="callerNameInput" placeholder="Enter caller name"
+    class="w-full px-3 py-2 border border-border rounded-lg text-sm text-ink bg-white transition">
+</div>
+
+<!-- Notes -->
+<div class="px-4 pb-3">
+  <label class="text-[11px] font-semibold text-ink-sec uppercase tracking-wide block mb-1.5">Notes</label>
+  <textarea id="notesInput" rows="3" placeholder="Notes about this caller..."
+    class="w-full px-3 py-2 border border-border rounded-lg text-sm text-ink bg-white resize-none transition"></textarea>
+</div>
+
+<!-- Toast feedback -->
+<div id="toast" class="hidden mx-4 mb-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-center"></div>
+
+<!-- Buttons -->
+<div class="px-4 pb-4 flex gap-2">
+  <button id="dismissBtn" onclick="dismiss()"
+    class="flex-1 bg-white border border-border hover:bg-surface text-ink-sec font-semibold py-2 rounded-lg transition text-sm">
+    Dismiss
+  </button>
+  <button id="saveBtn" onclick="save()"
+    class="flex-1 bg-teal hover:bg-teal-dark text-white font-semibold py-2 rounded-lg transition text-sm">
+    Save
+  </button>
+</div>
+
+<script>
+let callerData = {number:'', name:'', notes:'', callId:-1};
+
+function updateCallerInfo(number, name, notes, callId) {
+  callerData = {number, name: name || 'Unknown', notes: notes || '', callId};
+  document.getElementById('callerName').textContent = callerData.name;
+  document.getElementById('callerNumber').textContent = callerData.number || '-';
+  document.getElementById('callerNameInput').value = callerData.name !== 'Unknown' ? callerData.name : '';
+  document.getElementById('notesInput').value = callerData.notes;
+  document.getElementById('avatar').textContent = (callerData.name || '?').charAt(0).toUpperCase();
+
+  const btn = document.getElementById('saveBtn');
+  if (btn) { btn.textContent = 'Save'; btn.disabled = false; }
+  hideToast();
+
+  const badge = document.getElementById('statusBadge');
+  if (callerData.name && callerData.name !== 'Unknown' && callerData.name !== 'New Caller') {
+    badge.className = 'px-2 py-0.5 rounded-full text-[10px] font-semibold bg-teal-soft text-teal';
+    badge.textContent = 'Known';
+  } else {
+    badge.className = 'px-2 py-0.5 rounded-full text-[10px] font-semibold bg-gold-soft text-warning';
+    badge.textContent = 'New';
+  }
+}
+
+function showToast(msg, isError) {
+  const t = document.getElementById('toast');
+  t.className = 'mx-4 mb-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-center ' +
+    (isError ? 'bg-red-50 text-error' : 'bg-teal-soft text-teal');
+  t.textContent = msg;
+}
+
+function hideToast() {
+  const t = document.getElementById('toast');
+  t.className = 'hidden mx-4 mb-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-center';
+}
+
+function notifySaveResult(ok) {
+  const btn = document.getElementById('saveBtn');
+  if (ok) {
+    showToast('Saved successfully', false);
+    if (btn) { btn.textContent = 'Save'; btn.disabled = false; }
+  } else {
+    showToast('Save failed — check connection', true);
+    if (btn) { btn.textContent = 'Retry'; btn.disabled = false; }
+  }
+}
+
+function save() {
+  var name = document.getElementById('callerNameInput').value.trim();
+  var notes = document.getElementById('notesInput').value.trim();
+  var btn = document.getElementById('saveBtn');
+  btn.textContent = 'Saving...';
+  btn.disabled = true;
+  hideToast();
+
+  try {
+    if (window.chrome && window.chrome.webview) {
+      window.chrome.webview.postMessage(JSON.stringify({action:'save', name:name, notes:notes}));
+    }
+  } catch(e) {
+    btn.textContent = 'Save';
+    btn.disabled = false;
+  }
+}
+
+function dismiss() {
+  try {
+    if (window.chrome && window.chrome.webview) {
+      window.chrome.webview.postMessage(JSON.stringify({action:'dismiss'}));
+    }
+  } catch(e) {}
+}
+
+updateCallerInfo('', 'New Caller', '', -1);
+</script>
+
+</body>
+</html>
