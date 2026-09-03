@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" dir="ltr">
+<html lang="en" dir="ltr" class="h-full">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -9,8 +9,8 @@
     tailwind.config = { theme: { extend: { colors: { brand: '#087B78', gold: '#D6A62A' } } } };
   </script>
 </head>
-<body class="bg-slate-200 text-slate-800 antialiased">
-  <div class="mx-auto flex w-full max-w-[320px] flex-col bg-white shadow-xl select-none">
+<body class="h-full overflow-hidden bg-slate-200 text-slate-800 antialiased">
+  <div class="mx-auto flex h-full min-h-0 w-full max-w-[320px] flex-col overflow-hidden bg-white shadow-xl select-none">
 
     <!-- 1. Header -->
     <header class="bg-brand px-3 pb-2 pt-2 text-white">
@@ -99,7 +99,7 @@
       <button id="tabBtnLog" role="tab" aria-controls="tabLog" data-tab="tabLog" class="tab-btn flex flex-1 items-center justify-center gap-1 rounded-full px-2 py-1.5 text-xs font-medium text-slate-400 hover:text-slate-600"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg><span>Log</span></button>
     </nav>
 
-    <main class="flex-1 px-3 py-2">
+    <main class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       <!-- 3. Dial -->
       <section id="tabDial" role="tabpanel" class="space-y-2">
         <!-- Active call bar directly under tabs -->
@@ -190,7 +190,7 @@
       </section>
     </main>
 
-    <div id="msgToast" class="fixed bottom-3 left-1/2 hidden w-[296px] -translate-x-1/2 rounded-xl bg-slate-900 px-3 py-2 shadow-xl">
+    <div id="msgToast" class="fixed bottom-3 left-1/2 hidden w-[280px] max-w-[calc(100%-1.5rem)] -translate-x-1/2 rounded-xl bg-slate-900 px-3 py-2 shadow-xl">
       <p id="msgText" class="text-xs text-white"></p>
     </div>
   </div>
