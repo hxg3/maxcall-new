@@ -662,7 +662,11 @@ const MaxCallBridge = {
    */
   onCallHistory(jsonText) {
     let arr = [];
-    try { arr = JSON.parse(String(jsonText || '[]')); } catch { arr = []; }
+    try {
+      const parsed = JSON.parse(String(jsonText || '[]'));
+      // السيرفر يرسل {rows:[...]} — ونقبل المصفوفة المباشرة أيضاً
+      arr = Array.isArray(parsed) ? parsed : (parsed && parsed.rows) || [];
+    } catch { arr = []; }
     if (!Array.isArray(arr)) arr = [];
     const list = document.getElementById('logList');
     const empty = document.getElementById('logEmpty');
