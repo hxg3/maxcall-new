@@ -6,16 +6,32 @@
  * @returns {boolean} True when delivered through WebView2.
  */
 function _postToNative(msg) {
+  // NOTE: always send a JSON string (not an object) — C++ reads the
+  // message with TryGetWebMessageAsString, same as the proven CRM popup.
+  let text = null;
+  try { text = JSON.stringify(msg); } catch (err) { console.warn('[MaxCallBridge] stringify failed:', err); return false; }
   try {
     if (window.chrome && window.chrome.webview && typeof window.chrome.webview.postMessage === 'function') {
-      window.chrome.webview.postMessage(msg);
+      window.chrome.webview.postMessage(text);
+      _bridgeNote('sent: ' + (msg && msg.action ? msg.action : '?'));
       return true;
     }
   } catch (err) {
     console.warn('[MaxCallBridge] postMessage failed:', err);
   }
-  console.log('[MaxCallBridge:fallback]', JSON.stringify(msg));
+  console.log('[MaxCallBridge:fallback]', text);
+  _bridgeNote('no-bridge (fallback): ' + (msg && msg.action ? msg.action : '?'));
   return false;
+}
+
+/**
+ * Update the on-screen bridge status line (remote diagnostics).
+ * @param {string} s Status text.
+ * @returns {void}
+ */
+function _bridgeNote(s) {
+  const el = document.getElementById('bridgeStatus');
+  if (el) el.textContent = 'JS OK • ' + s;
 }
 
 /**
@@ -191,6 +207,7 @@ const MaxCallBridge = {
     if (!_gotFirstReg) {
       _gotFirstReg = true;
       document.getElementById('engineBanner')?.classList.add('hidden');
+      _bridgeNote('link: active');
     }
     _emit('reg-state', { registered: !!registered, message: String(message || '') });
   },
@@ -461,6 +478,8 @@ function _wireUI() {
 document.addEventListener('DOMContentLoaded', () => {
   _wireUI();
   _renderContacts('');
+  const hasBridge = !!(window.chrome && window.chrome.webview && window.chrome.webview.postMessage);
+  _bridgeNote(hasBridge ? 'bridge: WebView2' : 'bridge: MISSING (page opened outside app?)');
   MaxCallBridge.shellReady();
 });
 

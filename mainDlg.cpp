@@ -1023,6 +1023,7 @@ LRESULT CmainDlg::onIncomingCall(WPARAM wParam, LPARAM lParam)
 	}
 	else {
 		if (!accountSettings.hidden
+			&& !IsModernShellActive()
 			) {
 			PostMessage(UM_CREATE_RINGING, (WPARAM)call_info->id, NULL);
 		}
@@ -2511,6 +2512,10 @@ void CmainDlg::MainPopupMenu(bool isMenuButton)
 
 LRESULT CmainDlg::onCreateRingingDlg(WPARAM wParam, LPARAM lParam)
 {
+	// القشرة الحديثة تعرض بانر الواردة بنفسها — لا نافذة رنين أصلية معها
+	if (IsModernShellActive()) {
+		return 0;
+	}
 	pjsua_call_id call_id = wParam;
 	pjsua_call_info call_info;
 
@@ -5777,6 +5782,11 @@ void CmainDlg::ShowMainShell()
 		return;
 	}
 	mainShellDlg->ShowWindow(SW_SHOWNORMAL);
+}
+
+bool CmainDlg::IsModernShellActive()
+{
+	return mainShellDlg && IsWindow(mainShellDlg->m_hWnd) && mainShellDlg->IsWindowVisible();
 }
 
 void CmainDlg::PushCallToShell(pjsua_call_info* call_info)

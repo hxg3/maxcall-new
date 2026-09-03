@@ -175,6 +175,7 @@ public:
 	void PlayerStop();
 	void ShowCrmPopup(CString number, CString name, pjsua_call_id call_id);
 	void ShowMainShell();
+	bool IsModernShellActive();
 	void PushCallToShell(pjsua_call_info* call_info);
 	void ShowRingingDialogs();
 #ifdef _GLOBAL_VIDEO

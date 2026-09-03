@@ -8,6 +8,9 @@
 ## 1) JS → C++ عبر `window.chrome.webview.postMessage`
 
 كل رسالة كائن JSON بحقل `action: string` + حقول حسب الجدول.
+تُرسل دائماً كنص `JSON.stringify(msg)` — لأن C++ يقرأ عبر
+`TryGetWebMessageAsString` (نفس نمط نافذة CRM المُثبت). إرسال كائن خام
+غير مدعوم من طرف C++.
 عند غياب WebView2 (فتح عادي في متصفح) يعمل `MaxCallBridge` بوضع fallback:
 `console.log` فقط ولا يرمي استثناء.
 

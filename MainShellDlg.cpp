@@ -282,6 +282,8 @@ HRESULT ShellCtrlCallback::Invoke(HRESULT result, ICoreWebView2Controller* contr
 
 LRESULT MainShellDlg::OnShellReady(WPARAM wParam, LPARAM lParam)
 {
+	FILE* dbg = fopen("maxcall_debug.log", "a");
+	if (dbg) { fprintf(dbg, "shell: webview-ready\n"); fclose(dbg); }
 	m_pageReady = true;
 	PushSnapshot();
 	return 0;
@@ -426,6 +428,12 @@ void MainShellDlg::ExecuteShellScript(const CString& js)
 {
 	if (!m_webView || !m_pageReady || !IsWindow(m_hWnd)) {
 		return;
+	}
+	FILE* dbg = fopen("maxcall_debug.log", "a");
+	if (dbg) {
+		CString preview = js.Left(80);
+		fprintf(dbg, "shell-tx: %ls\n", (LPCTSTR)preview);
+		fclose(dbg);
 	}
 	ICoreWebView2* wv = static_cast<ICoreWebView2*>(m_webView);
 	if (wv) {

@@ -10,10 +10,10 @@
   </script>
 </head>
 <body class="bg-slate-200 text-slate-800 antialiased">
-  <div class="mx-auto flex min-h-screen w-full max-w-[320px] flex-col bg-white shadow-xl">
+  <div class="mx-auto flex w-full max-w-[320px] flex-col bg-white shadow-xl">
 
     <!-- 1. Header -->
-    <header class="bg-brand px-3 pb-3 pt-3 text-white">
+    <header class="bg-brand px-3 pb-2 pt-2 text-white">
       <div class="flex items-center justify-between gap-2">
         <div class="flex min-w-0 items-center gap-2">
           <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gold text-base font-bold text-teal-950">M</div>
@@ -78,9 +78,9 @@
       <button id="tabBtnLog" role="tab" aria-controls="tabLog" data-tab="tabLog" class="tab-btn flex-1 rounded-t-lg px-2 py-2 text-xs font-medium text-slate-400 hover:text-slate-600">Log</button>
     </nav>
 
-    <main class="flex-1 px-3 py-3">
+    <main class="flex-1 px-3 py-2">
       <!-- 3. Dial -->
-      <section id="tabDial" role="tabpanel" class="space-y-3">
+      <section id="tabDial" role="tabpanel" class="space-y-2">
         <div class="rounded-2xl border border-slate-100 bg-slate-50 p-3">
           <div class="flex items-center gap-1.5">
             <input id="dialInput" dir="ltr" inputmode="tel" autocomplete="off" placeholder="Enter number"
@@ -91,22 +91,22 @@
           </div>
         </div>
 
-        <div id="dialPad" class="grid grid-cols-3 gap-1.5">
-          <button data-digit="1" class="rounded-xl bg-slate-50 py-2.5 text-lg font-bold hover:bg-teal-50 hover:text-teal-800 active:scale-95">1</button>
-          <button data-digit="2" class="rounded-xl bg-slate-50 py-2.5 text-lg font-bold hover:bg-teal-50 hover:text-teal-800 active:scale-95">2</button>
-          <button data-digit="3" class="rounded-xl bg-slate-50 py-2.5 text-lg font-bold hover:bg-teal-50 hover:text-teal-800 active:scale-95">3</button>
-          <button data-digit="4" class="rounded-xl bg-slate-50 py-2.5 text-lg font-bold hover:bg-teal-50 hover:text-teal-800 active:scale-95">4</button>
-          <button data-digit="5" class="rounded-xl bg-slate-50 py-2.5 text-lg font-bold hover:bg-teal-50 hover:text-teal-800 active:scale-95">5</button>
-          <button data-digit="6" class="rounded-xl bg-slate-50 py-2.5 text-lg font-bold hover:bg-teal-50 hover:text-teal-800 active:scale-95">6</button>
-          <button data-digit="7" class="rounded-xl bg-slate-50 py-2.5 text-lg font-bold hover:bg-teal-50 hover:text-teal-800 active:scale-95">7</button>
-          <button data-digit="8" class="rounded-xl bg-slate-50 py-2.5 text-lg font-bold hover:bg-teal-50 hover:text-teal-800 active:scale-95">8</button>
-          <button data-digit="9" class="rounded-xl bg-slate-50 py-2.5 text-lg font-bold hover:bg-teal-50 hover:text-teal-800 active:scale-95">9</button>
-          <button data-digit="*" class="rounded-xl bg-slate-50 py-2.5 text-lg font-bold text-slate-400 hover:bg-teal-50 hover:text-teal-800 active:scale-95">*</button>
-          <button data-digit="0" class="rounded-xl bg-slate-50 py-2.5 text-lg font-bold hover:bg-teal-50 hover:text-teal-800 active:scale-95">0</button>
-          <button data-digit="#" class="rounded-xl bg-slate-50 py-2.5 text-lg font-bold text-slate-400 hover:bg-teal-50 hover:text-teal-800 active:scale-95">#</button>
+        <div id="dialPad" class="grid grid-cols-3 gap-1">
+          <button data-digit="1" class="rounded-lg bg-slate-50 py-1.5 text-base font-bold hover:bg-teal-50 hover:text-teal-800 active:scale-95">1</button>
+          <button data-digit="2" class="rounded-lg bg-slate-50 py-1.5 text-base font-bold hover:bg-teal-50 hover:text-teal-800 active:scale-95">2</button>
+          <button data-digit="3" class="rounded-lg bg-slate-50 py-1.5 text-base font-bold hover:bg-teal-50 hover:text-teal-800 active:scale-95">3</button>
+          <button data-digit="4" class="rounded-lg bg-slate-50 py-1.5 text-base font-bold hover:bg-teal-50 hover:text-teal-800 active:scale-95">4</button>
+          <button data-digit="5" class="rounded-lg bg-slate-50 py-1.5 text-base font-bold hover:bg-teal-50 hover:text-teal-800 active:scale-95">5</button>
+          <button data-digit="6" class="rounded-lg bg-slate-50 py-1.5 text-base font-bold hover:bg-teal-50 hover:text-teal-800 active:scale-95">6</button>
+          <button data-digit="7" class="rounded-lg bg-slate-50 py-1.5 text-base font-bold hover:bg-teal-50 hover:text-teal-800 active:scale-95">7</button>
+          <button data-digit="8" class="rounded-lg bg-slate-50 py-1.5 text-base font-bold hover:bg-teal-50 hover:text-teal-800 active:scale-95">8</button>
+          <button data-digit="9" class="rounded-lg bg-slate-50 py-1.5 text-base font-bold hover:bg-teal-50 hover:text-teal-800 active:scale-95">9</button>
+          <button data-digit="*" class="rounded-lg bg-slate-50 py-1.5 text-base font-bold text-slate-400 hover:bg-teal-50 hover:text-teal-800 active:scale-95">*</button>
+          <button data-digit="0" class="rounded-lg bg-slate-50 py-1.5 text-base font-bold hover:bg-teal-50 hover:text-teal-800 active:scale-95">0</button>
+          <button data-digit="#" class="rounded-lg bg-slate-50 py-1.5 text-base font-bold text-slate-400 hover:bg-teal-50 hover:text-teal-800 active:scale-95">#</button>
         </div>
 
-        <button id="btnCall" class="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-900/20 transition hover:bg-emerald-600 active:scale-[0.98]">
+        <button id="btnCall" class="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-900/20 transition hover:bg-emerald-600 active:scale-[0.98]">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L8 10a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2Z"/></svg>
           Call
         </button>
@@ -160,6 +160,8 @@
     <div id="msgToast" class="fixed bottom-3 left-1/2 hidden w-[296px] -translate-x-1/2 rounded-xl bg-slate-900 px-3 py-2 shadow-xl">
       <p id="msgText" class="text-xs text-white"></p>
     </div>
+
+    <p id="bridgeStatus" class="bg-slate-800 px-3 py-1 text-center font-mono text-[10px] text-slate-300" dir="ltr">starting…</p>
   </div>
 
   <script src="./app.js"></script>
