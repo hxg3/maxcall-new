@@ -2210,7 +2210,7 @@ void CmainDlg::OnCreated()
 	LRESULT pResult;
 	mainDlg->OnTcnSelchangeTab(NULL, &pResult);
 
-	if (!m_startMinimized) {
+	if (!m_startMinimized && !accountSettings.modernUI) {
 		ShowWindow(SW_SHOW);
 		TabFocusSet();
 	}
@@ -2445,6 +2445,12 @@ LRESULT CmainDlg::onTrayNotify(WPARAM wParam, LPARAM lParam)
 		}
 		else
 		{
+			// الوضع الحديث: أيقونة الدرج تفتح القشرة — الكلاسيكية لا تظهر أبداً
+			if (IsModernShellActive()) {
+				mainShellDlg->Restore();
+				SetForegroundWindow();
+				return 0;
+			}
 			bool blockRestore = false;
 			if (accountSettings.hidden) {
 				blockRestore = true;

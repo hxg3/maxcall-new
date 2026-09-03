@@ -100,6 +100,14 @@ function notifySaveResult(ok) {
   if (ok) {
     showToast('Saved successfully', false);
     if (btn) { btn.textContent = 'Save'; btn.disabled = false; }
+    // إغلاق تلقائي بعد التأكد من نجاح الحفظ
+    setTimeout(function() {
+      try {
+        if (window.chrome && window.chrome.webview) {
+          window.chrome.webview.postMessage(JSON.stringify({action:'dismiss'}));
+        }
+      } catch(e) {}
+    }, 700);
   } else {
     showToast('Save failed — check connection', true);
     if (btn) { btn.textContent = 'Retry'; btn.disabled = false; }

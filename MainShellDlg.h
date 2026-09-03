@@ -61,6 +61,7 @@ public:
 
 private:
 	bool m_pageReady;
+	bool m_minPin;
 	pjsua_call_id m_lastCallId;
 	CString m_lastNumber;
 	CString m_lastName;

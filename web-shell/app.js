@@ -13,25 +13,13 @@ function _postToNative(msg) {
   try {
     if (window.chrome && window.chrome.webview && typeof window.chrome.webview.postMessage === 'function') {
       window.chrome.webview.postMessage(text);
-      _bridgeNote('sent: ' + (msg && msg.action ? msg.action : '?'));
       return true;
     }
   } catch (err) {
     console.warn('[MaxCallBridge] postMessage failed:', err);
   }
   console.log('[MaxCallBridge:fallback]', text);
-  _bridgeNote('no-bridge (fallback): ' + (msg && msg.action ? msg.action : '?'));
   return false;
-}
-
-/**
- * Update the on-screen bridge status line (remote diagnostics).
- * @param {string} s Status text.
- * @returns {void}
- */
-function _bridgeNote(s) {
-  const el = document.getElementById('bridgeStatus');
-  if (el) el.textContent = 'JS OK • ' + s;
 }
 
 /**
@@ -104,6 +92,24 @@ function _stopTimer() {
 let _lastStateCall = -2;
 /** @type {string} Last processed state for dedupe. */
 let _lastState = '';
+
+/** Pause icon for the hold button. */
+const HOLD_ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4"><path d="M9 5v14M15 5v14"/></svg>';
+/** Play icon for the resume button. */
+const RESUME_ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4"><path d="m6 4 14 8-14 8V4Z"/></svg>';
+
+/**
+ * Update the hold button icon and label.
+ * @param {boolean} held True when the call is held (show Resume).
+ * @returns {void}
+ */
+function _setHoldUI(held) {
+  const b = document.getElementById('btnHold');
+  if (!b) return;
+  b.title = held ? 'Resume' : 'Hold';
+  b.setAttribute('aria-label', held ? 'Resume' : 'Hold');
+  b.innerHTML = held ? RESUME_ICON : HOLD_ICON;
+}
 
 /**
  * The MaxCall bridge: senders (JS->C++) and receivers (C++->JS).
@@ -236,7 +242,6 @@ const MaxCallBridge = {
     if (!_gotFirstReg) {
       _gotFirstReg = true;
       document.getElementById('engineBanner')?.classList.add('hidden');
-      _bridgeNote('link: active');
     }
     _emit('reg-state', { registered: !!registered, message: String(message || '') });
   },
@@ -271,7 +276,6 @@ const MaxCallBridge = {
     const acNum = document.getElementById('acNumber');
     const acName = document.getElementById('acName');
     const acState = document.getElementById('acState');
-    const holdBtn = document.getElementById('btnHold');
     if (acNum) acNum.textContent = meta.number || num || '—';
     if (acName) acName.textContent = meta.name || nm || 'Unknown';
     if (acState) acState.textContent = state;
@@ -280,16 +284,19 @@ const MaxCallBridge = {
       meta.wasActive = true;
       _inCall = true;
       bar?.classList.remove('hidden');
-      if (holdBtn) holdBtn.textContent = 'Hold';
+      _setHoldUI(false);
       _hideIncoming();
       _startTimer();
     } else if (state === 'held') {
       _inCall = true;
       bar?.classList.remove('hidden');
-      if (holdBtn) holdBtn.textContent = 'Resume';
-    } else if (state === 'calling' || state === 'ringing') {
+      _setHoldUI(true);
+    } else if (state === 'calling') {
       _inCall = true;
       bar?.classList.remove('hidden');
+    } else if (state === 'ringing') {
+      _inCall = true;
+      bar?.classList.add('hidden');
     } else if (state === 'ended' || state === 'idle') {
       _inCall = false;
       _stopTimer();
@@ -365,7 +372,11 @@ const MaxCallBridge = {
    */
   onAccount(user, domain) {
     const el = document.getElementById('accountLine');
-    if (el) el.textContent = String(user || '') + '@' + String(domain || '');
+    if (el) {
+      const raw = String(user || '');
+      const ext = raw.split('@')[0];
+      el.textContent = ext || 'not signed in';
+    }
     _emit('account', { user: String(user || ''), domain: String(domain || '') });
   },
 
@@ -411,8 +422,8 @@ function _renderContacts(query) {
       '<span class="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-white ' + dot + '"></span></div>' +
       '<div class="min-w-0"><p class="truncate text-xs font-bold"></p><p class="text-[11px] text-slate-400" dir="ltr"></p></div></div>' +
       '<div class="flex shrink-0 items-center gap-1">' +
-      '<button data-act="info" title="Caller details" class="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-500 active:scale-95">i</button>' +
-      '<button data-act="call" class="shrink-0 rounded-full bg-teal-700/10 px-2.5 py-1 text-[11px] font-bold text-teal-800 active:scale-95">Call</button></div>';
+      '<button data-act="info" title="Caller details" aria-label="Caller details" class="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-slate-500 active:scale-95"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></button>' +
+      '<button data-act="call" title="Call" aria-label="Call" class="flex h-7 w-7 items-center justify-center rounded-full bg-teal-700/10 text-teal-800 active:scale-95"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L8 10a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2Z"/></svg></button></div>';
     row.querySelector('span span').textContent = (c.name || c.number || '?').charAt(0).toUpperCase();
     row.querySelector('p').textContent = c.name || c.number;
     row.querySelectorAll('p')[1].textContent = c.number;
@@ -451,8 +462,8 @@ function _appendLog(meta) {
     '<p class="truncate text-[11px] text-slate-400"></p></div></div>' +
     '<div class="flex shrink-0 items-center gap-1.5">' +
     '<span class="rounded-full px-2 py-0.5 text-[11px] font-bold ' + badge + '">' + label + '</span>' +
-    '<button data-act="info" title="Caller details" class="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-500 active:scale-95">i</button>' +
-    '<button data-act="redial" class="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600 active:scale-95">Redial</button></div>';
+    '<button data-act="info" title="Caller details" aria-label="Caller details" class="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-slate-500 active:scale-95"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></button>' +
+    '<button data-act="redial" title="Redial" aria-label="Redial" class="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-slate-600 active:scale-95"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L8 10a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2Z"/></svg></button></div>';
   row.querySelectorAll('p')[0].textContent = meta.number || 'Unknown';
   row.querySelectorAll('p')[1].textContent = (meta.name ? meta.name + ' • ' : '') + time + ' • ' + type;
   row.querySelector('[data-act="redial"]').addEventListener('click', () => {
@@ -485,14 +496,39 @@ function _switchTab(id) {
 
 /** Wire up all DOM controls. */
 function _wireUI() {
+  document.addEventListener('contextmenu', (e) => e.preventDefault());
+
   document.querySelectorAll('.tab-btn').forEach((b) =>
     b.addEventListener('click', () => _switchTab(b.dataset.tab)));
 
   const input = document.getElementById('dialInput');
+  let zeroTimer = null;
+  let zeroLong = false;
+  const zeroBtn = document.querySelector('[data-digit="0"]');
+  function zeroStart() {
+    zeroLong = false;
+    if (zeroTimer !== null) clearTimeout(zeroTimer);
+    zeroTimer = setTimeout(() => {
+      zeroLong = true;
+      if (_inCall) MaxCallBridge.sendDTMF(undefined, '+');
+      else if (input) input.value += '+';
+    }, 500);
+  }
+  function zeroCancel() {
+    if (zeroTimer !== null) { clearTimeout(zeroTimer); zeroTimer = null; }
+  }
+  if (zeroBtn) {
+    zeroBtn.addEventListener('mousedown', zeroStart);
+    zeroBtn.addEventListener('mouseup', zeroCancel);
+    zeroBtn.addEventListener('mouseleave', zeroCancel);
+    zeroBtn.addEventListener('touchstart', zeroStart, { passive: true });
+    zeroBtn.addEventListener('touchend', zeroCancel);
+  }
   document.getElementById('dialPad')?.addEventListener('click', (e) => {
     const b = e.target.closest('[data-digit]');
     if (!b || !input) return;
     const d = b.dataset.digit;
+    if (d === '0' && zeroLong) { zeroLong = false; return; }
     if (_inCall) MaxCallBridge.sendDTMF(undefined, d);
     else input.value += d;
   });
@@ -510,7 +546,7 @@ function _wireUI() {
     MaxCallBridge.pinToggle(!pinned);
   });
   document.getElementById('btnHold')?.addEventListener('click', () => {
-    const holding = document.getElementById('btnHold')?.textContent === 'Hold';
+    const holding = document.getElementById('btnHold')?.title === 'Hold';
     MaxCallBridge.hold(undefined, holding);
   });
   document.getElementById('btnTransfer')?.addEventListener('click', () =>
@@ -525,17 +561,11 @@ function _wireUI() {
 
   document.getElementById('contactSearch')?.addEventListener('input', (e) =>
     _renderContacts(e.target.value));
-  document.getElementById('btnClearLog')?.addEventListener('click', () => {
-    document.getElementById('logList').innerHTML = '';
-    document.getElementById('logEmpty')?.classList.remove('hidden');
-  });
 }
 
 document.addEventListener('DOMContentLoaded', () => {
   _wireUI();
   _renderContacts('');
-  const hasBridge = !!(window.chrome && window.chrome.webview && window.chrome.webview.postMessage);
-  _bridgeNote(hasBridge ? 'bridge: WebView2' : 'bridge: MISSING (page opened outside app?)');
   MaxCallBridge.shellReady();
 });
 

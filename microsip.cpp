@@ -24,7 +24,7 @@
 #include "const.h"
 #include "settings.h"
 #include "langpack.h"
-#include "LoginDlg.h"
+#include "LoginWebDlg.h"
 
 #include "Strsafe.h"
 
@@ -312,7 +312,7 @@ BOOL CmicrosipApp::InitInstance()
 		&& lstrcmp(theApp.m_lpCmdLine, _T("/exit")) != 0
 		&& lstrcmp(theApp.m_lpCmdLine, _T("/reset")) != 0
 		) {
-		LoginDlg loginDlg;
+		LoginWebDlg loginDlg;
 		if (loginDlg.DoModal() != IDOK || !loginDlg.loginSuccess) {
 			return FALSE;
 		}

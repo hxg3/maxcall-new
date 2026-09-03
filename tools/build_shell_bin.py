@@ -16,6 +16,8 @@ ROOT = Path(__file__).resolve().parent.parent
 HTML = ROOT / "web-shell" / "index.html"
 JS = ROOT / "web-shell" / "app.js"
 OUT = ROOT / "res" / "main_shell.bin"
+LOGIN_HTML = ROOT / "web-shell" / "login.html"
+LOGIN_OUT = ROOT / "res" / "login.bin"
 MARKER = '<script src="./app.js"></script>'
 
 
@@ -31,6 +33,10 @@ def main() -> int:
     bundled = bundled.replace("</body>", notify + "</body>", 1)
     OUT.write_bytes(bundled.encode("utf-8"))
     print(f"OK: wrote {OUT} ({OUT.stat().st_size} bytes)")
+    # Login page is standalone — embed as-is.
+    login = LOGIN_HTML.read_text(encoding="utf-8")
+    LOGIN_OUT.write_bytes(login.encode("utf-8"))
+    print(f"OK: wrote {LOGIN_OUT} ({LOGIN_OUT.stat().st_size} bytes)")
     return 0
 
 

@@ -144,6 +144,7 @@ MainShellDlg::MainShellDlg(CWnd* pParent)
 	m_webView = nullptr;
 	m_env = nullptr;
 	m_pageReady = false;
+	m_minPin = false;
 	m_lastCallId = PJSUA_INVALID_ID;
 }
 
@@ -348,6 +349,14 @@ void MainShellDlg::ProcessShellMessage(CString& message)
 		return;
 	}
 	if (action == _T("minimizeApp")) {
+		// التصغير يثبّت النافذة تلقائياً حتى لا تضيع بين النوافذ،
+		// والتكبير يعيد حالة التثبيت السابقة (انظر OnSize).
+		if (!accountSettings.alwaysOnTop) {
+			m_minPin = true;
+			accountSettings.alwaysOnTop = 1;
+			SetWindowPos(&wndTopMost, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+			PushPinState(true);
+		}
 		ShowWindow(SW_MINIMIZE);
 		return;
 	}
@@ -700,6 +709,14 @@ void MainShellDlg::OnSize(UINT nType, int cx, int cy)
 		RECT bounds;
 		GetClientRect(&bounds);
 		ctrl->put_Bounds(bounds);
+	}
+	// إلغاء التثبيت التلقائي بعد التكبير من التصغير
+	if (nType == SIZE_RESTORED && m_minPin) {
+		m_minPin = false;
+		accountSettings.alwaysOnTop = 0;
+		mainDlg->AccountSettingsPendingSave();
+		SetWindowPos(&wndNoTopMost, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+		PushPinState(false);
 	}
 }
 
