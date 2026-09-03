@@ -14,6 +14,19 @@
 // Forward declare
 class LoginWebDlg;
 
+static bool IsAllDigits(const CString& s)
+{
+	if (s.IsEmpty()) {
+		return false;
+	}
+	for (int i = 0; i < s.GetLength(); i++) {
+		if (s[i] < L'0' || s[i] > L'9') {
+			return false;
+		}
+	}
+	return true;
+}
+
 class LoginMsgHandler : public ICoreWebView2WebMessageReceivedEventHandler
 {
 public:
@@ -363,6 +376,10 @@ void LoginWebDlg::ProcessLoginMessage(CString& message)
 	server.Trim();
 	if (username.IsEmpty() || password.IsEmpty()) {
 		PushLoginError(_T("Please enter username and password."));
+		return;
+	}
+	if (IsAllDigits(username)) {
+		PushLoginError(_T("Please sign in with your username, not the extension number."));
 		return;
 	}
 	PushLoginError(_T(""));
