@@ -176,6 +176,7 @@ BEGIN_MESSAGE_MAP(CrmPopupDlg, CBaseDialog)
 	ON_MESSAGE(WM_WEBVIEW_MESSAGE, &CrmPopupDlg::OnWebViewMessage)
 	ON_MESSAGE(WM_CRM_LOAD_RESULT, &CrmPopupDlg::OnCrmLoadResult)
 	ON_MESSAGE(WM_CRM_SAVE_RESULT, &CrmPopupDlg::OnCrmSaveResult)
+	ON_MESSAGE(WM_CRM_HISTORY, &CrmPopupDlg::OnCrmHistory)
 END_MESSAGE_MAP()
 
 BOOL CrmPopupDlg::OnInitDialog()
@@ -293,6 +294,7 @@ LRESULT CrmPopupDlg::OnWebViewReady(WPARAM wParam, LPARAM lParam)
 {
 	UpdateWebView();
 	LoadCallerInfo();
+	FetchCallerHistory();
 	return 0;
 }
 
@@ -351,6 +353,50 @@ void CrmPopupDlg::LoadCallerInfo()
 	url.Format(_T("http://192.168.1.165:3001/api/callers/%s"), UrlEncodeCallerNumber(cleanNumber));
 
 	URLGetAsync(url, m_hWnd, WM_CRM_LOAD_RESULT);
+}
+
+void CrmPopupDlg::FetchCallerHistory()
+{
+	CString cleanNumber = callerNumber;
+	int atPos = cleanNumber.Find(_T('@'));
+	if (atPos != -1) {
+		cleanNumber = cleanNumber.Left(atPos);
+	}
+	cleanNumber.TrimLeft(_T("sipSIP:"));
+	cleanNumber.Trim();
+	if (cleanNumber.IsEmpty()) {
+		return;
+	}
+	CString url;
+	url.Format(_T("http://192.168.1.165:3001/api/callers/%s/history"), UrlEncodeCallerNumber(cleanNumber));
+
+	URLGetAsync(url, m_hWnd, WM_CRM_HISTORY);
+}
+
+LRESULT CrmPopupDlg::OnCrmHistory(WPARAM wParam, LPARAM lParam)
+{
+	URLGetAsyncData* result = (URLGetAsyncData*)wParam;
+	if (result) {
+		if (result->statusCode >= 200 && result->statusCode < 300 && !result->body.IsEmpty()) {
+			CStringA bodyA = result->body;
+			wchar_t* ucs2 = NULL;
+			Utf8DecodeCP((char*)(LPCSTR)bodyA, CP_UTF8, &ucs2);
+			if (ucs2) {
+				CString js;
+				js.Format(_T("updateCallerHistory('%s')"), EscapeJson(CString(ucs2)));
+				free(ucs2);
+				if (m_webView && ::IsWindow(m_hWnd)) {
+					ICoreWebView2* wv = static_cast<ICoreWebView2*>(m_webView);
+					if (wv) {
+						CStringW wJs(js);
+						wv->ExecuteScript(wJs.GetString(), nullptr);
+					}
+				}
+			}
+		}
+		delete result;
+	}
+	return 0;
 }
 
 void CrmPopupDlg::UpdateWebView()

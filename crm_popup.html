@@ -47,7 +47,7 @@ input:focus,textarea:focus{outline:none;box-shadow:0 0 0 2px rgba(8,123,120,0.15
 <div id="toast" class="hidden mx-4 mb-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-center"></div>
 
 <!-- Buttons -->
-<div class="px-4 pb-4 flex gap-2">
+<div class="px-4 pb-3 flex gap-2">
   <button id="dismissBtn" onclick="dismiss()"
     class="flex-1 bg-white border border-border hover:bg-surface text-ink-sec font-semibold py-2 rounded-lg transition text-sm">
     Dismiss
@@ -56,6 +56,13 @@ input:focus,textarea:focus{outline:none;box-shadow:0 0 0 2px rgba(8,123,120,0.15
     class="flex-1 bg-teal hover:bg-teal-dark text-white font-semibold py-2 rounded-lg transition text-sm">
     Save
   </button>
+</div>
+
+<!-- Call history -->
+<div class="px-4 pb-4">
+  <div class="text-[11px] font-semibold text-ink-sec uppercase tracking-wide mb-1.5">Call history</div>
+  <div id="callerHistory" class="max-h-[140px] overflow-y-auto flex flex-col gap-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"></div>
+  <div id="historyEmpty" class="text-xs text-muted text-center py-2">No previous calls.</div>
 </div>
 
 <script>
@@ -100,7 +107,7 @@ function notifySaveResult(ok) {
   if (ok) {
     showToast('Saved successfully', false);
     if (btn) { btn.textContent = 'Save'; btn.disabled = false; }
-    // إغلاق تلقائي بعد التأكد من نجاح الحفظ
+    // Auto close after confirmed save
     setTimeout(function() {
       try {
         if (window.chrome && window.chrome.webview) {
@@ -138,6 +145,83 @@ function dismiss() {
       window.chrome.webview.postMessage(JSON.stringify({action:'dismiss'}));
     }
   } catch(e) {}
+}
+
+function historyBadgeClass(status) {
+  switch (status) {
+    case 'answered': return 'bg-green-100 text-green-700';
+    case 'missed': return 'bg-red-100 text-red-600';
+    case 'outgoing': return 'bg-sky-100 text-sky-700';
+    case 'outgoing-no-answer': return 'bg-amber-100 text-amber-700';
+    case 'called-back-answered': return 'bg-emerald-100 text-emerald-800 ring-1 ring-emerald-300';
+    case 'called-back-no-answer': return 'bg-amber-50 text-amber-800 ring-1 ring-amber-300';
+    default: return 'bg-gray-100 text-gray-600';
+  }
+}
+
+function historyLabel(status) {
+  switch (status) {
+    case 'answered': return 'Answered';
+    case 'missed': return 'Missed';
+    case 'outgoing': return 'Outgoing';
+    case 'outgoing-no-answer': return 'No answer';
+    case 'called-back-answered': return 'Called back';
+    case 'called-back-no-answer': return 'No answer';
+    default: return status ? String(status).replace(/-/g, ' ') : 'Unknown';
+  }
+}
+
+function formatHistoryDuration(sec) {
+  var s = parseInt(sec, 10);
+  if (isNaN(s) || s <= 0) return '';
+  var m = Math.floor(s / 60);
+  var r = s % 60;
+  return m + ':' + (r < 10 ? '0' + r : r);
+}
+
+function updateCallerHistory(jsonText) {
+  var list = document.getElementById('callerHistory');
+  var empty = document.getElementById('historyEmpty');
+  var items = [];
+  try {
+    var data = (typeof jsonText === 'string') ? JSON.parse(jsonText) : jsonText;
+    if (Array.isArray(data)) items = data;
+    else if (data && Array.isArray(data.history)) items = data.history;
+    else items = [];
+  } catch (e) { items = []; }
+  list.innerHTML = '';
+  if (!items.length) {
+    if (empty) empty.style.display = '';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+  items.forEach(function (h) {
+    h = h || {};
+    var row = document.createElement('div');
+    row.className = 'flex items-center gap-2 px-2 py-1.5 rounded-lg bg-surface border border-border';
+    var time = document.createElement('span');
+    time.className = 'text-xs text-ink truncate';
+    time.textContent = h.time || '-';
+    row.appendChild(time);
+    var badge = document.createElement('span');
+    badge.className = 'px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 ' + historyBadgeClass(h.status);
+    badge.textContent = historyLabel(h.status);
+    row.appendChild(badge);
+    if (h.answered_by) {
+      var by = document.createElement('span');
+      by.className = 'text-[11px] text-muted truncate';
+      by.textContent = 'answered by ' + h.answered_by;
+      row.appendChild(by);
+    }
+    var dur = formatHistoryDuration(h.duration);
+    if (dur) {
+      var d = document.createElement('span');
+      d.className = 'text-[11px] font-mono text-muted ml-auto shrink-0';
+      d.textContent = dur;
+      row.appendChild(d);
+    }
+    list.appendChild(row);
+  });
 }
 
 updateCallerInfo('', 'New Caller', '', -1);

@@ -13,6 +13,7 @@ struct ICoreWebView2Environment;
 #define WM_WEBVIEW_MESSAGE (WM_USER + 101)
 #define WM_CRM_LOAD_RESULT (WM_USER + 102)
 #define WM_CRM_SAVE_RESULT (WM_USER + 103)
+#define WM_CRM_HISTORY (WM_USER + 115)
 
 class CrmPopupDlg : public CBaseDialog
 {
@@ -27,6 +28,7 @@ public:
 	CString notes;
 
 	void LoadCallerInfo();
+	void FetchCallerHistory();
 	void Restore();
 
 protected:
@@ -44,6 +46,7 @@ protected:
 	afx_msg LRESULT OnWebViewMessage(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnCrmLoadResult(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnCrmSaveResult(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnCrmHistory(WPARAM wParam, LPARAM lParam);
 	DECLARE_MESSAGE_MAP()
 
 public:
