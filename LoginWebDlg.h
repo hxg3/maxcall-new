@@ -2,6 +2,7 @@
 
 #include "resource.h"
 #include "BaseDialog.h"
+#include "json.h"
 
 struct ICoreWebView2Controller;
 struct ICoreWebView2;
