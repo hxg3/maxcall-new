@@ -142,9 +142,12 @@ LRESULT CmainDlg::onRegState2(WPARAM wParam, LPARAM lParam)
 
 	UpdateWindowText(headerError, IDI_DEFAULT, true);
 
-	//-- modern shell: registration state
+	//-- modern shell: registration state + late contacts push
 	if (mainShellDlg && IsWindow(mainShellDlg->m_hWnd) && mainShellDlg->IsWebViewReady()) {
 		mainShellDlg->PushRegState(code == 200, headerError);
+		if (code == 200) {
+			mainShellDlg->PushContacts();
+		}
 	}
 
 	return 0;
@@ -1023,7 +1026,6 @@ LRESULT CmainDlg::onIncomingCall(WPARAM wParam, LPARAM lParam)
 	}
 	else {
 		if (!accountSettings.hidden
-			&& !IsModernShellActive()
 			) {
 			PostMessage(UM_CREATE_RINGING, (WPARAM)call_info->id, NULL);
 		}
@@ -1675,7 +1677,6 @@ BEGIN_MESSAGE_MAP(CmainDlg, CBaseDialog)
 	ON_COMMAND(ID_SETTINGS, OnMenuSettings)
 	ON_COMMAND(ID_SHORTCUTS, OnMenuShortcuts)
 	ON_COMMAND(ID_ALWAYS_ON_TOP, OnMenuAlwaysOnTop)
-	ON_COMMAND(ID_MODERN_UI, OnMenuModernUI)
 	ON_COMMAND(ID_LOG, OnMenuLog)
 	ON_COMMAND(ID_EXIT, OnMenuExit)
 	ON_NOTIFY(TCN_SELCHANGE, IDC_MAIN_TAB, &CmainDlg::OnTcnSelchangeTab)
@@ -2221,13 +2222,12 @@ void CmainDlg::OnCreated()
 		theApp.m_lpCmdLine = NULL;
 	}
 	PJAccountAdd();
-	//-- modern WebView2 shell (independent repo: maxcall-new)
-	if (accountSettings.modernUI) {
-		ShowMainShell();
-		if (mainShellDlg && IsWindow(mainShellDlg->m_hWnd)) {
-			// القشرة هي الواجهة الأساسية — نخفي النافذة الكلاسيكية (تبقى في الـ Tray)
-			ShowWindow(SW_HIDE);
-		}
+	//-- modern WebView2 shell is the only UI (independent repo: maxcall-new)
+	accountSettings.modernUI = true;
+	ShowMainShell();
+	if (mainShellDlg && IsWindow(mainShellDlg->m_hWnd)) {
+		// القشرة هي الواجهة الأساسية — نخفي النافذة الكلاسيكية (تبقى في الـ Tray)
+		ShowWindow(SW_HIDE);
 	}
 	//--
 	WM_SHELLHOOKMESSAGE = RegisterWindowMessage(_T("SHELLHOOK"));
@@ -2500,8 +2500,6 @@ void CmainDlg::MainPopupMenu(bool isMenuButton)
 	CMenu menu;
 	menu.CreatePopupMenu();
 	menu.AppendMenu(MF_STRING | (accountSettings.alwaysOnTop ? MF_CHECKED : 0), ID_ALWAYS_ON_TOP, Translate(_T("Always on Top")));
-	bool shellOpen = mainShellDlg && IsWindow(mainShellDlg->m_hWnd) && mainShellDlg->IsWindowVisible();
-	menu.AppendMenu(MF_STRING | (shellOpen ? MF_CHECKED : 0), ID_MODERN_UI, Translate(_T("Modern UI")));
 	menu.AppendMenu(MF_SEPARATOR);
 	menu.AppendMenu(MF_STRING, ID_EXIT, Translate(_T("Exit")));
 
@@ -2512,8 +2510,22 @@ void CmainDlg::MainPopupMenu(bool isMenuButton)
 
 LRESULT CmainDlg::onCreateRingingDlg(WPARAM wParam, LPARAM lParam)
 {
-	// القشرة الحديثة تعرض بانر الواردة بنفسها — لا نافذة رنين أصلية معها
+	// الوضع الحديث: بطاقة CRM فقط (البانر في القشرة) — بلا نافذة رنين أصلية
 	if (IsModernShellActive()) {
+		pjsua_call_info shellInfo;
+		if (pjsua_var.state == PJSUA_STATE_RUNNING
+			&& pjsua_call_get_info((pjsua_call_id)wParam, &shellInfo) == PJ_SUCCESS) {
+			SIPURI shellUri;
+			MSIP::ParseSIPURI(MSIP::PjToStr(&shellInfo.remote_info, TRUE), &shellUri);
+			CString shellNum = !shellUri.user.IsEmpty() ? shellUri.user : shellUri.domain;
+			CString shellName = pageContacts ? pageContacts->GetNameByNumber(shellNum) : _T("");
+			if (shellName.IsEmpty() && !shellUri.name.IsEmpty()) {
+				shellName = shellUri.name;
+			}
+			if (!shellNum.IsEmpty()) {
+				ShowCrmPopup(shellNum, shellName, shellInfo.id);
+			}
+		}
 		return 0;
 	}
 	pjsua_call_id call_id = wParam;
@@ -5752,21 +5764,6 @@ void CmainDlg::ShowCrmPopup(CString number, CString name, pjsua_call_id call_id)
 	crmPopupDlg->call_id = call_id;
 	crmPopupDlg->Create(CrmPopupDlg::IDD, this);
 	crmPopupDlg->ShowWindow(SW_SHOWNORMAL);
-}
-
-void CmainDlg::OnMenuModernUI()
-{
-	accountSettings.modernUI = !accountSettings.modernUI;
-	AccountSettingsPendingSave();
-	if (accountSettings.modernUI) {
-		ShowMainShell();
-	}
-	else if (mainShellDlg && IsWindow(mainShellDlg->m_hWnd)) {
-		mainShellDlg->ShowWindow(SW_HIDE);
-		if (!IsWindowVisible()) {
-			ShowWindow(SW_SHOW);
-		}
-	}
 }
 
 void CmainDlg::ShowMainShell()

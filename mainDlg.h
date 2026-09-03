@@ -260,7 +260,6 @@ public:
 	afx_msg void OnMenuAccountLocalEdit();
 	afx_msg void OnMenuCustomRange(UINT nID);
 	afx_msg void OnMenuSettings();
-	afx_msg void OnMenuModernUI();
 	afx_msg void OnMenuShortcuts();
 	afx_msg void OnMenuAlwaysOnTop();
 	afx_msg void OnMenuLog();

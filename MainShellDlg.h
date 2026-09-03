@@ -34,6 +34,7 @@ public:
 	void PushMessage(const CString& from, const CString& text);
 	void PushContacts();
 	void PushAccount();
+	void PushPinState(bool on);
 	void PushSnapshot();
 
 	bool IsWebViewReady() const { return m_webView != NULL && m_pageReady; }

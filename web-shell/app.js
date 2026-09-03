@@ -86,6 +86,12 @@ function _startTimer() {
   _timerId = setInterval(_tickTimer, 500);
 }
 
+/** Hide the incoming-call banner. */
+function _hideIncoming() {
+  document.getElementById('incomingBanner')?.classList.add('hidden');
+  document.getElementById('incomingBanner')?.classList.remove('flex');
+}
+
 /** Stop the JS-side duration counter. */
 function _stopTimer() {
   if (_timerId !== null) { clearInterval(_timerId); _timerId = null; }
@@ -93,6 +99,11 @@ function _stopTimer() {
   const el = document.getElementById('acTimer');
   if (el) el.textContent = '0:00';
 }
+
+/** @type {number} Last processed call id for dedupe. */
+let _lastStateCall = -2;
+/** @type {string} Last processed state for dedupe. */
+let _lastState = '';
 
 /**
  * The MaxCall bridge: senders (JS->C++) and receivers (C++->JS).
@@ -191,6 +202,24 @@ const MaxCallBridge = {
    */
   minimizeApp() { _postToNative({ action: 'minimizeApp' }); },
 
+  /**
+   * Ask C++ to open the caller-details popup for a number.
+   * @param {string} number Phone number.
+   * @returns {void}
+   */
+  openPopup(number) {
+    const num = String(number || '').trim();
+    if (!num) return;
+    _postToNative({ action: 'openPopup', number: num });
+  },
+
+  /**
+   * Toggle always-on-top pinning.
+   * @param {boolean} on True = pin on top.
+   * @returns {void}
+   */
+  pinToggle(on) { _postToNative({ action: 'pinToggle', on: !!on }); },
+
   // ---------- Receivers: C++ -> JS (called via ExecuteScript) ----------
 
   /**
@@ -233,6 +262,11 @@ const MaxCallBridge = {
     if (num) meta.number = num;
     if (nm) meta.name = nm;
 
+    // Dedupe: PJSUA repeats identical transitions; ignore exact repeats.
+    if (_currentCallId === _lastStateCall && state === _lastState) return;
+    _lastStateCall = _currentCallId;
+    _lastState = state;
+
     const bar = document.getElementById('activeCallBar');
     const acNum = document.getElementById('acNumber');
     const acName = document.getElementById('acName');
@@ -247,6 +281,7 @@ const MaxCallBridge = {
       _inCall = true;
       bar?.classList.remove('hidden');
       if (holdBtn) holdBtn.textContent = 'Hold';
+      _hideIncoming();
       _startTimer();
     } else if (state === 'held') {
       _inCall = true;
@@ -259,8 +294,7 @@ const MaxCallBridge = {
       _inCall = false;
       _stopTimer();
       bar?.classList.add('hidden');
-      document.getElementById('incomingBanner')?.classList.add('hidden');
-      document.getElementById('incomingBanner')?.classList.remove('flex');
+      _hideIncoming();
       if (state === 'ended') _appendLog(meta);
       if (!_inCall) { _currentCallId = -1; _lastDialed = ''; }
       _callMeta.delete(Number(callId));
@@ -334,6 +368,21 @@ const MaxCallBridge = {
     if (el) el.textContent = String(user || '') + '@' + String(domain || '');
     _emit('account', { user: String(user || ''), domain: String(domain || '') });
   },
+
+  /**
+   * Always-on-top pin state (sent in every snapshot).
+   * @param {boolean} on Whether the window is pinned.
+   * @returns {void}
+   */
+  onPinState(on) {
+    const btn = document.getElementById('btnPin');
+    if (btn) {
+      btn.classList.toggle('bg-gold', !!on);
+      btn.classList.toggle('text-teal-950', !!on);
+      btn.classList.toggle('text-white/70', !on);
+    }
+    _emit('pin-state', { on: !!on });
+  },
 };
 
 /**
@@ -361,14 +410,17 @@ function _renderContacts(query) {
       '<span></span>' +
       '<span class="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-white ' + dot + '"></span></div>' +
       '<div class="min-w-0"><p class="truncate text-xs font-bold"></p><p class="text-[11px] text-slate-400" dir="ltr"></p></div></div>' +
-      '<button class="shrink-0 rounded-full bg-teal-700/10 px-2.5 py-1 text-[11px] font-bold text-teal-800 active:scale-95">Call</button>';
+      '<div class="flex shrink-0 items-center gap-1">' +
+      '<button data-act="info" title="Caller details" class="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-500 active:scale-95">i</button>' +
+      '<button data-act="call" class="shrink-0 rounded-full bg-teal-700/10 px-2.5 py-1 text-[11px] font-bold text-teal-800 active:scale-95">Call</button></div>';
     row.querySelector('span span').textContent = (c.name || c.number || '?').charAt(0).toUpperCase();
     row.querySelector('p').textContent = c.name || c.number;
     row.querySelectorAll('p')[1].textContent = c.number;
-    row.querySelector('button').addEventListener('click', () => {
+    row.querySelector('[data-act="call"]').addEventListener('click', () => {
       MaxCallBridge.makeCall(c.number);
       _switchTab('tabDial');
     });
+    row.querySelector('[data-act="info"]').addEventListener('click', () => MaxCallBridge.openPopup(c.number));
     list.appendChild(row);
   });
   if (empty) empty.classList.toggle('hidden', shown.length > 0);
@@ -399,15 +451,17 @@ function _appendLog(meta) {
     '<p class="truncate text-[11px] text-slate-400"></p></div></div>' +
     '<div class="flex shrink-0 items-center gap-1.5">' +
     '<span class="rounded-full px-2 py-0.5 text-[11px] font-bold ' + badge + '">' + label + '</span>' +
-    '<button class="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600 active:scale-95">Redial</button></div>';
+    '<button data-act="info" title="Caller details" class="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-500 active:scale-95">i</button>' +
+    '<button data-act="redial" class="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600 active:scale-95">Redial</button></div>';
   row.querySelectorAll('p')[0].textContent = meta.number || 'Unknown';
   row.querySelectorAll('p')[1].textContent = (meta.name ? meta.name + ' • ' : '') + time + ' • ' + type;
-  row.querySelector('button').addEventListener('click', () => {
+  row.querySelector('[data-act="redial"]').addEventListener('click', () => {
     const input = document.getElementById('dialInput');
     if (input) input.value = meta.number;
     MaxCallBridge.makeCall(meta.number);
     _switchTab('tabDial');
   });
+  row.querySelector('[data-act="info"]').addEventListener('click', () => MaxCallBridge.openPopup(meta.number));
   list.prepend(row);
   if (empty) empty.classList.add('hidden');
 }
@@ -449,7 +503,12 @@ function _wireUI() {
   document.getElementById('btnCall')?.addEventListener('click', () =>
     MaxCallBridge.makeCall(input?.value.trim()));
   document.getElementById('btnHangup')?.addEventListener('click', () => MaxCallBridge.hangup(undefined));
-  document.getElementById('btnAnswer')?.addEventListener('click', () => MaxCallBridge.answer(undefined));
+  document.getElementById('btnPopup')?.addEventListener('click', () =>
+    MaxCallBridge.openPopup(input?.value.trim() || _callMeta.get(_currentCallId)?.number));
+  document.getElementById('btnPin')?.addEventListener('click', () => {
+    const pinned = document.getElementById('btnPin')?.classList.contains('bg-gold');
+    MaxCallBridge.pinToggle(!pinned);
+  });
   document.getElementById('btnHold')?.addEventListener('click', () => {
     const holding = document.getElementById('btnHold')?.textContent === 'Hold';
     MaxCallBridge.hold(undefined, holding);
@@ -460,9 +519,6 @@ function _wireUI() {
   document.getElementById('btnIncomingAnswer')?.addEventListener('click', () => MaxCallBridge.answer(undefined));
   document.getElementById('btnIncomingReject')?.addEventListener('click', () => MaxCallBridge.hangup(undefined));
 
-  document.getElementById('presenceSelect')?.addEventListener('change', (e) =>
-    MaxCallBridge.setPresence(e.target.value));
-  document.getElementById('btnSettings')?.addEventListener('click', () => MaxCallBridge.openSettings());
   document.getElementById('btnMinimize')?.addEventListener('click', () => MaxCallBridge.minimizeApp());
   document.getElementById('btnQuit')?.addEventListener('click', () => MaxCallBridge.quitApp());
   document.getElementById('btnRetry')?.addEventListener('click', () => MaxCallBridge.getData());
@@ -490,4 +546,5 @@ window.onIncomingCall = (...a) => MaxCallBridge.onIncomingCall(...a);
 window.onMessage = (...a) => MaxCallBridge.onMessage(...a);
 window.onContacts = (...a) => MaxCallBridge.onContacts(...a);
 window.onAccount = (...a) => MaxCallBridge.onAccount(...a);
+window.onPinState = (...a) => MaxCallBridge.onPinState(...a);
 window.MaxCallBridge = MaxCallBridge;

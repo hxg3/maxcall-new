@@ -28,6 +28,8 @@
 | `openSettings` | — | — | فتح نافذة الإعدادات الأصلية |
 | `quitApp` | — | — | خروج من التطبيق |
 | `minimizeApp` | — | — | تصغير نافذة القشرة |
+| `openPopup` | `number` | `string` | فتح بطاقة المتصل لنفس الرقم (يدوياً من Dial/Contacts/Log) |
+| `pinToggle` | `on` | `boolean` | تثبيت النافذة فوق الكل (يُحفظ في الإعدادات) |
 
 > `setPresence` يُعيَّن في `MainShellDlg::ProcessShellMessage` كالتالي:
 > `available/away` → إلغاء DND + نشر متاح، `busy` → تفعيل DND + نشر متاح،
@@ -55,6 +57,7 @@ window.chrome.webview.postMessage({ action: 'hold', callId: -1, on: true });
 | `onMessage` | `(from: string, text: string)` | تنبيه / رسالة نصية |
 | `onContacts` | `(jsonText: string)` | مصفوفة JSON `[{name, number, presence}]` من دفتر `pageContacts` |
 | `onAccount` | `(user: string, domain: string)` | سطر الحساب في الهيدر |
+| `onPinState` | `(on: boolean)` | حالة زر التثبيت (تُدفع مع كل لقطة) |
 
 مثال من C++ (نفس نمط `UpdateWebView` / `OnCrmSaveResult`):
 

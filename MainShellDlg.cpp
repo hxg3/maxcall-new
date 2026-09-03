@@ -351,6 +351,24 @@ void MainShellDlg::ProcessShellMessage(CString& message)
 		ShowWindow(SW_MINIMIZE);
 		return;
 	}
+	if (action == _T("openPopup")) {
+		CString number = JsStringToCString(root["number"]);
+		number.Trim();
+		if (!number.IsEmpty()) {
+			CString name = mainDlg->pageContacts
+				? mainDlg->pageContacts->GetNameByNumber(number) : _T("");
+			mainDlg->ShowCrmPopup(number, name, PJSUA_INVALID_ID);
+		}
+		return;
+	}
+	if (action == _T("pinToggle")) {
+		bool on = root.isMember("on") ? root["on"].asBool() : !accountSettings.alwaysOnTop;
+		accountSettings.alwaysOnTop = on ? 1 : 0;
+		mainDlg->AccountSettingsPendingSave();
+		SetWindowPos(on ? &wndTopMost : &wndNoTopMost, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+		PushPinState(on);
+		return;
+	}
 	if (action == _T("makeCall")) {
 		CString number = JsStringToCString(root["number"]);
 		number.Trim();
@@ -367,7 +385,15 @@ void MainShellDlg::ProcessShellMessage(CString& message)
 		return;
 	}
 	if (action == _T("answer")) {
-		mainDlg->CommandCallAnswer();
+		// الرد المباشر على المكالمة (CommandCallAnswer يعتمد على نافذة
+		// الرنين الأصلية وهي معطلة في الوضع الحديث)
+		pjsua_call_id id = ResolveCallId(JsInt(root["callId"], -1));
+		if (id != PJSUA_INVALID_ID) {
+			pjsua_call_answer(id, 200, NULL, NULL);
+		}
+		else {
+			mainDlg->CommandCallAnswer();
+		}
 		return;
 	}
 	if (action == _T("hold")) {
@@ -559,6 +585,13 @@ void MainShellDlg::PushAccount()
 	ExecuteShellScript(js);
 }
 
+void MainShellDlg::PushPinState(bool on)
+{
+	CString js;
+	js.Format(_T("onPinState(%s)"), on ? _T("true") : _T("false"));
+	ExecuteShellScript(js);
+}
+
 void MainShellDlg::PushSnapshot()
 {
 	if (!m_pageReady || !mainDlg || !IsWindow(mainDlg->m_hWnd)) {
@@ -581,6 +614,7 @@ void MainShellDlg::PushSnapshot()
 		PushRegState(registered, registered ? _T("Registered") : _T("Not registered"));
 		PushAccount();
 		PushContacts();
+		PushPinState(accountSettings.alwaysOnTop != 0);
 		// المكالمة النشطة الحالية إن وجدت (مع حالة التعليق الفعلية)
 		pjsua_call_id current = mainDlg->CurrentCallId();
 		if (current != PJSUA_INVALID_ID && pjsua_call_is_active(current)) {
