@@ -589,8 +589,10 @@ void MainShellDlg::PushAccount()
 	if (user.IsEmpty()) {
 		return;
 	}
+	CString display = accountSettings.account.displayName;
 	CString js;
-	js.Format(_T("onAccount('%s', '%s')"), EscapeJs(user), EscapeJs(domain));
+	js.Format(_T("onAccount('%s', '%s', '%s')"),
+		EscapeJs(user), EscapeJs(domain), EscapeJs(display));
 	ExecuteShellScript(js);
 }
 

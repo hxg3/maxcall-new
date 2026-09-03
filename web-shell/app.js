@@ -429,16 +429,17 @@ const MaxCallBridge = {
    * Account identity.
    * @param {string} user SIP user.
    * @param {string} domain SIP domain.
+   * @param {string} [name] Display name (optional).
    * @returns {void}
    */
-  onAccount(user, domain) {
+  onAccount(user, domain, name) {
     const el = document.getElementById('accountLine');
     if (el) {
-      const raw = String(user || '');
-      const ext = raw.split('@')[0];
-      el.textContent = ext || 'not signed in';
+      const raw = String(user || '').split('@')[0];
+      const disp = String(name || raw || '');
+      el.textContent = raw ? raw + '-' + (disp || raw) : 'not signed in';
     }
-    _emit('account', { user: String(user || ''), domain: String(domain || '') });
+    _emit('account', { user: String(user || ''), domain: String(domain || ''), name: String(name || '') });
   },
 
   /**
@@ -481,7 +482,7 @@ function _renderContacts(query) {
       '<span class="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-teal-50 text-xs font-bold text-teal-800">' +
       '<span></span>' +
       '<span class="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-white ' + dot + '"></span></div>' +
-      '<div class="min-w-0"><p class="truncate text-xs font-bold"></p><p class="text-[11px] text-slate-400" dir="ltr"></p></div></div>' +
+      '<div class="min-w-0"><p class="truncate text-xs font-bold select-text"></p><p class="text-[11px] text-slate-400 select-text" dir="ltr"></p></div></div>' +
       '<div class="flex shrink-0 items-center gap-1">' +
       '<button data-act="info" title="Caller details" aria-label="Caller details" class="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-slate-500 active:scale-95"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></button>' +
       '<button data-act="call" title="Call" aria-label="Call" class="flex h-7 w-7 items-center justify-center rounded-full bg-teal-700/10 text-teal-800 active:scale-95"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L8 10a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2Z"/></svg></button></div>';
@@ -519,8 +520,8 @@ function _appendLog(meta) {
   row.innerHTML =
     '<div class="flex min-w-0 items-center gap-2">' +
     '<span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full ' + badge + '">' + icon + '</span>' +
-    '<div class="min-w-0"><p class="truncate text-xs font-bold" dir="ltr"></p>' +
-    '<p class="truncate text-[11px] text-slate-400"></p></div></div>' +
+    '<div class="min-w-0"><p class="truncate text-xs font-bold select-text" dir="ltr"></p>' +
+    '<p class="truncate text-[11px] text-slate-400 select-text"></p></div></div>' +
     '<div class="flex shrink-0 items-center gap-1.5">' +
     '<span class="rounded-full px-2 py-0.5 text-[11px] font-bold ' + badge + '">' + label + '</span>' +
     '<button data-act="info" title="Caller details" aria-label="Caller details" class="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-slate-500 active:scale-95"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></button>' +
@@ -536,6 +537,24 @@ function _appendLog(meta) {
   row.querySelector('[data-act="info"]').addEventListener('click', () => MaxCallBridge.openPopup(meta.number));
   list.prepend(row);
   if (empty) empty.classList.add('hidden');
+  _applyLogFilter();
+}
+
+/**
+ * Filter visible log rows by number/name query.
+ * @param {string} query Search text.
+ * @returns {void}
+ */
+function _applyLogFilter(query) {
+  const list = document.getElementById('logList');
+  if (!list) return;
+  const q = String(query === undefined ? document.getElementById('logSearch')?.value || '' : query).toLowerCase().trim();
+  const norm = q.replace(/\s/g, '');
+  list.querySelectorAll(':scope > div').forEach((row) => {
+    const text = (row.textContent || '').toLowerCase();
+    const compact = text.replace(/\s/g, '');
+    row.classList.toggle('hidden', !(!q || text.includes(q) || (norm && compact.includes(norm))));
+  });
 }
 
 /**
@@ -554,6 +573,9 @@ function _switchTab(id) {
     b.classList.toggle('font-medium', !active);
     b.classList.toggle('text-slate-400', !active);
   });
+  if (id === 'tabDial') document.getElementById('dialInput')?.focus();
+  else if (id === 'tabContacts') document.getElementById('contactSearch')?.focus();
+  else if (id === 'tabLog') document.getElementById('logSearch')?.focus();
 }
 
 /** Wire up all DOM controls. */
@@ -629,6 +651,9 @@ function _wireUI() {
 
   document.getElementById('contactSearch')?.addEventListener('input', (e) =>
     _renderContacts(e.target.value));
+
+  document.getElementById('logSearch')?.addEventListener('input', (e) =>
+    _applyLogFilter(e.target.value));
 }
 
 document.addEventListener('DOMContentLoaded', () => {
