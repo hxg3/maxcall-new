@@ -175,8 +175,10 @@ BEGIN_MESSAGE_MAP(MainShellDlg, CBaseDialog)
 	ON_WM_SIZE()
 	ON_WM_CLOSE()
 	ON_WM_SYSCOMMAND()
+	ON_WM_TIMER()
 	ON_MESSAGE(WM_SHELL_READY, &MainShellDlg::OnShellReady)
 	ON_MESSAGE(WM_SHELL_MESSAGE, &MainShellDlg::OnShellMessage)
+	ON_MESSAGE(WM_SHELL_HISTORY, &MainShellDlg::OnShellHistory)
 END_MESSAGE_MAP()
 
 BOOL MainShellDlg::OnInitDialog()
@@ -338,6 +340,7 @@ void MainShellDlg::ProcessShellMessage(CString& message)
 		PushSnapshot();
 		PushContacts();
 		PushAccount();
+		FetchHistory();
 		return;
 	}
 	if (action == _T("openSettings")) {
@@ -511,6 +514,8 @@ void MainShellDlg::PushCallState(pjsua_call_id call_id, const CString& state, co
 		m_lastCallId = PJSUA_INVALID_ID;
 		m_lastNumber.Empty();
 		m_lastName.Empty();
+		// تحديث سجل السيرفر بعد الإنهاء مباشرة
+		SetTimer(2, 4000, NULL);
 	}
 	CString js;
 	js.Format(_T("onCallState(%d, '%s', '%s', '%s')"),
@@ -601,6 +606,54 @@ void MainShellDlg::PushPinState(bool on)
 	CString js;
 	js.Format(_T("onPinState(%s)"), on ? _T("true") : _T("false"));
 	ExecuteShellScript(js);
+}
+
+void MainShellDlg::FetchHistory()
+{
+	if (!IsWindow(m_hWnd)) {
+		return;
+	}
+	CString agent = accountSettings.account.username;
+	agent.Trim();
+	if (agent.IsEmpty()) {
+		return;
+	}
+	CString url;
+	url.Format(_T("http://192.168.1.165:3001/api/calls/history?agent=%s&limit=50"), (LPCTSTR)agent);
+	URLGetAsync(url, m_hWnd, WM_SHELL_HISTORY);
+}
+
+LRESULT MainShellDlg::OnShellHistory(WPARAM wParam, LPARAM lParam)
+{
+	URLGetAsyncData* result = (URLGetAsyncData*)wParam;
+	if (result) {
+		if (result->statusCode >= 200 && result->statusCode < 300) {
+			CStringA bodyA = result->body;
+			if (!bodyA.IsEmpty()) {
+				wchar_t* ucs2 = NULL;
+				Utf8DecodeCP((char*)(LPCSTR)bodyA, CP_UTF8, &ucs2);
+				if (ucs2) {
+					CString js;
+					js.Format(_T("onCallHistory('%s')"), EscapeJs(CString(ucs2)));
+					free(ucs2);
+					ExecuteShellScript(js);
+				}
+			}
+		}
+		delete result;
+	}
+	return 0;
+}
+
+void MainShellDlg::OnTimer(UINT_PTR nIDEvent)
+{
+	if (nIDEvent == 2) {
+		KillTimer(2);
+		// تحديث السجل بعد انتهاء المكالمة (يُكتب CDR عند الإنهاء)
+		FetchHistory();
+		return;
+	}
+	CDialog::OnTimer(nIDEvent);
 }
 
 void MainShellDlg::PushSnapshot()

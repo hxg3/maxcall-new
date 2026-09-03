@@ -11,6 +11,7 @@ struct ICoreWebView2Environment;
 
 #define WM_SHELL_READY (WM_USER + 110)
 #define WM_SHELL_MESSAGE (WM_USER + 111)
+#define WM_SHELL_HISTORY (WM_USER + 114)
 
 // MainShellDlg — النافذة الرئيسية الحديثة (WebView2 Shell).
 // تستضيف web-shell/ المضمّنة (IDR_MAIN_SHELL_HTML) بملء العميل،
@@ -35,6 +36,7 @@ public:
 	void PushContacts();
 	void PushAccount();
 	void PushPinState(bool on);
+	void FetchHistory();
 	void PushSnapshot();
 
 	bool IsWebViewReady() const { return m_webView != NULL && m_pageReady; }
@@ -52,6 +54,8 @@ protected:
 	virtual void PostNcDestroy();
 	afx_msg LRESULT OnShellReady(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnShellMessage(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnShellHistory(WPARAM wParam, LPARAM lParam);
+	afx_msg void OnTimer(UINT_PTR nIDEvent);
 	DECLARE_MESSAGE_MAP()
 
 public:

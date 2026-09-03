@@ -56,8 +56,9 @@ window.chrome.webview.postMessage({ action: 'hold', callId: -1, on: true });
 | `onRegState` | `(registered: boolean, message: string)` | تحديث `#regDot` / `#regText` + إخفاء بانر المحرك |
 | `onMessage` | `(from: string, text: string)` | تنبيه / رسالة نصية |
 | `onContacts` | `(jsonText: string)` | مصفوفة JSON `[{name, number, presence}]` من دفتر `pageContacts` |
-| `onAccount` | `(user: string, domain: string)` | سطر الحساب في الهيدر |
+| `onAccount` | `(user: string, domain: string, name?: string)` | سطر الحساب في الهيدر بصيغة `user-name` |
 | `onPinState` | `(on: boolean)` | حالة زر التثبيت (تُدفع مع كل لقطة) |
+| `onCallHistory` | `(jsonText: string)` | سجل السيرفر: `{rows:[{time,number,name,direction,status,duration,answered_by,has_rec}]}` من `GET /api/calls/history` — يُجلب عند `shellReady/getData` وبعد كل إنهاء بـ 4 ثوانٍ |
 
 مثال من C++ (نفس نمط `UpdateWebView` / `OnCrmSaveResult`):
 
