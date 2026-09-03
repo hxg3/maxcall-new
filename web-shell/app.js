@@ -80,6 +80,47 @@ function _hideIncoming() {
   document.getElementById('incomingBanner')?.classList.remove('flex');
 }
 
+/** Show the outgoing-call banner with a number. */
+function _showOutgoing(number, name) {
+  const banner = document.getElementById('outgoingBanner');
+  const numEl = document.getElementById('outgoingNumber');
+  const nameEl = document.getElementById('outgoingName');
+  if (numEl) numEl.textContent = String(number || '');
+  if (nameEl) nameEl.textContent = String(name || '');
+  if (banner) { banner.classList.remove('hidden'); banner.classList.add('flex'); }
+}
+
+/** Hide the outgoing-call banner. */
+function _hideOutgoing() {
+  document.getElementById('outgoingBanner')?.classList.add('hidden');
+  document.getElementById('outgoingBanner')?.classList.remove('flex');
+}
+
+/** Show the snoozed-incoming mini strip. */
+function _showSnooze(number, name) {
+  const strip = document.getElementById('incomingSnooze');
+  const txt = document.getElementById('incomingSnoozeText');
+  if (txt) {
+    const num = String(number || '');
+    txt.textContent = 'Incoming call ' + num + ' — tap to answer';
+  }
+  if (strip) { strip.classList.remove('hidden'); strip.classList.add('flex'); }
+  void name;
+}
+
+/** Hide the snoozed-incoming mini strip. */
+function _hideSnooze() {
+  document.getElementById('incomingSnooze')?.classList.add('hidden');
+  document.getElementById('incomingSnooze')?.classList.remove('flex');
+}
+
+/** Restore the full incoming banner (from snooze). */
+function _restoreIncoming() {
+  const banner = document.getElementById('incomingBanner');
+  if (banner) { banner.classList.remove('hidden'); banner.classList.add('flex'); }
+  _hideSnooze();
+}
+
 /** Stop the JS-side duration counter. */
 function _stopTimer() {
   if (_timerId !== null) { clearInterval(_timerId); _timerId = null; }
@@ -97,6 +138,10 @@ let _lastState = '';
 const HOLD_ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4"><path d="M9 5v14M15 5v14"/></svg>';
 /** Play icon for the resume button. */
 const RESUME_ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4"><path d="m6 4 14 8-14 8V4Z"/></svg>';
+/** Slanted arrow icons for the call log (Tailwind colors inherited from badge). */
+const LOG_ICON_MISSED = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4"><path d="M17 7 7 17M16 17H7V8"/></svg>';
+const LOG_ICON_IN = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4"><path d="M7 7l10 10M17 8v9H8"/></svg>';
+const LOG_ICON_OUT = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4"><path d="M7 17 17 7M8 7h9v9"/></svg>';
 
 /**
  * Update the hold button icon and label.
@@ -286,22 +331,36 @@ const MaxCallBridge = {
       bar?.classList.remove('hidden');
       _setHoldUI(false);
       _hideIncoming();
+      _hideOutgoing();
+      _hideSnooze();
       _startTimer();
     } else if (state === 'held') {
       _inCall = true;
       bar?.classList.remove('hidden');
       _setHoldUI(true);
+      _hideOutgoing();
     } else if (state === 'calling') {
       _inCall = true;
-      bar?.classList.remove('hidden');
+      bar?.classList.add('hidden');
+      _hideIncoming();
+      _showOutgoing(meta.number || num, meta.name || nm);
     } else if (state === 'ringing') {
       _inCall = true;
-      bar?.classList.add('hidden');
+      if (meta.direction === 'out') {
+        bar?.classList.add('hidden');
+        _hideIncoming();
+        _showOutgoing(meta.number || num, meta.name || nm);
+      } else {
+        bar?.classList.add('hidden');
+        _hideOutgoing();
+      }
     } else if (state === 'ended' || state === 'idle') {
       _inCall = false;
       _stopTimer();
       bar?.classList.add('hidden');
       _hideIncoming();
+      _hideOutgoing();
+      _hideSnooze();
       if (state === 'ended') _appendLog(meta);
       if (!_inCall) { _currentCallId = -1; _lastDialed = ''; }
       _callMeta.delete(Number(callId));
@@ -324,6 +383,8 @@ const MaxCallBridge = {
     const nameEl = document.getElementById('incomingName');
     if (numEl) numEl.textContent = String(number || '');
     if (nameEl) nameEl.textContent = String(name || '');
+    _hideOutgoing();
+    _hideSnooze();
     if (banner) { banner.classList.remove('hidden'); banner.classList.add('flex'); }
     _emit('incoming-call', { number: String(number || ''), name: String(name || ''), callId: _currentCallId });
   },
@@ -452,12 +513,12 @@ function _appendLog(meta) {
   const badge = type === 'missed'
     ? 'bg-rose-50 text-rose-600'
     : type === 'in' ? 'bg-emerald-50 text-emerald-600' : 'bg-sky-50 text-sky-600';
-  const arrow = type === 'missed' ? '↘' : type === 'in' ? '↙' : '↗';
+  const icon = type === 'missed' ? LOG_ICON_MISSED : type === 'in' ? LOG_ICON_IN : LOG_ICON_OUT;
   const label = type === 'missed' ? 'Missed' : type === 'in' ? 'Incoming' : 'Outgoing';
   row.className = 'flex items-center justify-between rounded-2xl border border-slate-100 bg-white p-2.5';
   row.innerHTML =
     '<div class="flex min-w-0 items-center gap-2">' +
-    '<span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm ' + badge + '">' + arrow + '</span>' +
+    '<span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full ' + badge + '">' + icon + '</span>' +
     '<div class="min-w-0"><p class="truncate text-xs font-bold" dir="ltr"></p>' +
     '<p class="truncate text-[11px] text-slate-400"></p></div></div>' +
     '<div class="flex shrink-0 items-center gap-1.5">' +
@@ -487,9 +548,10 @@ function _switchTab(id) {
   document.getElementById(id)?.classList.remove('hidden');
   document.querySelectorAll('.tab-btn').forEach((b) => {
     const active = b.dataset.tab === id;
-    b.classList.toggle('bg-teal-50', active);
-    b.classList.toggle('text-teal-800', active);
+    b.classList.toggle('bg-brand', active);
+    b.classList.toggle('text-white', active);
     b.classList.toggle('font-bold', active);
+    b.classList.toggle('font-medium', !active);
     b.classList.toggle('text-slate-400', !active);
   });
 }
@@ -553,7 +615,13 @@ function _wireUI() {
     MaxCallBridge.transfer(undefined, document.getElementById('transferTarget')?.value));
 
   document.getElementById('btnIncomingAnswer')?.addEventListener('click', () => MaxCallBridge.answer(undefined));
-  document.getElementById('btnIncomingReject')?.addEventListener('click', () => MaxCallBridge.hangup(undefined));
+  document.getElementById('btnIncomingReject')?.addEventListener('click', () => {
+    const meta = _callMeta.get(_currentCallId);
+    _hideIncoming();
+    _showSnooze(meta?.number || document.getElementById('incomingNumber')?.textContent || '', meta?.name || '');
+  });
+  document.getElementById('incomingSnooze')?.addEventListener('click', _restoreIncoming);
+  document.getElementById('btnOutgoingCancel')?.addEventListener('click', () => MaxCallBridge.hangup(undefined));
 
   document.getElementById('btnMinimize')?.addEventListener('click', () => MaxCallBridge.minimizeApp());
   document.getElementById('btnQuit')?.addEventListener('click', () => MaxCallBridge.quitApp());
