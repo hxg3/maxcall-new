@@ -248,8 +248,13 @@ BOOL CmicrosipApp::InitInstance()
 				activate = ::SendMessage(hWndRunning, WM_COPYDATA, NULL, (LPARAM)&cd);
 			}
 			if (activate && !MACRO_SILENT) {
-				::ShowWindow(hWndRunning, SW_SHOW);
-				::SetForegroundWindow(hWndRunning);
+				// الوضع الحديث: أعِد القشرة — لا تعرض الكلاسيكية أبداً
+				COPYDATASTRUCT cd2;
+				cd2.dwData = 1;
+				TCHAR sh[] = _T("/showshell");
+				cd2.lpData = sh;
+				cd2.cbData = sizeof(sh);
+				::SendMessage(hWndRunning, WM_COPYDATA, NULL, (LPARAM)&cd2);
 			}
 		}
 		return FALSE;

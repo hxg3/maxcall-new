@@ -716,20 +716,14 @@ void MainShellDlg::Restore()
 
 void MainShellDlg::OnClose()
 {
+	// إخفاء للدرج فقط — النافذة الكلاسيكية لا تظهر أبداً في الوضع الحديث
 	ShowWindow(SW_HIDE);
-	// أمان: لا نترك المستخدم بلا أي نافذة — أعد الكلاسيكية إن كانت مخفية
-	if (mainDlg && IsWindow(mainDlg->m_hWnd) && !mainDlg->IsWindowVisible()) {
-		mainDlg->ShowWindow(SW_SHOW);
-	}
 }
 
 void MainShellDlg::OnSysCommand(UINT nID, LPARAM lParam)
 {
 	if ((nID & 0xFFF0) == SC_CLOSE) {
 		ShowWindow(SW_HIDE);
-		if (mainDlg && IsWindow(mainDlg->m_hWnd) && !mainDlg->IsWindowVisible()) {
-			mainDlg->ShowWindow(SW_SHOW);
-		}
 		return;
 	}
 	CBaseDialog::OnSysCommand(nID, lParam);

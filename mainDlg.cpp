@@ -2445,8 +2445,8 @@ LRESULT CmainDlg::onTrayNotify(WPARAM wParam, LPARAM lParam)
 		}
 		else
 		{
-			// الوضع الحديث: أيقونة الدرج تفتح القشرة — الكلاسيكية لا تظهر أبداً
-			if (IsModernShellActive()) {
+			// الوضع الحديث: أيقونة الدرج تعيد القشرة دائماً — الكلاسيكية لا تظهر أبداً
+			if (accountSettings.modernUI && mainShellDlg && IsWindow(mainShellDlg->m_hWnd)) {
 				mainShellDlg->Restore();
 				SetForegroundWindow();
 				return 0;
@@ -3951,7 +3951,19 @@ LRESULT CmainDlg::onCopyData(WPARAM wParam, LPARAM lParam)
 		if (s) {
 			CString params = (LPCTSTR)s->lpData;
 			if (s->dwData == 1) {
-				res = CommandLine(params);
+				if (params == _T("/showshell")) {
+					// نسخة ثانية/أيقونة الدرج: أعِد القشرة الحديثة فقط
+					if (accountSettings.modernUI) {
+						ShowMainShell();
+						res = FALSE;
+					}
+					else {
+						res = CommandLine(params);
+					}
+				}
+				else {
+					res = CommandLine(params);
+				}
 			} else if (s->dwData == 2) {
 				res = FALSE;
 				CString *str = new CString();
