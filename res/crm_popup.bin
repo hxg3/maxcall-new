@@ -36,35 +36,29 @@ input:focus,textarea:focus{outline:none;box-shadow:0 0 0 2px rgba(8,123,120,0.15
     class="w-full px-3 py-2 border border-border rounded-lg text-sm text-ink bg-white transition">
 </div>
 
-<!-- Company + Email -->
+<!-- File no + Alt phone -->
 <div class="px-4 pb-2 flex gap-2">
   <div class="flex-1 min-w-0">
-    <label class="text-[11px] font-semibold text-ink-sec uppercase tracking-wide block mb-1.5">Company</label>
-    <input type="text" id="callerCompanyInput" placeholder="Company"
+    <label class="text-[11px] font-semibold text-ink-sec uppercase tracking-wide block mb-1.5">File no.</label>
+    <input type="text" id="callerFileNoInput" placeholder="Patient file no."
       class="w-full px-3 py-2 border border-border rounded-lg text-sm text-ink bg-white transition">
   </div>
   <div class="flex-1 min-w-0">
-    <label class="text-[11px] font-semibold text-ink-sec uppercase tracking-wide block mb-1.5">Email</label>
-    <input type="text" id="callerEmailInput" placeholder="Email"
+    <label class="text-[11px] font-semibold text-ink-sec uppercase tracking-wide block mb-1.5">Alt phone</label>
+    <input type="text" id="callerPhone2Input" placeholder="Alternate number"
       class="w-full px-3 py-2 border border-border rounded-lg text-sm text-ink bg-white transition">
   </div>
 </div>
 
-<!-- Category + VIP -->
-<div class="px-4 pb-2 flex gap-2 items-end">
-  <div class="flex-1 min-w-0">
-    <label class="text-[11px] font-semibold text-ink-sec uppercase tracking-wide block mb-1.5">Category</label>
-    <select id="callerCategoryInput"
-      class="w-full px-3 py-2 border border-border rounded-lg text-sm text-ink bg-white transition">
-      <option value="general">General</option>
-      <option value="customer">Customer</option>
-      <option value="supplier">Supplier</option>
-      <option value="other">Other</option>
-    </select>
-  </div>
-  <label class="flex items-center gap-1.5 text-xs font-semibold text-ink-sec border border-border rounded-lg px-3 py-2 cursor-pointer whitespace-nowrap">
-    <input id="callerVipInput" type="checkbox"> VIP
-  </label>
+<!-- Relation -->
+<div class="px-4 pb-2">
+  <label class="text-[11px] font-semibold text-ink-sec uppercase tracking-wide block mb-1.5">Caller is</label>
+  <select id="callerRelationInput"
+    class="w-full px-3 py-2 border border-border rounded-lg text-sm text-ink bg-white transition">
+    <option value="patient">Patient himself/herself</option>
+    <option value="relative">Relative</option>
+    <option value="other">Other</option>
+  </select>
 </div>
 
 <!-- Notes -->
@@ -97,21 +91,20 @@ input:focus,textarea:focus{outline:none;box-shadow:0 0 0 2px rgba(8,123,120,0.15
 </div>
 
 <script>
-let callerData = {number:'', name:'', notes:'', callId:-1, company:'', email:'', category:'general', vip:0};
+let callerData = {number:'', name:'', notes:'', callId:-1, file_no:'', phone2:'', relation:'patient'};
 
 function updateCallerInfo(number, name, notes, callId, extra) {
   extra = extra || {};
   callerData = {number, name: name || 'Unknown', notes: notes || '', callId,
-    company: extra.company || '', email: extra.email || '',
-    category: extra.category || 'general', vip: extra.vip ? 1 : 0};
+    file_no: extra.file_no || '', phone2: extra.phone2 || '',
+    relation: extra.relation || 'patient'};
   document.getElementById('callerName').textContent = callerData.name;
   document.getElementById('callerNumber').textContent = callerData.number || '-';
   document.getElementById('callerNameInput').value = callerData.name !== 'Unknown' ? callerData.name : '';
   document.getElementById('notesInput').value = callerData.notes;
-  document.getElementById('callerCompanyInput').value = callerData.company;
-  document.getElementById('callerEmailInput').value = callerData.email;
-  document.getElementById('callerCategoryInput').value = callerData.category;
-  document.getElementById('callerVipInput').checked = !!callerData.vip;
+  document.getElementById('callerFileNoInput').value = callerData.file_no;
+  document.getElementById('callerPhone2Input').value = callerData.phone2;
+  document.getElementById('callerRelationInput').value = callerData.relation;
   document.getElementById('avatar').textContent = (callerData.name || '?').charAt(0).toUpperCase();
 
   const btn = document.getElementById('saveBtn');
@@ -162,10 +155,9 @@ function notifySaveResult(ok) {
 function save() {
   var name = document.getElementById('callerNameInput').value.trim();
   var notes = document.getElementById('notesInput').value.trim();
-  var company = document.getElementById('callerCompanyInput').value.trim();
-  var email = document.getElementById('callerEmailInput').value.trim();
-  var category = document.getElementById('callerCategoryInput').value;
-  var vip = document.getElementById('callerVipInput').checked ? 1 : 0;
+  var file_no = document.getElementById('callerFileNoInput').value.trim();
+  var phone2 = document.getElementById('callerPhone2Input').value.trim();
+  var relation = document.getElementById('callerRelationInput').value;
   var btn = document.getElementById('saveBtn');
   btn.textContent = 'Saving...';
   btn.disabled = true;
@@ -173,7 +165,7 @@ function save() {
 
   try {
     if (window.chrome && window.chrome.webview) {
-      window.chrome.webview.postMessage(JSON.stringify({action:'save', name:name, notes:notes, company:company, email:email, category:category, vip:vip}));
+      window.chrome.webview.postMessage(JSON.stringify({action:'save', name:name, notes:notes, file_no:file_no, phone2:phone2, relation:relation}));
     }
   } catch(e) {
     btn.textContent = 'Save';

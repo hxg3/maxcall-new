@@ -140,8 +140,7 @@ CrmPopupDlg::CrmPopupDlg(CWnd* pParent)
 	: CBaseDialog(CrmPopupDlg::IDD, pParent)
 {
 	call_id = PJSUA_INVALID_ID;
-	category = _T("general");
-	vip = 0;
+	relation = _T("patient");
 	m_controller = nullptr;
 	m_webView = nullptr;
 	m_env = nullptr;
@@ -324,10 +323,9 @@ void CrmPopupDlg::ProcessWebViewMessage(CString& message)
 			if(fp = fopen("maxcall_debug.log", "a")) { fprintf(fp, "Action is save\n"); fclose(fp); }
 			callerName = JsonStringToCString(root["name"]);
 			notes = JsonStringToCString(root["notes"]);
-			company = JsonStringToCString(root["company"]);
-			email = JsonStringToCString(root["email"]);
-			category = JsonStringToCString(root["category"]);
-			vip = (root["vip"].isInt() && root["vip"].asInt() != 0) ? 1 : 0;
+			fileNo = JsonStringToCString(root["file_no"]);
+			phone2 = JsonStringToCString(root["phone2"]);
+			relation = JsonStringToCString(root["relation"]);
 
 			if(fp = fopen("maxcall_debug.log", "a")) { fprintf(fp, "Calling SaveCallerInfo\n"); fclose(fp); }
 			SaveCallerInfo();
@@ -422,14 +420,14 @@ void CrmPopupDlg::UpdateWebView()
 	CString escapedNumber = EscapeJson(cleanNumber);
 	CString escapedName = EscapeJson(callerName);
 	CString escapedNotes = EscapeJson(notes);
-	CString escapedCompany = EscapeJson(company);
-	CString escapedEmail = EscapeJson(email);
-	CString escapedCategory = EscapeJson(category);
+	CString escapedFileNo = EscapeJson(fileNo);
+	CString escapedPhone2 = EscapeJson(phone2);
+	CString escapedRelation = EscapeJson(relation);
 
 	CString js;
-	js.Format(_T("updateCallerInfo('%s', '%s', '%s', %d, {company:'%s',email:'%s',category:'%s',vip:%d})"),
+	js.Format(_T("updateCallerInfo('%s', '%s', '%s', %d, {file_no:'%s',phone2:'%s',relation:'%s'})"),
 		escapedNumber, escapedName, escapedNotes, call_id,
-		escapedCompany, escapedEmail, escapedCategory, vip);
+		escapedFileNo, escapedPhone2, escapedRelation);
 
 	ICoreWebView2* wv = static_cast<ICoreWebView2*>(m_webView);
 	if (wv) {
@@ -459,13 +457,13 @@ void CrmPopupDlg::SaveCallerInfo()
 	CString phone = EscapeJson(cleanNumber);
 	CString name = EscapeJson(callerName);
 	CString callerNotes = EscapeJson(notes);
-	CString callerCompany = EscapeJson(company);
-	CString callerEmail = EscapeJson(email);
-	CString callerCategory = EscapeJson(category);
+	CString callerFileNo = EscapeJson(fileNo);
+	CString callerPhone2 = EscapeJson(phone2);
+	CString callerRelation = EscapeJson(relation);
 
 	if(fp = fopen("maxcall_debug.log", "a")) { fprintf(fp, "Formatting postData\n"); fclose(fp); }
 	CString postData;
-	postData.Format(_T("{\"phone\":\"%s\",\"name\":\"%s\",\"notes\":\"%s\",\"company\":\"%s\",\"email\":\"%s\",\"category\":\"%s\",\"vip\":%d}"), (LPCTSTR)phone, (LPCTSTR)name, (LPCTSTR)callerNotes, (LPCTSTR)callerCompany, (LPCTSTR)callerEmail, (LPCTSTR)callerCategory, vip);
+	postData.Format(_T("{\"phone\":\"%s\",\"name\":\"%s\",\"notes\":\"%s\",\"file_no\":\"%s\",\"phone2\":\"%s\",\"relation\":\"%s\"}"), (LPCTSTR)phone, (LPCTSTR)name, (LPCTSTR)callerNotes, (LPCTSTR)callerFileNo, (LPCTSTR)callerPhone2, (LPCTSTR)callerRelation);
 
 	CString headers = _T("Content-Type: application/json; charset=utf-8");
 
@@ -489,17 +487,14 @@ LRESULT CrmPopupDlg::OnCrmLoadResult(WPARAM wParam, LPARAM lParam)
 				if (caller["notes"].isString()) {
 					notes = JsonStringToCString(caller["notes"]);
 				}
-				if (caller["company"].isString()) {
-					company = JsonStringToCString(caller["company"]);
+				if (caller["file_no"].isString()) {
+					fileNo = JsonStringToCString(caller["file_no"]);
 				}
-				if (caller["email"].isString()) {
-					email = JsonStringToCString(caller["email"]);
+				if (caller["phone2"].isString()) {
+					phone2 = JsonStringToCString(caller["phone2"]);
 				}
-				if (caller["category"].isString()) {
-					category = JsonStringToCString(caller["category"]);
-				}
-				if (caller["vip"].isInt()) {
-					vip = caller["vip"].asInt() != 0 ? 1 : 0;
+				if (caller["relation"].isString()) {
+					relation = JsonStringToCString(caller["relation"]);
 				}
 			}
 		}
