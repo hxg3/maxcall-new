@@ -73,9 +73,9 @@ js.Format(_T("onCallState(%d, '%s')"), call_id, _T("active"));
 
 | الاتجاه | الشكل |
 |---|---|
-| JS → C++ | `{action:'save', name: string, notes: string}` ثم `SaveCallerInfo()` → `POST /api/callers` |
+| JS → C++ | `{action:'save', name: string, notes: string, company?: string, email?: string, category?: string, vip?: 0\|1}` ثم `SaveCallerInfo()` → `POST /api/callers` |
 | JS → C++ | `{action:'dismiss'}` → `ShowWindow(SW_HIDE)` |
-| C++ → JS | `updateCallerInfo(number, name, notes, call_id)` |
+| C++ → JS | `updateCallerInfo(number, name, notes, call_id, extra?: {company, email, category, vip})` |
 | C++ → JS | `notifySaveResult(true \| false)` |
 
 ## 4) ملاحظات التنفيذ لـ C++

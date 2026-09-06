@@ -39,8 +39,8 @@ END_MESSAGE_MAP()
 
 int CButtonBottom::OnCreate(LPCREATESTRUCT lpCreateStruct)
 {
-	textColor = MAXCARE_TEXT_MUTED;
-	faceColor = MAXCARE_WHITE;
+	textColor = MAXCALL_TEXT_MUTED;
+	faceColor = MAXCALL_WHITE;
 	UpdateColor();
 	return CMFCButton::OnCreate(lpCreateStruct);
 }
@@ -57,8 +57,8 @@ void CButtonBottom::UpdateColor(int nCheck)
 		nCheck = GetCheck();
 	}
 	if (nCheck) {
-		SetTextColor(MAXCARE_WHITE);
-		SetFaceColor(MAXCARE_TEAL, true);
+		SetTextColor(MAXCALL_WHITE);
+		SetFaceColor(MAXCALL_TEAL, true);
 	} else {
 		SetTextColor(textColor);
 		SetFaceColor(faceColor);

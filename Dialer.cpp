@@ -969,7 +969,7 @@ HBRUSH Dialer::OnCtlColor(CDC* pDC, CWnd *pWnd, UINT nCtlColor)
 		|| pWnd == &m_ButtonPlusInput
 		|| pWnd == &m_ButtonPlusOutput
 		) {
-		pDC->SetTextColor(MAXCARE_TEXT_MUTED);
+		pDC->SetTextColor(MAXCALL_TEXT_MUTED);
 	}
 	return br;
 }

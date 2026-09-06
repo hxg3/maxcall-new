@@ -55,13 +55,13 @@ BOOL RinginDlg::OnInitDialog() {
 	SetIcon(hIcon, TRUE);
 	SetIcon(hIcon, FALSE);
 
-	SetClassLongPtr(m_hWnd, GCLP_HBRBACKGROUND, (LONG_PTR)CreateSolidBrush(MAXCARE_SURFACE));
+	SetClassLongPtr(m_hWnd, GCLP_HBRBACKGROUND, (LONG_PTR)CreateSolidBrush(MAXCALL_SURFACE));
 
 	BOOL darkMode = TRUE;
 	DwmSetWindowAttribute(m_hWnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &darkMode, sizeof(darkMode));
-	COLORREF titleColor = MAXCARE_TEAL;
+	COLORREF titleColor = MAXCALL_TEAL;
 	DwmSetWindowAttribute(m_hWnd, DWMWA_CAPTION_COLOR, &titleColor, sizeof(titleColor));
-	COLORREF txtColor = MAXCARE_WHITE;
+	COLORREF txtColor = MAXCALL_WHITE;
 	DwmSetWindowAttribute(m_hWnd, DWMWA_TEXT_COLOR, &txtColor, sizeof(txtColor));
 
 	AutoMove(IDC_ANSWER, 0, 100, 0, 0);

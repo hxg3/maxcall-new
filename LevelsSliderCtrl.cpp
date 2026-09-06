@@ -29,7 +29,7 @@ void CLevelsSliderCtrl::OnCustomDraw(NMHDR *pNotifyStruct, LRESULT *result)
 			else {
 				rect.DeflateRect(MulDiv(2, dpiX, 96), MulDiv(5, dpiX, 96));
 			}
-			pDC->FillSolidRect(&rect, MAXCARE_TEAL);
+			pDC->FillSolidRect(&rect, MAXCALL_TEAL);
 			*result = CDRF_SKIPDEFAULT;
 			break;
 		}
@@ -56,9 +56,9 @@ void CLevelsSliderCtrl::OnCustomDraw(NMHDR *pNotifyStruct, LRESULT *result)
 					pDC->FillSolidRect(CRect(rect.left, rect.top, rect.right, rect.bottom), pDC->GetBkColor());
 				}
 				else {
-					pDC->FillSolidRect(CRect(rect.left, rect.top, rect.right, rect.bottom), MAXCARE_BORDER);
+					pDC->FillSolidRect(CRect(rect.left, rect.top, rect.right, rect.bottom), MAXCALL_BORDER);
 				}
-				pDC->FillSolidRect(CRect(rect.left, selmin, rect.right, selmax), hot ? MAXCARE_ERROR : MAXCARE_TEAL);
+				pDC->FillSolidRect(CRect(rect.left, selmin, rect.right, selmax), hot ? MAXCALL_ERROR : MAXCALL_TEAL);
 				pDC->ExcludeClipRect(rect);
 			}
 			else {
@@ -75,9 +75,9 @@ void CLevelsSliderCtrl::OnCustomDraw(NMHDR *pNotifyStruct, LRESULT *result)
 					pDC->FillSolidRect(CRect(rect.left, rect.top, rect.right, rect.bottom), pDC->GetBkColor());
 				}
 				else {
-					pDC->FillSolidRect(CRect(rect.left, rect.top, rect.right, rect.bottom), MAXCARE_BORDER);
+					pDC->FillSolidRect(CRect(rect.left, rect.top, rect.right, rect.bottom), MAXCALL_BORDER);
 				}
-				pDC->FillSolidRect(CRect(selmin, rect.top, selmax, rect.bottom), hot ? MAXCARE_ERROR : MAXCARE_TEAL);
+				pDC->FillSolidRect(CRect(selmin, rect.top, selmax, rect.bottom), hot ? MAXCALL_ERROR : MAXCALL_TEAL);
 				pDC->ExcludeClipRect(rect);
 			}
 			*result = CDRF_DODEFAULT | CDRF_NOTIFYPOSTPAINT;

@@ -95,20 +95,20 @@
 #define _GLOBAL_DIALER_CALL_COLOR RGB(8, 123, 120)
 #define _GLOBAL_DIALER_END_COLOR RGB(201, 74, 74)
 
-// === MaxCare Hospital Brand Colors ===
-#define MAXCARE_TEAL        RGB(8, 123, 120)      // #087B78 - Primary
-#define MAXCARE_TEAL_DARK   RGB(7, 91, 89)        // #075B59 - Primary Dark
-#define MAXCARE_TEAL_LIGHT  RGB(10, 157, 152)     // #0A9D98 - Primary Light
-#define MAXCARE_GOLD        RGB(214, 166, 42)      // #D6A62A - Accent
-#define MAXCARE_GOLD_SOFT   RGB(244, 231, 191)     // #F4E7BF - Accent Soft
-#define MAXCARE_SURFACE     RGB(248, 250, 250)     // #F8FAFA - Background
-#define MAXCARE_WHITE       RGB(255, 255, 255)     // #FFFFFF
-#define MAXCARE_TEAL_SOFT   RGB(221, 242, 240)     // #DDF2F0 - Teal Background
-#define MAXCARE_TEXT        RGB(31, 41, 41)         // #1F2929 - Primary Text
-#define MAXCARE_TEXT_SEC    RGB(61, 75, 75)         // #3D4B4B - Secondary Text
-#define MAXCARE_TEXT_MUTED  RGB(113, 128, 128)      // #718080 - Muted Text
-#define MAXCARE_BORDER      RGB(231, 236, 236)      // #E7ECEC - Border
-#define MAXCARE_SUCCESS     RGB(33, 138, 103)       // #218A67 - Success
-#define MAXCARE_WARNING     RGB(212, 154, 36)       // #D49A24 - Warning
-#define MAXCARE_ERROR       RGB(201, 74, 74)        // #C94A4A - Error
-#define MAXCARE_INFO        RGB(47, 128, 168)       // #2F80A8 - Info
+// === MaxCall Brand Colors ===
+#define MAXCALL_TEAL        RGB(8, 123, 120)      // #087B78 - Primary
+#define MAXCALL_TEAL_DARK   RGB(7, 91, 89)        // #075B59 - Primary Dark
+#define MAXCALL_TEAL_LIGHT  RGB(10, 157, 152)     // #0A9D98 - Primary Light
+#define MAXCALL_GOLD        RGB(214, 166, 42)      // #D6A62A - Accent
+#define MAXCALL_GOLD_SOFT   RGB(244, 231, 191)     // #F4E7BF - Accent Soft
+#define MAXCALL_SURFACE     RGB(248, 250, 250)     // #F8FAFA - Background
+#define MAXCALL_WHITE       RGB(255, 255, 255)     // #FFFFFF
+#define MAXCALL_TEAL_SOFT   RGB(221, 242, 240)     // #DDF2F0 - Teal Background
+#define MAXCALL_TEXT        RGB(31, 41, 41)         // #1F2929 - Primary Text
+#define MAXCALL_TEXT_SEC    RGB(61, 75, 75)         // #3D4B4B - Secondary Text
+#define MAXCALL_TEXT_MUTED  RGB(113, 128, 128)      // #718080 - Muted Text
+#define MAXCALL_BORDER      RGB(231, 236, 236)      // #E7ECEC - Border
+#define MAXCALL_SUCCESS     RGB(33, 138, 103)       // #218A67 - Success
+#define MAXCALL_WARNING     RGB(212, 154, 36)       // #D49A24 - Warning
+#define MAXCALL_ERROR       RGB(201, 74, 74)        // #C94A4A - Error
+#define MAXCALL_INFO        RGB(47, 128, 168)       // #2F80A8 - Info

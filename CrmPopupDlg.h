@@ -26,6 +26,10 @@ public:
 	CString callerNumber;
 	CString callerName;
 	CString notes;
+	CString company;
+	CString email;
+	CString category;
+	int vip;
 
 	void LoadCallerInfo();
 	void FetchCallerHistory();

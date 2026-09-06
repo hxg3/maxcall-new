@@ -311,7 +311,7 @@ BOOL CmicrosipApp::InitInstance()
 	// Register this class so that MFC can use it.
 	if (!::AfxRegisterClass(&wc)) return FALSE;
 
-	// MaxCare Login Dialog
+	// MaxCall Login Dialog
 	if (lstrcmp(theApp.m_lpCmdLine, _T("/minimized")) != 0
 		&& lstrcmp(theApp.m_lpCmdLine, _T("/hidden")) != 0
 		&& lstrcmp(theApp.m_lpCmdLine, _T("/exit")) != 0

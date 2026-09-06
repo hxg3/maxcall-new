@@ -41,8 +41,8 @@ BOOL CButtonEx::EnableWindow(BOOL bEnable)
 		SetFaceColor(m_FaceColor, true);
 	}
 	else {
-		SetTextColor(MAXCARE_TEXT_MUTED);
-		SetFaceColor(MAXCARE_BORDER, true);
+		SetTextColor(MAXCALL_TEXT_MUTED);
+		SetFaceColor(MAXCALL_BORDER, true);
 	}
 	return CMFCButton::EnableWindow(bEnable);
 }

@@ -1969,12 +1969,12 @@ BOOL CmainDlg::OnInitDialog()
 	SetIcon(m_hIcon, TRUE);			// Set big icon
 	SetIcon(m_hIcon, FALSE);		// Set small icon
 
-	// MaxCare teal title bar
+	// MaxCall teal title bar
 	BOOL darkMode = TRUE;
 	DwmSetWindowAttribute(m_hWnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &darkMode, sizeof(darkMode));
-	COLORREF titleColor = MAXCARE_TEAL;
+	COLORREF titleColor = MAXCALL_TEAL;
 	DwmSetWindowAttribute(m_hWnd, DWMWA_CAPTION_COLOR, &titleColor, sizeof(titleColor));
-	COLORREF txtColor = MAXCARE_WHITE;
+	COLORREF txtColor = MAXCALL_WHITE;
 	DwmSetWindowAttribute(m_hWnd, DWMWA_TEXT_COLOR, &txtColor, sizeof(txtColor));
 
 	// add tray icon or set tnd.hWnd = NULL;
@@ -4917,9 +4917,9 @@ void CmainDlg::OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT lpDrawItemStruct)
 		CRect rc = lpDrawItemStruct->rcItem;
 		
 		// Fill background with top bar surface color
-		pDC->FillSolidRect(&rc, MAXCARE_SURFACE);
+		pDC->FillSolidRect(&rc, MAXCALL_SURFACE);
 		
-		COLORREF iconCol = bSelected ? MAXCARE_TEAL : MAXCARE_TEXT_MUTED;
+		COLORREF iconCol = bSelected ? MAXCALL_TEAL : MAXCALL_TEXT_MUTED;
 		
 		// Hover effect on inactive tab
 		if (!bSelected) {
@@ -4927,10 +4927,10 @@ void CmainDlg::OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT lpDrawItemStruct)
 			GetCursorPos(&pt);
 			tab->ScreenToClient(&pt);
 			if (rc.PtInRect(pt)) {
-				iconCol = MAXCARE_TEXT;
+				iconCol = MAXCALL_TEXT;
 				CRect hoverRc = rc; hoverRc.DeflateRect(2, 2);
 				CPen nullPen(PS_NULL, 0, RGB(0,0,0));
-				CBrush hoverBrush(MAXCARE_TEAL_SOFT);
+				CBrush hoverBrush(MAXCALL_TEAL_SOFT);
 				CPen* pOldPen = pDC->SelectObject(&nullPen);
 				CBrush* pOldBrush = pDC->SelectObject(&hoverBrush);
 				pDC->RoundRect(&hoverRc, CPoint(6, 6));
@@ -4948,7 +4948,7 @@ void CmainDlg::OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT lpDrawItemStruct)
 			indicatorRc.top = indicatorRc.bottom - 3;
 			indicatorRc.left += 4;
 			indicatorRc.right -= 4;
-			pDC->FillSolidRect(&indicatorRc, MAXCARE_TEAL);
+			pDC->FillSolidRect(&indicatorRc, MAXCALL_TEAL);
 		}
 		
 		return;
@@ -4963,38 +4963,38 @@ void CmainDlg::OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT lpDrawItemStruct)
 		BOOL bActive = isPin && accountSettings.alwaysOnTop;
 
 		// Blend with top bar, then draw a real button face like Mute/Hold (BS_PUSHLIKE)
-		pDC->FillSolidRect(&rc, MAXCARE_SURFACE);
+		pDC->FillSolidRect(&rc, MAXCALL_SURFACE);
 
 		CRect btnRc = rc;
 		btnRc.DeflateRect(1, 1);
 
-		COLORREF faceCol = MAXCARE_WHITE;
-		COLORREF borderCol = MAXCARE_BORDER;
-		COLORREF iconCol = MAXCARE_TEXT_SEC;
+		COLORREF faceCol = MAXCALL_WHITE;
+		COLORREF borderCol = MAXCALL_BORDER;
+		COLORREF iconCol = MAXCALL_TEXT_SEC;
 
 		if (isPin) {
 			if (bPressed) {
-				faceCol = MAXCARE_TEAL_DARK;
-				borderCol = MAXCARE_TEAL_DARK;
-				iconCol = MAXCARE_WHITE;
+				faceCol = MAXCALL_TEAL_DARK;
+				borderCol = MAXCALL_TEAL_DARK;
+				iconCol = MAXCALL_WHITE;
 			} else if (bActive) {
-				faceCol = bHot ? MAXCARE_TEAL_LIGHT : MAXCARE_TEAL;
-				borderCol = bHot ? MAXCARE_TEAL_LIGHT : MAXCARE_TEAL;
-				iconCol = MAXCARE_WHITE;
+				faceCol = bHot ? MAXCALL_TEAL_LIGHT : MAXCALL_TEAL;
+				borderCol = bHot ? MAXCALL_TEAL_LIGHT : MAXCALL_TEAL;
+				iconCol = MAXCALL_WHITE;
 			} else if (bHot) {
-				faceCol = MAXCARE_TEAL_SOFT;
-				borderCol = MAXCARE_TEAL;
-				iconCol = MAXCARE_TEAL;
+				faceCol = MAXCALL_TEAL_SOFT;
+				borderCol = MAXCALL_TEAL;
+				iconCol = MAXCALL_TEAL;
 			}
 		} else {
 			if (bPressed) {
-				faceCol = MAXCARE_ERROR;
-				borderCol = MAXCARE_ERROR;
-				iconCol = MAXCARE_WHITE;
+				faceCol = MAXCALL_ERROR;
+				borderCol = MAXCALL_ERROR;
+				iconCol = MAXCALL_WHITE;
 			} else if (bHot) {
 				faceCol = RGB(253, 235, 235);
-				borderCol = MAXCARE_ERROR;
-				iconCol = MAXCARE_ERROR;
+				borderCol = MAXCALL_ERROR;
+				iconCol = MAXCALL_ERROR;
 			}
 		}
 

@@ -140,6 +140,8 @@ CrmPopupDlg::CrmPopupDlg(CWnd* pParent)
 	: CBaseDialog(CrmPopupDlg::IDD, pParent)
 {
 	call_id = PJSUA_INVALID_ID;
+	category = _T("general");
+	vip = 0;
 	m_controller = nullptr;
 	m_webView = nullptr;
 	m_env = nullptr;
@@ -189,13 +191,13 @@ BOOL CrmPopupDlg::OnInitDialog()
 	SetIcon(hIcon, TRUE);
 	SetIcon(hIcon, FALSE);
 
-	SetClassLongPtr(m_hWnd, GCLP_HBRBACKGROUND, (LONG_PTR)CreateSolidBrush(MAXCARE_SURFACE));
+	SetClassLongPtr(m_hWnd, GCLP_HBRBACKGROUND, (LONG_PTR)CreateSolidBrush(MAXCALL_SURFACE));
 
 	BOOL darkMode = TRUE;
 	DwmSetWindowAttribute(m_hWnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &darkMode, sizeof(darkMode));
-	COLORREF titleColor = MAXCARE_TEAL;
+	COLORREF titleColor = MAXCALL_TEAL;
 	DwmSetWindowAttribute(m_hWnd, DWMWA_CAPTION_COLOR, &titleColor, sizeof(titleColor));
-	COLORREF txtColor = MAXCARE_WHITE;
+	COLORREF txtColor = MAXCALL_WHITE;
 	DwmSetWindowAttribute(m_hWnd, DWMWA_TEXT_COLOR, &txtColor, sizeof(txtColor));
 
 	CRect screenRect;
@@ -322,6 +324,10 @@ void CrmPopupDlg::ProcessWebViewMessage(CString& message)
 			if(fp = fopen("maxcall_debug.log", "a")) { fprintf(fp, "Action is save\n"); fclose(fp); }
 			callerName = JsonStringToCString(root["name"]);
 			notes = JsonStringToCString(root["notes"]);
+			company = JsonStringToCString(root["company"]);
+			email = JsonStringToCString(root["email"]);
+			category = JsonStringToCString(root["category"]);
+			vip = (root["vip"].isInt() && root["vip"].asInt() != 0) ? 1 : 0;
 
 			if(fp = fopen("maxcall_debug.log", "a")) { fprintf(fp, "Calling SaveCallerInfo\n"); fclose(fp); }
 			SaveCallerInfo();
@@ -416,10 +422,14 @@ void CrmPopupDlg::UpdateWebView()
 	CString escapedNumber = EscapeJson(cleanNumber);
 	CString escapedName = EscapeJson(callerName);
 	CString escapedNotes = EscapeJson(notes);
+	CString escapedCompany = EscapeJson(company);
+	CString escapedEmail = EscapeJson(email);
+	CString escapedCategory = EscapeJson(category);
 
 	CString js;
-	js.Format(_T("updateCallerInfo('%s', '%s', '%s', %d)"),
-		escapedNumber, escapedName, escapedNotes, call_id);
+	js.Format(_T("updateCallerInfo('%s', '%s', '%s', %d, {company:'%s',email:'%s',category:'%s',vip:%d})"),
+		escapedNumber, escapedName, escapedNotes, call_id,
+		escapedCompany, escapedEmail, escapedCategory, vip);
 
 	ICoreWebView2* wv = static_cast<ICoreWebView2*>(m_webView);
 	if (wv) {
@@ -449,10 +459,13 @@ void CrmPopupDlg::SaveCallerInfo()
 	CString phone = EscapeJson(cleanNumber);
 	CString name = EscapeJson(callerName);
 	CString callerNotes = EscapeJson(notes);
+	CString callerCompany = EscapeJson(company);
+	CString callerEmail = EscapeJson(email);
+	CString callerCategory = EscapeJson(category);
 
 	if(fp = fopen("maxcall_debug.log", "a")) { fprintf(fp, "Formatting postData\n"); fclose(fp); }
 	CString postData;
-	postData.Format(_T("{\"phone\":\"%s\",\"name\":\"%s\",\"notes\":\"%s\"}"), (LPCTSTR)phone, (LPCTSTR)name, (LPCTSTR)callerNotes);
+	postData.Format(_T("{\"phone\":\"%s\",\"name\":\"%s\",\"notes\":\"%s\",\"company\":\"%s\",\"email\":\"%s\",\"category\":\"%s\",\"vip\":%d}"), (LPCTSTR)phone, (LPCTSTR)name, (LPCTSTR)callerNotes, (LPCTSTR)callerCompany, (LPCTSTR)callerEmail, (LPCTSTR)callerCategory, vip);
 
 	CString headers = _T("Content-Type: application/json; charset=utf-8");
 
@@ -475,6 +488,18 @@ LRESULT CrmPopupDlg::OnCrmLoadResult(WPARAM wParam, LPARAM lParam)
 				}
 				if (caller["notes"].isString()) {
 					notes = JsonStringToCString(caller["notes"]);
+				}
+				if (caller["company"].isString()) {
+					company = JsonStringToCString(caller["company"]);
+				}
+				if (caller["email"].isString()) {
+					email = JsonStringToCString(caller["email"]);
+				}
+				if (caller["category"].isString()) {
+					category = JsonStringToCString(caller["category"]);
+				}
+				if (caller["vip"].isInt()) {
+					vip = caller["vip"].asInt() != 0 ? 1 : 0;
 				}
 			}
 		}

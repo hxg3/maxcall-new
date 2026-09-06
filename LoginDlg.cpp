@@ -59,9 +59,9 @@ BOOL LoginDlg::OnInitDialog()
 
 	BOOL darkMode = TRUE;
 	DwmSetWindowAttribute(m_hWnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &darkMode, sizeof(darkMode));
-	COLORREF titleColor = MAXCARE_TEAL;
+	COLORREF titleColor = MAXCALL_TEAL;
 	DwmSetWindowAttribute(m_hWnd, DWMWA_CAPTION_COLOR, &titleColor, sizeof(titleColor));
-	COLORREF txtColor = MAXCARE_WHITE;
+	COLORREF txtColor = MAXCALL_WHITE;
 	DwmSetWindowAttribute(m_hWnd, DWMWA_TEXT_COLOR, &txtColor, sizeof(txtColor));
 
 	m_username = _T("");
@@ -96,7 +96,7 @@ void LoginDlg::OnBnClickedLogin()
 		(LPCTSTR)EscapeLoginJson(m_username),
 		(LPCTSTR)EscapeLoginJson(m_password));
 
-	CString url = _T("http://maxcare.local:3001/api/agent/login");
+	CString url = _T("http://maxcall.local:3001/api/agent/login");
 	CString headers = _T("Content-Type: application/json");
 
 	URLGetAsyncData result = URLGetSync(url, true, jsonData, headers);
@@ -133,7 +133,7 @@ void LoginDlg::OnBnClickedLogin()
 			Json::Value sipServer = response["sip_server"];
 			CString sipServerVal = sipServer.isString() && !sipServer.asString().empty()
 				? MSIP::Utf8DecodeUni(sipServer.asCString())
-				: _T("maxcare.local");
+				: _T("maxcall.local");
 
 			accountSettings.AccountDelete(1);
 

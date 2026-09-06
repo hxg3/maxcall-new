@@ -150,19 +150,19 @@ void CButtonDialer::DrawItem(LPDRAWITEMSTRUCT lpDrawItemStruct)
 		GraphicsPath* path = CreateRoundedRect(rect, 6);
 
 		if (bPressed) {
-			SolidBrush brushPressed(MAXCARE_TEAL_DARK);
+			SolidBrush brushPressed(MAXCALL_TEAL_DARK);
 			graphics.FillPath(&brushPressed, path);
 		}
 		else if (m_bHover) {
-			SolidBrush brushHover(MAXCARE_TEAL_SOFT);
+			SolidBrush brushHover(MAXCALL_TEAL_SOFT);
 			graphics.FillPath(&brushHover, path);
 		}
 		else {
-			SolidBrush brushNormal(MAXCARE_WHITE);
+			SolidBrush brushNormal(MAXCALL_WHITE);
 			graphics.FillPath(&brushNormal, path);
 		}
 
-		Pen penBorder(MAXCARE_BORDER, 1);
+		Pen penBorder(MAXCALL_BORDER, 1);
 		graphics.DrawPath(&penBorder, path);
 
 		delete path;
@@ -175,10 +175,10 @@ void CButtonDialer::DrawItem(LPDRAWITEMSTRUCT lpDrawItemStruct)
 
 		if (!forceNumeric && m_map.Lookup(strTemp, letters)) {
 			if (bPressed) {
-				textColor = MAXCARE_WHITE;
+				textColor = MAXCALL_WHITE;
 			}
 			else {
-				textColor = MAXCARE_TEXT;
+				textColor = MAXCALL_TEXT;
 			}
 			dc.SetTextColor(textColor);
 			dc.SetBkMode(TRANSPARENT);
@@ -190,16 +190,16 @@ void CButtonDialer::DrawItem(LPDRAWITEMSTRUCT lpDrawItemStruct)
 			HFONT hOldFont = (HFONT)SelectObject(dc.m_hDC, m_FontLetters);
 			rtl.left += MulDiv(12, dpiX, 96);
 			rtl.right -= MulDiv(4, dpiX, 96);
-			dc.SetTextColor(bPressed ? RGB(221, 242, 240) : MAXCARE_TEXT_MUTED);
+			dc.SetTextColor(bPressed ? RGB(221, 242, 240) : MAXCALL_TEXT_MUTED);
 			dc.DrawText(letters, rtl, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 			SelectObject(dc.m_hDC, hOldFont);
 		}
 		else {
 			if (forceNumeric) {
-				textColor = bPressed ? MAXCARE_WHITE : MAXCARE_TEXT;
+				textColor = bPressed ? MAXCALL_WHITE : MAXCALL_TEXT;
 			}
 			else {
-				textColor = bPressed ? MAXCARE_WHITE : MAXCARE_TEXT_MUTED;
+				textColor = bPressed ? MAXCALL_WHITE : MAXCALL_TEXT_MUTED;
 			}
 			dc.SetTextColor(textColor);
 			dc.SetBkMode(TRANSPARENT);

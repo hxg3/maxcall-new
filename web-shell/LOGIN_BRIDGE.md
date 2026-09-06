@@ -16,11 +16,11 @@
 3. طلب HTTP من C++ نفسه: `LoginDlg.cpp:94-102` — يبني
    `{"username":"…","password":"…"}` (مع `EscapeLoginJson` في
    `LoginDlg.cpp:13-27`) ويبعثه `POST` إلى
-   `http://maxcare.local:3001/api/agent/login` عبر `URLGetSync`
+   `http://maxcall.local:3001/api/agent/login` عبر `URLGetSync`
    (المعرّفة في `global.*`).
 4. الحسابات تأتي من الخادم لا من الإعدادات المحلية: عند `statusCode == 200`
    و `ok == true` يقرأ `extension` و `name` و `sip_server`
-   (`LoginDlg.cpp:113-136`، والقيمة الاحتياطية `maxcare.local` في السطر 136)،
+   (`LoginDlg.cpp:113-136`، والقيمة الاحتياطية `maxcall.local` في السطر 136)،
    ثم يمسح الحساب 1 (`accountSettings.AccountDelete(1)` في السطر 138)
    ويملأ `accountSettings.account` في الذاكرة فقط: `server`/`domain` =
    `sip_server`، `port = 5060`، `username`/`authID` = رقم الـ extension،
@@ -43,13 +43,13 @@
 
 | action | الحقول | الأنواع | الوصف |
 |---|---|---|---|
-| `login` | `username`, `password`, `server?` | `string`, `string`, `string?` | بيانات الدخول؛ `server` اختياري (افتراضي `maxcare.local` — نفس احتياطي `LoginDlg.cpp:136`) |
+| `login` | `username`, `password`, `server?` | `string`, `string`, `string?` | بيانات الدخول؛ `server` اختياري (افتراضي `maxcall.local` — نفس احتياطي `LoginDlg.cpp:136`) |
 
 مثال (إلزامي كنص — لا ترسل كائناً خاماً):
 
 ```js
 window.chrome.webview.postMessage(JSON.stringify({
-  action: 'login', username: '101', password: 'secret', server: 'maxcare.local'
+  action: 'login', username: '101', password: 'secret', server: 'maxcall.local'
 }));
 ```
 
@@ -65,7 +65,7 @@ window.chrome.webview.postMessage(JSON.stringify({
 3. يملك C++ طلب HTTP (نفس `URLGetSync` + `EscapeLoginJson` في
    `LoginDlg.cpp:13-27`) — لا تبعث JS كلمة المرور لأي مكان آخر.
    عنوان الطلب: `http://<server>:3001/api/agent/login` (الأصل مثبّت على
-   `maxcare.local` في `LoginDlg.cpp:99`؛ هنا `<server>` من حقل `server`).
+   `maxcall.local` في `LoginDlg.cpp:99`؛ هنا `<server>` من حقل `server`).
 4. تحقق C++ يعكس `LoginDlg.cpp:82-85`: ارفض `username`/`password`
    الفارغين عبر `onLoginError` بدل `AfxMessageBox`.
 5. خارج WebView2 (فتح مباشر في متصفح) تعمل الصفحة بوضع fallback:
@@ -111,7 +111,7 @@ js.Format(_T("onLoginBusy(false)"));
 |---|---|---|
 | `loginUser` | `input` | Extension / Username (يرسل كـ `username`) |
 | `loginPass` | `input[type=password]` | يرسل كـ `password` |
-| `loginServer` | `input` | اختياري، القيمة الافتراضية `maxcare.local` |
+| `loginServer` | `input` | اختياري، القيمة الافتراضية `maxcall.local` |
 | `btnSignIn` | `button[type=submit]` | يعطَّل أثناء `onLoginBusy(true)` |
 | `loginBtnLabel` | `span` | `Sign in` / `Signing in…` |
 | `loginSpinner` | `svg.animate-spin` | يظهر أثناء `onLoginBusy(true)` |

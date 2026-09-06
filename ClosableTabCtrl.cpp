@@ -323,13 +323,13 @@ void CClosableTabCtrl::DrawItem(LPDRAWITEMSTRUCT lpDIS)
 			rectFill.top = rect.top+1;
 			rectFill.right = rect.right-1;
 			rectFill.bottom = rect.bottom;
-			pDC->FillSolidRect(rectFill, MAXCARE_SURFACE);
+			pDC->FillSolidRect(rectFill, MAXCALL_SURFACE);
 	}
 
 	int iOldBkMode = pDC->SetBkMode(TRANSPARENT);
 
 	if (bSelected) {
-		CPen penLine(PS_SOLID, 3, MAXCARE_TEAL);
+		CPen penLine(PS_SOLID, 3, MAXCALL_TEAL);
 		CPen* pOldPen = pDC->SelectObject(&penLine);
 		int lineY = rcFullItem.bottom - 1;
 		pDC->MoveTo(rcFullItem.left + 2, lineY);
@@ -381,13 +381,13 @@ void CClosableTabCtrl::DrawItem(LPDRAWITEMSTRUCT lpDIS)
 
 	COLORREF crOldColor = CLR_NONE;
 	if (tci.dwState & TCIS_HIGHLIGHTED)
-		crOldColor = pDC->SetTextColor(MAXCARE_ERROR);
+		crOldColor = pDC->SetTextColor(MAXCALL_ERROR);
 	else if (bSelected)
-		crOldColor = pDC->SetTextColor(MAXCARE_TEAL);
+		crOldColor = pDC->SetTextColor(MAXCALL_TEAL);
 	else if (bVistaHotTracked)
-		crOldColor = pDC->SetTextColor(MAXCARE_TEAL_DARK);
+		crOldColor = pDC->SetTextColor(MAXCALL_TEAL_DARK);
 	else
-		crOldColor = pDC->SetTextColor(MAXCARE_TEXT_SEC);
+		crOldColor = pDC->SetTextColor(MAXCALL_TEXT_SEC);
 
 	CFont fontTab;
 	fontTab.CreateFont(-11, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,

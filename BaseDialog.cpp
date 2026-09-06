@@ -254,19 +254,19 @@ HBRUSH CBaseDialog::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
 {
 	HBRUSH hbr = CDialog::OnCtlColor(pDC, pWnd, nCtlColor);
 
-	// Apply MaxCare theme colors
+	// Apply MaxCall theme colors
 	if (nCtlColor == CTLCOLOR_DLG || nCtlColor == CTLCOLOR_STATIC)
 	{
-		pDC->SetBkColor(MAXCARE_SURFACE);
-		pDC->SetTextColor(MAXCARE_TEXT);
-		static CBrush br(MAXCARE_SURFACE);
+		pDC->SetBkColor(MAXCALL_SURFACE);
+		pDC->SetTextColor(MAXCALL_TEXT);
+		static CBrush br(MAXCALL_SURFACE);
 		return br;
 	}
 	else if (nCtlColor == CTLCOLOR_EDIT)
 	{
-		pDC->SetBkColor(MAXCARE_WHITE);
-		pDC->SetTextColor(MAXCARE_TEXT);
-		static CBrush brEdit(MAXCARE_WHITE);
+		pDC->SetBkColor(MAXCALL_WHITE);
+		pDC->SetTextColor(MAXCALL_TEXT);
+		static CBrush brEdit(MAXCALL_WHITE);
 		return brEdit;
 	}
 
