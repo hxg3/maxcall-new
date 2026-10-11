@@ -27,6 +27,10 @@ OUT = ROOT / "res" / "main_shell.bin"
 LOGIN_HTML = ROOT / "web-shell" / "login.html"
 LOGIN_OUT = ROOT / "res" / "login.bin"
 TAILWIND = ROOT / "web-shell" / "tailwind.play.js"
+# The caller popup is kept at the repository root and was being copied to
+# res/crm_popup.bin by hand, so it silently kept its cdn.tailwindcss.com tag.
+CRM_POPUP_HTML = ROOT / "crm_popup.html"
+CRM_POPUP_OUT = ROOT / "res" / "crm_popup.bin"
 MARKER = '<script src="./app.js"></script>'
 TAILWIND_TAG = '<script src="https://cdn.tailwindcss.com"></script>'
 
@@ -62,6 +66,14 @@ def main() -> int:
     bundled = bundled.replace("</body>", notify + "</body>", 1)
     OUT.write_bytes(bundled.encode("utf-8"))
     print(f"OK: wrote {OUT} ({OUT.stat().st_size} bytes)")
+    # Caller popup: same offline Tailwind, and generated from the source instead
+    # of being a hand-edited binary.
+    popup = inline_tailwind(CRM_POPUP_HTML.read_text(encoding="utf-8"), CRM_POPUP_HTML)
+    if TAILWIND_TAG in popup:
+        return 1
+    CRM_POPUP_OUT.write_bytes(popup.encode("utf-8"))
+    print(f"OK: wrote {CRM_POPUP_OUT} ({CRM_POPUP_OUT.stat().st_size} bytes)")
+
     # Login page is standalone, but it needs the same offline Tailwind.
     login = inline_tailwind(LOGIN_HTML.read_text(encoding="utf-8"), LOGIN_HTML)
     if TAILWIND_TAG in login:
