@@ -63,7 +63,6 @@ CmainDlg *mainDlg;
 static UINT WM_SHELLHOOKMESSAGE;
 static UINT WM_TASKBARRESTARTMESSAGE;
 
-static bool updateCheckerShow;
 
 static UINT BASED_CODE indicators[] =
 {
@@ -1599,6 +1598,32 @@ void CmainDlg::OnDestroy()
 	}
 	WTSUnRegisterSessionNotification(m_hWnd);
 
+	// A pending update check must never outlive the window it reports to.
+	KillTimer(IDT_TIMER_UPDATE_EXIT);
+
+	// The worker thread writes into m_updateProgress, a member of this object, so
+	// it must be gone before PostNcDestroy runs `delete this`. Cancel() is polled
+	// between read chunks and the socket carries a receive timeout, so this wait
+	// is bounded; the terminate is a last resort against a wedged stack.
+	m_updateBusy = false;
+	m_updateProgress.hNotify = NULL;
+	m_updateProgress.Cancel();
+	if (m_updateThread) {
+		// Only the install worker touches m_updateProgress, so the check worker is
+		// safe to walk away from. For an install, the read timeout bounds the wait;
+		// terminating is the last resort against a wedged network stack, and the
+		// process is exiting anyway so the handful of leaked handles is harmless.
+		if (m_updateState == AppUpdate::StateDownloading
+			|| m_updateState == AppUpdate::StateVerifying
+			|| m_updateState == AppUpdate::StateReady) {
+			if (WaitForSingleObject(m_updateThread, 10000) != WAIT_OBJECT_0) {
+				TerminateThread(m_updateThread, 0);
+			}
+		}
+		CloseHandle(m_updateThread);
+		m_updateThread = NULL;
+	}
+
 	PJDestroy(true);
 
 	accountSettings.SettingsSave();
@@ -1673,7 +1698,10 @@ BEGIN_MESSAGE_MAP(CmainDlg, CBaseDialog)
 	ON_COMMAND(ID_ACCOUNT_EDIT_LOCAL, OnMenuAccountLocalEdit)
 	ON_COMMAND_RANGE(ID_CUSTOM_RANGE, ID_CUSTOM_RANGE + 99, OnMenuCustomRange)
 	ON_COMMAND(ID_UPDATES, OnCheckUpdates)
-	ON_MESSAGE(UM_UPDATE_CHECKER_LOADED, OnUpdateCheckerLoaded)
+	ON_COMMAND(ID_CHECK_UPDATES, &CmainDlg::OnMenuCheckUpdates)
+	ON_COMMAND(ID_INSTALL_UPDATE, &CmainDlg::OnMenuInstallUpdate)
+	ON_COMMAND_RANGE(ID_UPDATE_CHANNEL_RANGE, ID_UPDATE_CHANNEL_RANGE + 1, &CmainDlg::OnMenuUpdateChannel)
+	ON_MESSAGE(UM_UPDATE_EVENT, OnUpdateEvent)
 	ON_COMMAND(ID_SETTINGS, OnMenuSettings)
 	ON_COMMAND(ID_SHORTCUTS, OnMenuShortcuts)
 	ON_COMMAND(ID_ALWAYS_ON_TOP, OnMenuAlwaysOnTop)
@@ -1751,7 +1779,15 @@ CmainDlg::CmainDlg(CWnd* pParent /*=NULL*/)
 
 	this->m_hWnd = NULL;
 	mmNotificationClient = NULL;
-	updateCheckerShow = false;
+
+	m_updateState = AppUpdate::StateNone;
+	m_updatePercent = 0;
+	m_updateMessage.Empty();
+	m_updateBusy = false;
+	m_updateDismissed = false;
+	m_updateThread = NULL;
+	m_updateProgress.hNotify = NULL;
+	m_updateProgress.notifyMessage = 0;
 
 	pageCalls = NULL;
 	pageContacts = NULL;
@@ -2230,6 +2266,10 @@ void CmainDlg::OnCreated()
 		ShowWindow(SW_HIDE);
 	}
 	//--
+	// Periodic release check. The interval itself is enforced inside
+	// ScheduleUpdateCheck; this timer only supplies a tick to compare against.
+	SetTimer(IDT_TIMER_UPDATE, 15 * 60 * 1000, NULL);
+
 	WM_SHELLHOOKMESSAGE = RegisterWindowMessage(_T("SHELLHOOK"));
 	if (WM_SHELLHOOKMESSAGE) {
 		RegisterShellHookWindow(m_hWnd);
@@ -2505,7 +2545,24 @@ void CmainDlg::MainPopupMenu(bool isMenuButton)
 	}
 	CMenu menu;
 	menu.CreatePopupMenu();
+	if (m_updateState == AppUpdate::StateAvailable) {
+		CString item;
+		item.Format(_T("%s  %s"), Translate(_T("Install Update")), m_updateManifest.version);
+		menu.AppendMenu(MF_STRING, ID_INSTALL_UPDATE, item);
+		menu.AppendMenu(MF_SEPARATOR);
+	}
+	menu.AppendMenu(MF_STRING, ID_CHECK_UPDATES, Translate(_T("Check for Updates")));
+	menu.AppendMenu(MF_SEPARATOR);
 	menu.AppendMenu(MF_STRING | (accountSettings.alwaysOnTop ? MF_CHECKED : 0), ID_ALWAYS_ON_TOP, Translate(_T("Always on Top")));
+	menu.AppendMenu(MF_SEPARATOR);
+
+	CMenu channelMenu;
+	channelMenu.CreatePopupMenu();
+	channelMenu.AppendMenu(MF_STRING | (accountSettings.updateChannel == AppUpdate::ChannelStable ? MF_CHECKED : 0),
+		ID_UPDATE_CHANNEL_STABLE, Translate(_T("Stable releases")));
+	channelMenu.AppendMenu(MF_STRING | (accountSettings.updateChannel == AppUpdate::ChannelBeta ? MF_CHECKED : 0),
+		ID_UPDATE_CHANNEL_BETA, Translate(_T("Beta builds")));
+	menu.AppendMenu(MF_POPUP, (UINT_PTR)channelMenu.Detach(), Translate(_T("Update Channel")));
 	menu.AppendMenu(MF_SEPARATOR);
 	menu.AppendMenu(MF_STRING, ID_EXIT, Translate(_T("Exit")));
 
@@ -2820,6 +2877,15 @@ void CmainDlg::OnTimer(UINT_PTR TimerVal)
 			autoAnswerTimerCallId = PJSUA_INVALID_ID;
 		}
 	}
+	else if (TimerVal == IDT_TIMER_UPDATE_EXIT) {
+		// The apply stage is already running and waiting on our PID. If the
+		// graceful shutdown below did not finish in time, stop blocking it.
+		KillTimer(IDT_TIMER_UPDATE_EXIT);
+		ExitProcess(0);
+	}
+	else if (TimerVal == IDT_TIMER_UPDATE) {
+		ScheduleUpdateCheck();
+	}
 	else if (TimerVal == IDT_TIMER_FORWARDING) {
 		KillTimer(IDT_TIMER_FORWARDING);
 		if (forwardingTimerCallId != PJSUA_INVALID_ID) {
@@ -2932,34 +2998,10 @@ void CmainDlg::PJCreateRaw()
 		accountSettings.audioCodecs = _T(_GLOBAL_CODECS_ENABLED);
 	}
 
-	// check updates
-	if (accountSettings.updatesInterval != _T("never"))
-	{
-		CTime t = CTime::GetCurrentTime();
-		time_t time = t.GetTime();
-		int days;
-		if (accountSettings.updatesInterval == _T("daily"))
-		{
-			days = 1;
-		}
-		else if (accountSettings.updatesInterval == _T("monthly"))
-		{
-			days = 30;
-		}
-		else if (accountSettings.updatesInterval == _T("quarterly"))
-		{
-			days = 90;
-		}
-		else
-		{
-			days = 7;
-		}
-		if (accountSettings.updatesInterval == _T("always") || accountSettings.checkUpdatesTime + days * 86400 < time) {
-			CheckUpdates();
-			accountSettings.checkUpdatesTime = time;
-			accountSettings.SettingsSave();
-		}
-	}
+	// Self update. The interval now lives in _GLOBAL_UPDATE_CHECK_INTERVAL_HOURS
+	// and the channel in accountSettings.updateChannel, which replaced the old
+	// updatesInterval ladder that used to own accountSettings.checkUpdatesTime.
+	ScheduleUpdateCheck();
 
 	// pj create
 	pj_status_t status;
@@ -5533,86 +5575,419 @@ void CmainDlg::OpenTransferDlg(CWnd *pParent, msip_action action, pjsua_call_id 
 
 void CmainDlg::OnCheckUpdates()
 {
-	updateCheckerShow = true;
-	CheckUpdates();
+	CheckForUpdates(true);
 }
 
 void CmainDlg::CheckUpdates()
 {
-	// يتم توزيع MaxCall وصيانته مركزياً، لذلك فحص التحديثات من العميل معطّل.
-	return;
-
-	CString url;
-	url = _T("http://update.microsip.org/softphone-update.txt");
-	url.AppendFormat(_T("?version=%s&client=%s"), _T(_GLOBAL_VERSION), CString(urlencode(Utf8EncodeUcs2(_T(_GLOBAL_NAME_NICE)))));
-#ifndef _GLOBAL_VIDEO
-	url.Append(_T("&lite=1"));
-#endif
-	URLGetAsync(url, m_hWnd, UM_UPDATE_CHECKER_LOADED);
+	// Legacy entry point (the ID_UPDATES command). Always silent: the startup
+	// path below still calls this, and a modal box per launch is unacceptable.
+	CheckForUpdates(false);
 }
 
-LRESULT CmainDlg::OnUpdateCheckerLoaded(WPARAM wParam, LPARAM lParam)
+// ---------------------------------------------------------------------------
+// Self update
+//
+// The heavy lifting lives in AppUpdater.cpp. This side only owns the policy:
+// when to check, what to tell the user, and when to hand control to the
+// downloaded build.
+// ---------------------------------------------------------------------------
+
+struct SUpdateJob
 {
-	bool found = false;
-	URLGetAsyncData *response = (URLGetAsyncData *)wParam;
-	if (response->statusCode == 200) {
-		if (!response->body.IsEmpty() && response->body.Left(4) == "http") {
-			int pos = response->body.Find("\n");
-			if (pos > 0) {
-				CStringA url = response->body.Left(pos);
-				url.Trim();
-				bool allowed = false;
-				DWORD dwServiceType;
-				CString strServer;
-				CString strObject;
-				INTERNET_PORT nPort;
-				if (AfxParseURL(CString(url), dwServiceType, strServer, strObject, nPort) && dwServiceType == AFX_INET_SERVICE_HTTPS && strServer.Right(13) == _T(".microsip.org")) {
-					allowed = true;
-				}
-				int pos1 = response->body.Find("\n", pos + 1);
-				if (allowed && pos1 > pos) {
-					CStringA version = response->body.Mid(pos, pos1 - pos);
-					version.Trim();
-					CString info = MSIP::Utf8DecodeUni(response->body.Mid(pos1 + 1));
-					info.Trim();
-					CStringA our = _GLOBAL_VERSION;
-					int count = version.Replace(".", ".");
-					if (count < 4) {
-						int i = count;
-						while (i < 3) {
-							version.Append(".0");
-							i++;
-						}
-						count = our.Replace(".", ".");
-						i = count;
-						while (i < 3) {
-							our.Append(".0");
-							i++;
-						}
-						unsigned long ia = inet_addr(version.GetBuffer());
-						if (ia != -1 && htonl(ia) > htonl(inet_addr(our.GetBuffer()))) {
-							CString caption;
-							caption.Format(_T("%s %s"), _T(_GLOBAL_NAME_NICE), Translate(_T("Update Available")));
-							CString message = Translate(_T("Do you want to update now?"));
-							if (!info.IsEmpty()) {
-								message.AppendFormat(_T("\r\n\r\n%s"), info);
-							}
-							found = true;
-							if (::MessageBox(this->m_hWnd, message, caption, MB_YESNO | MB_ICONQUESTION) == IDYES) {
-								MSIP::OpenURL(MSIP::Utf8DecodeUni(url));
-							}
-						}
-					}
-				}
-			}
+	HWND hWnd;
+	bool manual;
+	AppUpdate::EUpdateChannel channel;
+	AppUpdate::SManifest manifest;
+	AppUpdate::SProgress *progress;
+	CString downloadPath;
+
+	SUpdateJob() : hWnd(NULL), manual(false), channel(AppUpdate::ChannelStable), progress(NULL) {}
+};
+
+// Owns the job for the lifetime of the worker thread, so every early return
+// releases it. Without this the job leaks on every single check.
+struct SUpdateJobGuard
+{
+	SUpdateJob *job;
+	explicit SUpdateJobGuard(SUpdateJob *j) : job(j) {}
+	~SUpdateJobGuard() { delete job; }
+};
+
+// Downloads the payload, verifies it, then asks the window thread to swap.
+static DWORD WINAPI UpdateInstallThread(LPVOID lpData)
+{
+	SUpdateJob* data = (SUpdateJob*)lpData;
+	SUpdateJobGuard guard(data);
+	HWND hWnd = data->hWnd;
+
+	data->progress->Report(0);
+
+	DWORD total = 0, downloaded = 0;
+	CString error;
+	bool ok = AppUpdate::HttpDownloadToFile(data->manifest.url, data->downloadPath,
+		total, downloaded, error, 300000, data->progress);
+
+	CString version = data->manifest.version;
+	if (ok) {
+		AppUpdate::SUpdateEvent* verifying =
+			new AppUpdate::SUpdateEvent(AppUpdate::StateVerifying, version, 100, CString());
+		if (!PostMessage(hWnd, UM_UPDATE_EVENT, 0, (LPARAM)verifying)) {
+			delete verifying;
+		}
+
+		CString hex;
+		if (!AppUpdate::Sha256File(data->downloadPath, hex)) {
+			ok = false;
+			error = _T("The downloaded update could not be read back for verification.");
+		}
+		else if (hex.CompareNoCase(data->manifest.sha256) != 0) {
+			ok = false;
+			error = _T("The downloaded update does not match its published checksum and was discarded.");
 		}
 	}
-	delete response;
-	if (updateCheckerShow && !found) {
-		MessageBox(_T("No new version found"), _T(""), MB_ICONINFORMATION);
+
+	if (!ok && error.CompareNoCase(_T("cancelled")) == 0) {
+		error = _T("The update was cancelled.");
 	}
-	updateCheckerShow = false;
+	else if (!ok) {
+		DeleteFile(data->downloadPath);
+	}
+
+	AppUpdate::SUpdateEvent* done = new AppUpdate::SUpdateEvent(
+		ok ? AppUpdate::StateReady : AppUpdate::StateError, version, 100, error);
+	if (!PostMessage(hWnd, UM_UPDATE_EVENT, 0, (LPARAM)done)) {
+		delete done;
+	}
 	return 0;
+}
+
+// Fetches and verifies the signed manifest for the configured channel.
+static DWORD WINAPI UpdateCheckThread(LPVOID lpData)
+{
+	SUpdateJob* data = (SUpdateJob*)lpData;
+	SUpdateJobGuard guard(data);
+	HWND hWnd = data->hWnd;
+
+	AppUpdate::SManifest manifest;
+	CString error;
+	if (!AppUpdate::FetchManifest(data->channel, manifest, error)) {
+		// Always report, even for a background check: the window thread clears
+		// m_updateBusy on this message. The UI stays quiet unless the user asked,
+// because a failed background check is usually just a missing network.
+		AppUpdate::SUpdateEvent* ev = new AppUpdate::SUpdateEvent(AppUpdate::StateError,
+			CString(), 0, error, data->manual);
+		if (!PostMessage(hWnd, UM_UPDATE_EVENT, 0, (LPARAM)ev)) {
+			delete ev;
+		}
+		return 0;
+	}
+
+	bool newer = AppUpdate::IsNewer(manifest.version, CString(_T(_GLOBAL_VERSION)));
+	int state = newer ? AppUpdate::StateAvailable : AppUpdate::StateNone;
+	AppUpdate::SUpdateEvent* ev = new AppUpdate::SUpdateEvent(state, manifest.version, 0,
+		newer ? manifest.notes : CString(), data->manual);
+	// The UI needs the whole manifest later: it decides whether to install.
+	ev->AttachManifest(manifest);
+	if (!PostMessage(hWnd, UM_UPDATE_EVENT, 0, (LPARAM)ev)) {
+		delete ev;
+	}
+	return 0;
+}
+
+void CmainDlg::ScheduleUpdateCheck()
+{
+	if (m_updateBusy) {
+		return;
+	}
+	time_t now = time(NULL);
+	time_t last = (accountSettings.checkUpdatesTime > 0)
+		? (time_t)accountSettings.checkUpdatesTime : 0;
+	if (now - last < (time_t)_GLOBAL_UPDATE_CHECK_INTERVAL_HOURS * 3600) {
+		return;
+	}
+	accountSettings.checkUpdatesTime = (int)now;
+	accountSettings.SettingsSave();
+	CheckForUpdates(false);
+}
+
+void CmainDlg::CheckForUpdates(bool manual)
+{
+	if (m_updateBusy) {
+		if (manual) {
+			MessageBox(Translate(_T("An update check is already running.")), _T(""), MB_ICONINFORMATION);
+		}
+		return;
+	}
+	if (!m_hWnd || !IsWindow(m_hWnd)) {
+		return;
+	}
+
+	// A previous worker may still be finishing its last PostMessage; release its
+	// handle before the new one takes the slot.
+	if (m_updateThread) {
+		WaitForSingleObject(m_updateThread, 0);
+		CloseHandle(m_updateThread);
+		m_updateThread = NULL;
+	}
+
+	m_updateBusy = true;
+	m_updateDismissed = false;
+	m_updateState = AppUpdate::StateChecking;
+	m_updatePercent = 0;
+	m_updateMessage.Empty();
+	if (manual) {
+		m_updateManifest.version.Empty();
+	}
+	PushUpdateStateToShell();
+
+	SUpdateJob* job = new SUpdateJob;
+	job->hWnd = m_hWnd;
+	job->manual = manual;
+	job->channel = accountSettings.updateChannel == AppUpdate::ChannelBeta
+		? AppUpdate::ChannelBeta : AppUpdate::ChannelStable;
+
+	m_updateThread = CreateThread(NULL, 0, UpdateCheckThread, job, 0, NULL);
+	if (!m_updateThread) {
+		m_updateBusy = false;
+		delete job;
+		m_updateState = AppUpdate::StateNone;
+		PushUpdateStateToShell();
+		if (manual) {
+			MessageBox(Translate(_T("The update check could not be started.")), _T(""), MB_ICONERROR);
+		}
+	}
+}
+
+void CmainDlg::InstallUpdate()
+{
+	if (m_updateBusy) {
+		return;
+	}
+	if (m_updateState != AppUpdate::StateAvailable || !m_updateManifest.IsValid()) {
+		return;
+	}
+
+	CString folder = accountSettings.pathLocal + _T("update");
+	CreateDirectory(folder, NULL);
+
+	CString path;
+	path.Format(_T("%s\\MaxCall-%s.exe"), folder, m_updateManifest.version);
+	DeleteFile(path);
+
+	m_updateBusy = true;
+	m_updateDismissed = false;
+	m_updatePercent = 0;
+	m_updateMessage.Empty();
+	m_updateState = AppUpdate::StateDownloading;
+	PushUpdateStateToShell();
+
+	m_updateProgress.hNotify = m_hWnd;
+	m_updateProgress.notifyMessage = UM_UPDATE_EVENT;
+	m_updateProgress.version = m_updateManifest.version;
+	m_updateProgress.percent = 0;
+	m_updateProgress.cancel = 0;
+
+	SUpdateJob* job = new SUpdateJob;
+	job->hWnd = m_hWnd;
+	job->manifest = m_updateManifest;        // the worker needs url + sha256
+	job->progress = &m_updateProgress;
+	job->downloadPath = path;
+
+	m_updateThread = CreateThread(NULL, 0, UpdateInstallThread, job, 0, NULL);
+	if (!m_updateThread) {
+		delete job;
+		m_updateBusy = false;
+		m_updateProgress.hNotify = NULL;
+		m_updateState = AppUpdate::StateAvailable;
+		PushUpdateStateToShell();
+		MessageBox(Translate(_T("The update could not be started.")), _T(""), MB_ICONERROR);
+	}
+}
+
+void CmainDlg::DismissUpdate()
+{
+	// "Later" hides the prompt but must not discard the update: the tray menu
+	// still offers it, and a running download is never cancelled from the web UI.
+	if (m_updateState != AppUpdate::StateAvailable) {
+		return;
+	}
+	m_updateDismissed = true;
+	PushUpdateStateToShell();
+}
+
+void CmainDlg::PushUpdateStateToShell()
+{
+	if (m_updateDismissed && m_updateState == AppUpdate::StateAvailable) {
+		return;
+	}
+	if (mainShellDlg && IsWindow(mainShellDlg->m_hWnd)) {
+		// The banner shows the release notes when an update is waiting, and the
+		// live status/error text otherwise.
+		const CString& text = (m_updateState == AppUpdate::StateAvailable)
+			? m_updateManifest.notes : m_updateMessage;
+		mainShellDlg->PushUpdateState(m_updateState, m_updateManifest.version,
+			m_updatePercent, text);
+	}
+}
+
+void CmainDlg::ApplyUpdateAndRestart()
+{
+	if (m_updateState != AppUpdate::StateReady) {
+		return;
+	}
+
+	CString path;
+	path.Format(_T("%supdate\\MaxCall-%s.exe"), accountSettings.pathLocal,
+		m_updateManifest.version);
+
+	DWORD previousPid = 0;
+	if (!AppUpdate::LaunchApplyStage(accountSettings.exeFile, path, previousPid)) {
+		m_updateState = AppUpdate::StateError;
+		MessageBox(Translate(_T("MaxCall could not start the installer of the update.")), _T(""), MB_ICONERROR);
+		PushUpdateStateToShell();
+		return;
+	}
+
+	m_updateState = AppUpdate::StateApplied;
+	PushUpdateStateToShell();
+
+	// Ask for a clean shutdown so settings and the SIP stack are flushed. The
+	// watchdog guarantees the apply stage is not held hostage if the graceful
+	// path stalls; OnDestroy cancels it on the normal path.
+	PostMessage(WM_CLOSE, 0, 0);
+	SetTimer(IDT_TIMER_UPDATE_EXIT, 8000, NULL);
+}
+
+LRESULT CmainDlg::OnUpdateEvent(WPARAM wParam, LPARAM lParam)
+{
+	AppUpdate::SUpdateEvent* ev = (AppUpdate::SUpdateEvent*)lParam;
+	if (!ev) {
+		return 0;
+	}
+
+	// Progress ticks arrive roughly once per percent while the worker is still
+	// downloading, so the thread handle and the busy flag must survive them.
+	// Only a genuinely finished thread may be released here - OnDestroy relies
+	// on that handle to wait for the worker before this object is deleted.
+	if (m_updateThread && WaitForSingleObject(m_updateThread, 0) == WAIT_OBJECT_0) {
+		CloseHandle(m_updateThread);
+		m_updateThread = NULL;
+	}
+
+	const bool terminal = (ev->state == AppUpdate::StateAvailable
+		|| ev->state == AppUpdate::StateReady
+		|| ev->state == AppUpdate::StateApplied
+		|| ev->state == AppUpdate::StateError
+		|| ev->state == AppUpdate::StateNone);
+	if (terminal) {
+		m_updateBusy = false;
+		m_updateProgress.hNotify = NULL;
+	}
+
+	m_updatePercent = ev->percent;
+
+	switch (ev->state) {
+	case AppUpdate::StateChecking:
+		break;
+
+	case AppUpdate::StateAvailable:
+		m_updateDismissed = false;
+		m_updateManifest.Reset();
+		m_updateManifest.version = ev->version;
+		m_updateManifest.channel = ev->channel;
+		m_updateManifest.url = ev->url;
+		m_updateManifest.sha256 = ev->sha256;
+		m_updateManifest.notes = ev->message;
+		m_updateState = AppUpdate::StateAvailable;
+		m_updateMessage = ev->message;
+		if (ev->manual) {
+			CString caption;
+			caption.Format(_T("%s %s"), _T(_GLOBAL_NAME_NICE), Translate(_T("Update Available")));
+			CString text;
+			text.Format(_T("%s %s\n\n%s"), Translate(_T("A new version is available:")),
+				ev->version, Translate(_T("Download and install it now?")));
+			if (MessageBox(text, caption, MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2 | MB_SYSTEMMODAL) == IDYES) {
+				InstallUpdate();
+				break;
+			}
+		}
+		else {
+			CString caption;
+			caption.Format(_T("%s %s"), _T(_GLOBAL_NAME_NICE), Translate(_T("Update Available")));
+			CString text;
+			text.Format(_T("Version %s is ready to install."), ev->version);
+			BaloonPopup(caption, text, NIIF_INFO);
+		}
+		break;
+
+	case AppUpdate::StateDownloading:
+	case AppUpdate::StateVerifying:
+		m_updateState = ev->state;
+		break;
+
+	case AppUpdate::StateReady:
+		m_updateState = AppUpdate::StateReady;
+		m_updateMessage.Empty();
+		ApplyUpdateAndRestart();
+		break;
+
+	case AppUpdate::StateError:
+		m_updateState = AppUpdate::StateError;
+		m_updateMessage = ev->message;
+		if (ev->manual) {
+			MessageBox(Translate(_T("MaxCall could not check for updates.")), ev->message, MB_ICONERROR);
+		}
+		break;
+
+	case AppUpdate::StateNone:
+	default:
+		m_updateState = AppUpdate::StateNone;
+		// Nothing pending: drop the version so the banner never shows a stale one.
+		m_updateManifest.Reset();
+		m_updateMessage.Empty();
+		if (ev->manual) {
+			CString text;
+			text.Format(_T("%s is up to date (%s)."), _T(_GLOBAL_NAME_NICE), CString(_T(_GLOBAL_VERSION)));
+			MessageBox(text, _T(""), MB_ICONINFORMATION);
+		}
+		break;
+	}
+
+	PushUpdateStateToShell();
+	delete ev;
+	return 0;
+}
+
+void CmainDlg::OnMenuCheckUpdates()
+{
+	CheckForUpdates(true);
+}
+
+void CmainDlg::OnMenuInstallUpdate()
+{
+	InstallUpdate();
+}
+
+void CmainDlg::OnMenuUpdateChannel(UINT nID)
+{
+	int channel = (nID == ID_UPDATE_CHANNEL_BETA) ? AppUpdate::ChannelBeta : AppUpdate::ChannelStable;
+	if (accountSettings.updateChannel == channel) {
+		return;
+	}
+	accountSettings.updateChannel = channel;
+	accountSettings.checkUpdatesTime = 0;      // re-evaluate against the new channel
+	accountSettings.SettingsSave();
+
+	m_updateManifest.Reset();
+	m_updateState = AppUpdate::StateNone;
+	PushUpdateStateToShell();
+
+	CString text;
+	text.Format(_T("%s\n\n%s"), Translate(_T("Update channel changed.")),
+		Translate(_T("Checking for a new version now.")));
+	MessageBox(text, _T(""), MB_ICONINFORMATION);
+	CheckForUpdates(true);
 }
 
 #ifdef _GLOBAL_VIDEO

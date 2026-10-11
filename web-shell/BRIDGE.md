@@ -30,6 +30,9 @@
 | `minimizeApp` | — | — | تصغير نافذة القشرة |
 | `openPopup` | `number` | `string` | فتح بطاقة المتصل لنفس الرقم (يدوياً من Dial/Contacts/Log) |
 | `pinToggle` | `on` | `boolean` | تثبيت النافذة فوق الكل (يُحفظ في الإعدادات) |
+| `checkUpdate` | — | — | فحص التحديثات يدوياً الآن (زر Retry عند الخطأ) |
+| `installUpdate` | — | — | بدء تنزيل وتثبيت التحديث المعلَن (زر `#btnUpdateNow`) |
+| `dismissUpdate` | — | — | إخفاء بانر التحديث لهذه الجلسة فقط — لا يُلغي تنزيلاً جارياً ولا يغيّر حالة C++ (`onUpdateState` التالية تُظهره مجدداً) |
 
 > `setPresence` يُعيَّن في `MainShellDlg::ProcessShellMessage` كالتالي:
 > `available/away` → إلغاء DND + نشر متاح، `busy` → تفعيل DND + نشر متاح،
@@ -59,6 +62,7 @@ window.chrome.webview.postMessage({ action: 'hold', callId: -1, on: true });
 | `onAccount` | `(user: string, domain: string, name?: string)` | سطر الحساب في الهيدر بصيغة `user-name` |
 | `onPinState` | `(on: boolean)` | حالة زر التثبيت (تُدفع مع كل لقطة) |
 | `onCallHistory` | `(jsonText: string)` | سجل السيرفر: `{rows:[{time,number,name,direction,status,duration,answered_by,has_rec}]}` من `GET /api/calls/history` — يُجلب عند `shellReady/getData` وبعد كل إنهاء بـ 4 ثوانٍ |
+| `onUpdateState` | `(state: number, version: string, percent: number, message: string)` | حالة التحديث التلقائي: `0` لا شيء، `1` يُفحص (يبقى البانر مخفياً إن لم يكن مفتوحاً)، `2` متاح، `3` يُنزَّل (`percent` 0..100)، `4` يتحقق، `5` جاهز → إعادة تشغيل، `6` أُعيد التشغيل → إخفاء البانر، `7` خطأ → زر إعادة الفحص. `version` و`message` قد يكونان فارغين |
 
 مثال من C++ (نفس نمط `UpdateWebView` / `OnCrmSaveResult`):
 

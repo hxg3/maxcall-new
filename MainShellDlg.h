@@ -36,6 +36,7 @@ public:
 	void PushContacts();
 	void PushAccount();
 	void PushPinState(bool on);
+	void PushUpdateState(int state, const CString& version, int percent, const CString& message);
 	void FetchHistory();
 	void PushSnapshot();
 

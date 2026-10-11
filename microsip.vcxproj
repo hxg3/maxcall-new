@@ -112,7 +112,7 @@
       <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <Link>
-      <AdditionalDependencies>dwmapi.lib;dwmapi.lib;Wtsapi32.lib;WebView2LoaderStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>dwmapi.lib;dwmapi.lib;Wtsapi32.lib;bcrypt.lib;wininet.lib;WebView2LoaderStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>lib\;packages\Microsoft.Web.WebView2.1.0.2739.15\build\native\x86;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <SubSystem>Windows</SubSystem>
       <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
@@ -144,7 +144,7 @@
       <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <Link>
-      <AdditionalDependencies>dwmapi.lib;Wtsapi32.lib;WebView2LoaderStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>dwmapi.lib;Wtsapi32.lib;bcrypt.lib;wininet.lib;WebView2LoaderStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>lib\;packages\Microsoft.Web.WebView2.1.0.2739.15\build\native\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <SubSystem>Windows</SubSystem>
       <AdditionalOptions>/OPT:NOLBR %(AdditionalOptions)</AdditionalOptions>
@@ -174,7 +174,7 @@
       <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <Link>
-      <AdditionalDependencies>dwmapi.lib;Wtsapi32.lib;WebView2LoaderStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>dwmapi.lib;Wtsapi32.lib;bcrypt.lib;wininet.lib;WebView2LoaderStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>lib\;packages\Microsoft.Web.WebView2.1.0.2739.15\build\native\x86;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
@@ -206,7 +206,7 @@
       <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <Link>
-      <AdditionalDependencies>dwmapi.lib;Wtsapi32.lib;WebView2LoaderStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>dwmapi.lib;Wtsapi32.lib;bcrypt.lib;wininet.lib;WebView2LoaderStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>lib\;packages\Microsoft.Web.WebView2.1.0.2739.15\build\native\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
@@ -222,6 +222,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="AAOptionsDlg.cpp" />
+    <ClCompile Include="AppUpdater.cpp" />
     <ClCompile Include="AccountDlg.cpp" />
     <ClCompile Include="AddDlg.cpp" />
     <ClCompile Include="addons.cpp" />
@@ -283,6 +284,7 @@
     <ClInclude Include="AccountDlg.h" />
     <ClInclude Include="AddDlg.h" />
     <ClInclude Include="addons.h" />
+    <ClInclude Include="AppUpdater.h" />
     <ClInclude Include="BaseDialog.h" />
     <ClInclude Include="ButtonDialer.h" />
     <ClInclude Include="ButtonEx.h" />
@@ -332,6 +334,7 @@
     <ClInclude Include="stdafx.h" />
     <ClInclude Include="targetver.h" />
     <ClInclude Include="Transfer.h" />
+    <ClInclude Include="UpdatePublicKey.h" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="res\active.ico" />

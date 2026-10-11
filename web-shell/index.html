@@ -55,6 +55,34 @@
       </button>
     </div>
 
+    <!-- Auto-update banner -->
+    <div id="updateBanner" role="status" aria-live="polite" class="hidden flex items-center justify-between gap-2 border-b border-slate-100 bg-emerald-50 px-3 py-2">
+      <div class="flex min-w-0 flex-1 items-center gap-2">
+        <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand text-white">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4"><path d="M12 15V3"/><path d="m7 10 5 5 5-5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></svg>
+        </span>
+        <div class="min-w-0 flex-1">
+          <p id="updateVersion" class="truncate text-xs font-bold text-emerald-900" dir="ltr">Update available</p>
+          <p id="updateMessage" class="truncate text-[11px] text-emerald-700" dir="ltr">A new version is ready to install</p>
+          <div id="updateProgress" role="progressbar" aria-label="Download progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" class="mt-1.5 hidden h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
+            <div id="updateProgressBar" class="h-full rounded-full bg-brand transition-[width] duration-200 ease-out" style="width:0%"></div>
+          </div>
+        </div>
+      </div>
+      <div class="flex shrink-0 items-center gap-1.5">
+        <button id="btnUpdateNow" type="button" title="Install update" aria-label="Install update" class="flex items-center gap-1 rounded-full bg-brand px-2.5 py-1 text-[11px] font-bold text-white active:scale-95 disabled:pointer-events-none disabled:opacity-50">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5"><path d="M12 15V3"/><path d="m7 10 5 5 5-5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></svg>
+          <span>Install</span>
+        </button>
+        <button id="btnUpdateRetry" type="button" title="Retry" aria-label="Retry update" class="hidden h-7 w-7 shrink-0 items-center justify-center rounded-full bg-rose-600 text-white active:scale-95 disabled:pointer-events-none disabled:opacity-50">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6"/></svg>
+        </button>
+        <button id="btnUpdateLater" type="button" title="Remind me later" aria-label="Dismiss update" class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-slate-500 ring-1 ring-slate-200 active:scale-95 disabled:pointer-events-none disabled:opacity-50">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+    </div>
+
     <!-- Incoming call banner -->
     <div id="incomingBanner" class="hidden items-center justify-between gap-2 border-b border-slate-100 bg-amber-50 px-3 py-2">
       <div class="flex min-w-0 items-center gap-2">

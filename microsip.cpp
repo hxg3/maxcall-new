@@ -25,6 +25,7 @@
 #include "settings.h"
 #include "langpack.h"
 #include "LoginWebDlg.h"
+#include "AppUpdater.h"
 
 #include "Strsafe.h"
 
@@ -193,7 +194,20 @@ BOOL CALLBACK MsipEnumWindowsProc(HWND hWnd, LPARAM lParam)
 
 BOOL CmicrosipApp::InitInstance()
 {
+	// An update payload restarts as `MaxCall.exe --apply <target> <source> <pid>`.
+	// It must not touch settings, must not be treated as a second instance and
+	// must never reach the message pump, so it is handled before anything else.
+	if (AppUpdate::IsApplyCommandLine(theApp.m_lpCmdLine)) {
+		AppUpdate::RunApplyStage(_T(""), _T(""));
+		return FALSE;
+	}
+
 	accountSettings.Init();
+
+	// Discard whatever an interrupted update left behind, so the program's folder
+	// holds MaxCall.exe and nothing else.
+	AppUpdate::CleanupLeftovers(accountSettings.exeFile,
+		accountSettings.pathLocal + _T("update"));
 	// يبدأ MaxCall جلسة موثقة جديدة من الخادم عند كل تشغيل دون بيانات سابقة.
 	accountSettings.AccountDelete(1);
 	accountSettings.accountId = 0;

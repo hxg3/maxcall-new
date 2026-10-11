@@ -347,6 +347,18 @@ void MainShellDlg::ProcessShellMessage(CString& message)
 		mainDlg->OnMenuSettings();
 		return;
 	}
+	if (action == _T("checkUpdate")) {
+		mainDlg->CheckForUpdates(true);
+		return;
+	}
+	if (action == _T("installUpdate")) {
+		mainDlg->InstallUpdate();
+		return;
+	}
+	if (action == _T("dismissUpdate")) {
+		mainDlg->DismissUpdate();
+		return;
+	}
 	if (action == _T("quitApp")) {
 		mainDlg->OnMenuExit();
 		return;
@@ -608,6 +620,14 @@ void MainShellDlg::PushPinState(bool on)
 	ExecuteShellScript(js);
 }
 
+void MainShellDlg::PushUpdateState(int state, const CString& version, int percent, const CString& message)
+{
+	CString js;
+	js.Format(_T("onUpdateState(%d, '%s', %d, '%s')"),
+		state, EscapeJs(version), percent, EscapeJs(message));
+	ExecuteShellScript(js);
+}
+
 void MainShellDlg::FetchHistory()
 {
 	if (!IsWindow(m_hWnd)) {
@@ -619,7 +639,7 @@ void MainShellDlg::FetchHistory()
 		return;
 	}
 	CString url;
-	url.Format(_T("http://192.168.1.165:3001/api/calls/history?agent=%s&limit=50"), (LPCTSTR)agent);
+	url.Format(_T("http://maxcall.local:3001/api/calls/history?agent=%s&limit=50"), (LPCTSTR)agent);
 	URLGetAsync(url, m_hWnd, WM_SHELL_HISTORY);
 }
 
@@ -679,6 +699,7 @@ void MainShellDlg::PushSnapshot()
 		PushAccount();
 		PushContacts();
 		PushPinState(accountSettings.alwaysOnTop != 0);
+		mainDlg->PushUpdateStateToShell();
 		// المكالمة النشطة الحالية إن وجدت (مع حالة التعليق الفعلية)
 		pjsua_call_id current = mainDlg->CurrentCallId();
 		if (current != PJSUA_INVALID_ID && pjsua_call_is_active(current)) {

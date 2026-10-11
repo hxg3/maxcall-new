@@ -134,6 +134,10 @@ struct AccountSettings {
 
 	int checkUpdatesTime;
 
+	// Release channel the client follows. 0 = stable (published from a v* tag),
+	// 1 = beta (published on every push to main, developer builds only).
+	int updateChannel;
+
 	bool minimized;
 	bool hidden;
 	bool silent;

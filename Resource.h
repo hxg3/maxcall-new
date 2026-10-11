@@ -510,6 +510,13 @@
 #define ID_CMD 32815
 #define ID_VIEW_DETAILS 32816
 #define ID_CALL_BACK 32817
+// Self update commands (AppUpdater). Kept contiguous so ON_COMMAND_RANGE can
+// cover the release channel radio items.
+#define ID_CHECK_UPDATES 32818
+#define ID_INSTALL_UPDATE 32819
+#define ID_UPDATE_CHANNEL_STABLE 32820
+#define ID_UPDATE_CHANNEL_BETA 32821
+#define ID_UPDATE_CHANNEL_RANGE 32820
 #define IDR_CRM_POPUP_HTML 200
 #define IDR_MAIN_SHELL_HTML 203
 #define IDR_LOGIN_HTML 204
@@ -528,7 +535,7 @@
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        240
-#define _APS_NEXT_COMMAND_VALUE         32818
+#define _APS_NEXT_COMMAND_VALUE         32822
 #define _APS_NEXT_CONTROL_VALUE         1205
 #define _APS_NEXT_SYMED_VALUE           101
 #endif

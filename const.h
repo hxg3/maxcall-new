@@ -17,8 +17,49 @@
  */
 
 #pragma once
-#define _GLOBAL_VERSION "2.1.0"
-#define _GLOBAL_VERSION_COMMA 2,1,0,0
+
+// ---------------------------------------------------------------------------
+// Version
+//
+// _GLOBAL_VERSION is the single source of truth for the product version.
+// It must match the git tag that ships a release (e.g. tag v6.1.6 => 6.1.6).
+// build.yml fails the release job when the tag and this value disagree, so a
+// build can never claim a version the tag does not carry.
+//
+// CI also rewrites these macros from the tag at build time for tag builds, so
+// a release binary always reports exactly the tag it was cut from.
+// ---------------------------------------------------------------------------
+#define _GLOBAL_VERSION "6.1.5"
+#define _GLOBAL_VERSION_MAJOR 6
+#define _GLOBAL_VERSION_MINOR 1
+#define _GLOBAL_VERSION_PATCH 5
+#define _GLOBAL_VERSION_COMMA 6,1,5,0
+
 #define _GLOBAL_KEY "*********"
 #define _GLOBAL_VIDEO 
 #define _GLOBAL_NAME "MaxCall"
+
+// ---------------------------------------------------------------------------
+// Update channel infrastructure
+//
+// The download the user ever sees is a single MaxCall.exe. Everything the
+// auto-updater needs is machine-only metadata, published to its own hidden
+// releases so it never clutters the release page people actually visit:
+//
+//   stable manifest -> releases/download/manifest-stable/update.json
+//   beta   manifest -> releases/download/manifest-beta/update.json
+//
+// Both are RSA-signed at build time and verified locally against
+// UpdatePublicKey.h before anything is downloaded or executed.
+// ---------------------------------------------------------------------------
+#define _GLOBAL_UPDATE_REPO "hxg3/maxcall-new"
+#define _GLOBAL_UPDATE_BASE_URL "https://github.com/" _GLOBAL_UPDATE_REPO "/releases"
+#define _GLOBAL_UPDATE_MANIFEST "update.json"
+#define _GLOBAL_UPDATE_SIGNATURE "update.json.sig"
+#define _GLOBAL_UPDATE_STABLE_CHANNEL_TAG "manifest-stable"
+#define _GLOBAL_UPDATE_BETA_CHANNEL_TAG "manifest-beta"
+#define _GLOBAL_UPDATE_STABLE_URL _GLOBAL_UPDATE_BASE_URL "/download/" _GLOBAL_UPDATE_STABLE_CHANNEL_TAG "/" _GLOBAL_UPDATE_MANIFEST
+#define _GLOBAL_UPDATE_BETA_URL _GLOBAL_UPDATE_BASE_URL "/download/" _GLOBAL_UPDATE_BETA_CHANNEL_TAG "/" _GLOBAL_UPDATE_MANIFEST
+#define _GLOBAL_UPDATE_STABLE_SIG_URL _GLOBAL_UPDATE_BASE_URL "/download/" _GLOBAL_UPDATE_STABLE_CHANNEL_TAG "/" _GLOBAL_UPDATE_SIGNATURE
+#define _GLOBAL_UPDATE_BETA_SIG_URL _GLOBAL_UPDATE_BASE_URL "/download/" _GLOBAL_UPDATE_BETA_CHANNEL_TAG "/" _GLOBAL_UPDATE_SIGNATURE
+#define _GLOBAL_UPDATE_CHECK_INTERVAL_HOURS 6

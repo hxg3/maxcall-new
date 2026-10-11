@@ -41,6 +41,10 @@ let _activeSince = 0;
 let _timerId = null;
 /** @type {boolean} Whether the first onRegState has arrived (hides the engine banner). */
 let _gotFirstReg = false;
+/** @type {number} Last auto-update state pushed by C++ (0 idle, 1 checking, 2 available, 3 downloading, 4 verifying, 5 ready, 6 restarted, 7 error). */
+let _updateState = 0;
+/** @type {boolean} Whether the user hid the update banner for this session. */
+let _updateDismissed = false;
 /** @type {Array<{name:string,number:string,presence:string}>} Cached contacts. */
 let _contacts = [];
 /** @type {Map<number,{number:string,name:string,direction:string,wasActive:boolean}>} Per-call tracking for log typing. */
@@ -157,6 +161,41 @@ function _setHoldUI(held) {
 }
 
 /**
+ * Color tones for the update banner: [banner background, title color, message color].
+ */
+const UPDATE_TONES = {
+  info: ['bg-emerald-50', 'text-emerald-900', 'text-emerald-700'],
+  error: ['bg-rose-50', 'text-rose-900', 'text-rose-700'],
+};
+
+/** Show or hide the update banner row. */
+function _showUpdateBanner(show) {
+  const banner = document.getElementById('updateBanner');
+  if (!banner) return;
+  banner.classList.toggle('hidden', !show);
+  banner.classList.toggle('flex', !!show);
+}
+
+/** Repaint the update banner with one of the UPDATE_TONES palettes. */
+function _setUpdateTone(name) {
+  const palette = UPDATE_TONES[name] || UPDATE_TONES.info;
+  const targets = ['updateBanner', 'updateVersion', 'updateMessage'];
+  targets.forEach((id, i) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    Object.values(UPDATE_TONES).forEach((tone) => el.classList.toggle(tone[i], tone[i] === palette[i]));
+  });
+}
+
+/** Enable or disable every update-banner button. */
+function _setUpdateButtonsDisabled(disabled) {
+  ['btnUpdateNow', 'btnUpdateRetry', 'btnUpdateLater'].forEach((id) => {
+    const b = document.getElementById(id);
+    if (b) b.disabled = !!disabled;
+  });
+}
+
+/**
  * The MaxCall bridge: senders (JS->C++) and receivers (C++->JS).
  */
 const MaxCallBridge = {
@@ -270,6 +309,30 @@ const MaxCallBridge = {
    * @returns {void}
    */
   pinToggle(on) { _postToNative({ action: 'pinToggle', on: !!on }); },
+
+  /**
+   * Ask C++ to check for updates right now.
+   * @returns {void}
+   */
+  checkUpdate() { _postToNative({ action: 'checkUpdate' }); },
+
+  /**
+   * Ask C++ to download and install the pending update.
+   * @returns {void}
+   */
+  installUpdate() { _postToNative({ action: 'installUpdate' }); },
+
+  /**
+   * Hide the update banner for this session. C++ keeps its own state untouched,
+   * so the next onUpdateState brings the banner back.
+   * @returns {void}
+   */
+  dismissUpdate() {
+    _updateDismissed = true;
+    _showUpdateBanner(false);
+    _postToNative({ action: 'dismissUpdate' });
+    _emit('update-dismissed', { state: _updateState, dismissed: true });
+  },
 
   // ---------- Receivers: C++ -> JS (called via ExecuteScript) ----------
 
@@ -455,6 +518,88 @@ const MaxCallBridge = {
       btn.classList.toggle('text-white/70', !on);
     }
     _emit('pin-state', { on: !!on });
+  },
+
+  /**
+   * Auto-update state pushed by C++.
+   * @param {number} state 0 idle | 1 checking | 2 available | 3 downloading | 4 verifying | 5 ready | 6 restarted | 7 error.
+   * @param {string} version Available version, may be empty.
+   * @param {number} percent Download progress 0..100 (state 3 only).
+   * @param {string} message Ready-to-display English text, may be empty.
+   * @returns {void}
+   */
+  onUpdateState(state, version, percent, message) {
+    const st = Number(state) || 0;
+    const ver = String(version || '');
+    const msg = String(message || '');
+    const pct = Math.max(0, Math.min(100, Number(percent) || 0));
+    const wasDismissed = _updateDismissed;
+    _updateState = st;
+    _updateDismissed = false;
+
+    const verEl = document.getElementById('updateVersion');
+    const msgEl = document.getElementById('updateMessage');
+    const prog = document.getElementById('updateProgress');
+    const bar = document.getElementById('updateProgressBar');
+    const btnNow = document.getElementById('btnUpdateNow');
+    const btnRetry = document.getElementById('btnUpdateRetry');
+
+    // The bar is the only inline-styled node: Tailwind cannot express a ratio.
+    const progress = (on) => {
+      if (prog) prog.classList.toggle('hidden', !on);
+      if (!on || !bar) return;
+      bar.style.width = pct + '%';
+      prog?.setAttribute('aria-valuenow', String(Math.round(pct)));
+    };
+
+    if (verEl) verEl.textContent = ver ? 'Update ' + ver : 'Update available';
+    if (msgEl) msgEl.textContent = msg || 'A new version is ready to install';
+    progress(st === 3);
+    _setUpdateTone(st === 7 ? 'error' : 'info');
+
+    if (st === 0 || st === 6) {
+      _showUpdateBanner(false);
+      _setUpdateButtonsDisabled(false);
+    } else if (st === 1) {
+      // Keep the banner hidden during a silent background check; only refresh it if already open.
+      if (msgEl) msgEl.textContent = 'Checking for updates…';
+      _setUpdateButtonsDisabled(true);
+      _showUpdateBanner(!document.getElementById('updateBanner')?.classList.contains('hidden'));
+    } else if (st === 2) {
+      btnNow?.classList.remove('hidden');
+      btnNow?.classList.add('flex');
+      btnRetry?.classList.add('hidden');
+      _setUpdateButtonsDisabled(false);
+      _showUpdateBanner(true);
+    } else if (st === 3 || st === 4) {
+      if (verEl) verEl.textContent = ver ? 'Update ' + ver : 'Update';
+      if (msgEl) msgEl.textContent = st === 4 ? 'Verifying…' : (msg || 'Downloading… ' + Math.round(pct) + '%');
+      btnNow?.classList.remove('hidden');
+      btnNow?.classList.add('flex');
+      btnRetry?.classList.add('hidden');
+      _setUpdateButtonsDisabled(true);
+      _showUpdateBanner(true);
+    } else if (st === 5) {
+      if (verEl) verEl.textContent = ver ? 'MaxCall ' + ver : 'MaxCall';
+      if (msgEl) msgEl.textContent = 'Restarting MaxCall…';
+      btnNow?.classList.add('hidden');
+      btnNow?.classList.remove('flex');
+      btnRetry?.classList.add('hidden');
+      _setUpdateButtonsDisabled(true);
+      _showUpdateBanner(true);
+    } else if (st === 7) {
+      if (msgEl) msgEl.textContent = msg || 'Update failed';
+      btnNow?.classList.add('hidden');
+      btnNow?.classList.remove('flex');
+      btnRetry?.classList.remove('hidden');
+      btnRetry?.classList.add('flex');
+      _setUpdateButtonsDisabled(false);
+      _showUpdateBanner(true);
+    } else {
+      _showUpdateBanner(false);
+    }
+
+    _emit('update-state', { state: st, version: ver, percent: pct, message: msg, wasDismissed });
   },
 
   /**
@@ -756,6 +901,10 @@ function _wireUI() {
   document.getElementById('btnQuit')?.addEventListener('click', () => MaxCallBridge.quitApp());
   document.getElementById('btnRetry')?.addEventListener('click', () => MaxCallBridge.getData());
 
+  document.getElementById('btnUpdateNow')?.addEventListener('click', () => MaxCallBridge.installUpdate());
+  document.getElementById('btnUpdateLater')?.addEventListener('click', () => MaxCallBridge.dismissUpdate());
+  document.getElementById('btnUpdateRetry')?.addEventListener('click', () => MaxCallBridge.checkUpdate());
+
   document.getElementById('contactSearch')?.addEventListener('input', (e) =>
     _renderContacts(e.target.value));
 
@@ -778,4 +927,5 @@ window.onContacts = (...a) => MaxCallBridge.onContacts(...a);
 window.onAccount = (...a) => MaxCallBridge.onAccount(...a);
 window.onPinState = (...a) => MaxCallBridge.onPinState(...a);
 window.onCallHistory = (...a) => MaxCallBridge.onCallHistory(...a);
+window.onUpdateState = (...a) => MaxCallBridge.onUpdateState(...a);
 window.MaxCallBridge = MaxCallBridge;

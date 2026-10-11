@@ -9,8 +9,75 @@ on:
 permissions:
   contents: write
 
+env:
+  # Rolling release that every push to main overwrites.
+  BETA_TAG: beta
+  # Machine-only manifest releases. The payload release people download holds a
+  # single MaxCall.exe; the updater metadata lives here so the release page a
+  # human visits never shows more than one file.
+  MANIFEST_BETA_TAG: manifest-beta
+  MANIFEST_STABLE_TAG: manifest-stable
+
 jobs:
+  resolve-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      channel: ${{ steps.v.outputs.channel }}
+      release_tag: ${{ steps.v.outputs.release_tag }}
+      release_name: ${{ steps.v.outputs.release_name }}
+      manifest_tag: ${{ steps.v.outputs.manifest_tag }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+      make_latest: ${{ steps.v.outputs.make_latest }}
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Resolve release version
+      id: v
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        declared=$(grep -oP '(?<=^#define _GLOBAL_VERSION ")[^"]+' const.h)
+        echo "const.h declares version: $declared"
+
+        if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+          tag="${GITHUB_REF#refs/tags/v}"
+          if [[ "$tag" != "$declared" ]]; then
+            echo "::error::Tag v$tag does not match const.h ($declared)."
+            echo "::error::Bump _GLOBAL_VERSION in const.h before tagging, otherwise the"
+            echo "::error::binary would advertise a version the tag does not carry."
+            exit 1
+          fi
+          echo "version=$tag"          >> "$GITHUB_OUTPUT"
+          echo "channel=stable"        >> "$GITHUB_OUTPUT"
+          echo "release_tag=v$tag"     >> "$GITHUB_OUTPUT"
+          echo "manifest_tag=$MANIFEST_STABLE_TAG" >> "$GITHUB_OUTPUT"
+          echo "release_name=MaxCall v$tag" >> "$GITHUB_OUTPUT"
+          echo "prerelease=false"      >> "$GITHUB_OUTPUT"
+          echo "make_latest=true"      >> "$GITHUB_OUTPUT"
+        else
+          # A commit on main: ship the next patch as a beta so it always sorts
+          # above the last stable release (6.1.5 -> 6.1.6-beta.<run>).
+          last_tag=$(git describe --tags --abbrev=0 --match 'v[0-9]*' || true)
+          last_tag="${last_tag:-v$declared}"
+          core="${last_tag#v}"
+          IFS=. read -r maj min pat <<< "$core"
+          next_patch=$((pat + 1))
+          version="${maj}.${min}.${next_patch}-beta.${GITHUB_RUN_NUMBER}"
+          echo "version=$version"     >> "$GITHUB_OUTPUT"
+          echo "channel=beta"          >> "$GITHUB_OUTPUT"
+          echo "release_tag=$BETA_TAG" >> "$GITHUB_OUTPUT"
+          echo "manifest_tag=$MANIFEST_BETA_TAG" >> "$GITHUB_OUTPUT"
+          echo "release_name=MaxCall $version (developer preview)" >> "$GITHUB_OUTPUT"
+          echo "prerelease=true"       >> "$GITHUB_OUTPUT"
+          echo "make_latest=false"     >> "$GITHUB_OUTPUT"
+        fi
+
   build:
+    needs: resolve-version
     runs-on: windows-2022
     steps:
     - uses: actions/checkout@v4
@@ -28,6 +95,29 @@ jobs:
       run: |
         nuget restore microsip.sln
         Write-Host "NuGet packages restored"
+
+    - name: Stamp version into const.h
+      shell: pwsh
+      env:
+        VERSION: ${{ needs.resolve-version.outputs.version }}
+      run: |
+        # const.h is the single source of truth, but the published artifact must
+        # report exactly the tag it was cut from. Rewrite the four macros in the
+        # throwaway checkout so the binary and the manifest can never disagree.
+        $version = $env:VERSION
+        $core = ($version -split '-')[0]
+        $parts = $core -split '\.'
+        if ($parts.Count -lt 3) { throw "Malformed version '$version'" }
+
+        $path = "const.h"
+        $text = Get-Content $path -Raw
+        $text = [regex]::Replace($text, '(?m)^#define _GLOBAL_VERSION\s+"[^"]*"',       "#define _GLOBAL_VERSION `"$version`"")
+        $text = [regex]::Replace($text, '(?m)^#define _GLOBAL_VERSION_MAJOR\s+\d+',      "#define _GLOBAL_VERSION_MAJOR $($parts[0])")
+        $text = [regex]::Replace($text, '(?m)^#define _GLOBAL_VERSION_MINOR\s+\d+',      "#define _GLOBAL_VERSION_MINOR $($parts[1])")
+        $text = [regex]::Replace($text, '(?m)^#define _GLOBAL_VERSION_PATCH\s+\d+',      "#define _GLOBAL_VERSION_PATCH $($parts[2])")
+        $text = [regex]::Replace($text, '(?m)^#define _GLOBAL_VERSION_COMMA\s+[0-9,]+',  "#define _GLOBAL_VERSION_COMMA $($parts[0]),$($parts[1]),$($parts[2]),0")
+        Set-Content $path $text -NoNewline
+        Select-String -Path $path -Pattern "_GLOBAL_VERSION"
 
     - name: Download and Prepare PJSIP
       shell: pwsh
@@ -130,6 +220,75 @@ jobs:
         New-Item -ItemType Directory -Path "MaxCall" -Force | Out-Null
         Copy-Item $exe.FullName "MaxCall/MaxCall.exe" -Force
 
+    - name: Build signed update manifest
+      shell: pwsh
+      env:
+        VERSION: ${{ needs.resolve-version.outputs.version }}
+        CHANNEL: ${{ needs.resolve-version.outputs.channel }}
+        RELEASE_TAG: ${{ needs.resolve-version.outputs.release_tag }}
+        SIGNING_KEY: ${{ secrets.MAXCALL_SIGNING_KEY }}
+      run: |
+        $ErrorActionPreference = "Stop"
+        $repo = "hxg3/maxcall-new"
+        $tag  = $env:RELEASE_TAG
+        $base = "https://github.com/$repo/releases"
+
+        $bytes = [System.IO.File]::ReadAllBytes("MaxCall/MaxCall.exe")
+        $sha256 = (Get-FileHash -Path "MaxCall/MaxCall.exe" -Algorithm SHA256).Hash.ToLower()
+
+        # The URL is derived here and never taken from the payload. The client
+        # additionally pins the host to GitHub's release infrastructure
+        # (see IsAllowedUpdateHost in AppUpdater.cpp), so even a signed manifest
+        # could not redirect a download to a third-party server.
+        $url = "$base/download/$tag/MaxCall.exe"
+
+        # Release notes are the tag commit subject: the release body does not
+        # exist yet at this point, and generated notes land after signing.
+        $notes = (git log -1 --pretty=%s).Trim()
+        if ($notes.Length -gt 400) { $notes = $notes.Substring(0, 400) }
+
+        $manifest = [ordered]@{
+          version = $env:VERSION
+          channel = $env:CHANNEL
+          url     = $url
+          size    = $bytes.Length
+          sha256  = $sha256
+          notes   = $notes
+        }
+        $json = $manifest | ConvertTo-Json -Compress
+
+        # UTF-8 without BOM. A BOM would change the signed bytes and every client
+        # would reject the manifest.
+        $encoding = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText("MaxCall/update.json", $json, $encoding)
+        Write-Host "manifest: $json"
+
+        if (-not $env:SIGNING_KEY) {
+          Write-Host "::error::MAXCALL_SIGNING_KEY is not configured, so update.json cannot be signed."
+          Write-Host "Clients reject unsigned manifests on purpose - that is the whole point of the signature."
+          Write-Host ""
+          Write-Host "Add the secret with:"
+          Write-Host "  gh secret set MAXCALL_SIGNING_KEY < base64-of-signing-key.pem"
+          Write-Host ""
+          Write-Host "Generate the key pair once with:"
+          Write-Host "  openssl genrsa -out maxcall_signing.pem 3072"
+          Write-Host "  openssl rsa -in maxcall_signing.pem -pubout -out maxcall_signing.pub"
+          Write-Host "and paste the little-endian BCRYPT_RSAKEY_BLOB into UpdatePublicKey.h."
+          throw "MAXCALL_SIGNING_KEY is not configured"
+        }
+
+        $pem = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($env:SIGNING_KEY))
+        $rsa = [System.Security.Cryptography.RSA]::Create()
+        $rsa.ImportFromPem($pem)
+        $signature = $rsa.SignData(
+          [System.IO.File]::ReadAllBytes("MaxCall/update.json"),
+          [System.Security.Cryptography.HashAlgorithmName]::SHA256,
+          [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+
+        $sigText = [System.Convert]::ToBase64String($signature) + "`n"
+        [System.IO.File]::WriteAllText("MaxCall/update.json.sig", $sigText, $encoding)
+        Write-Host "signed with a $($rsa.KeySize)-bit key"
+
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
@@ -137,13 +296,37 @@ jobs:
         path: MaxCall
         retention-days: 30
 
-    - name: Create Release
+    # The release people actually open: one file, nothing else.
+    - name: Publish MaxCall.exe
       uses: softprops/action-gh-release@v2
       with:
-        name: ${{ startsWith(github.ref, 'refs/tags/') && format('MaxCall {0}', github.ref_name) || 'MaxCall Latest Build' }}
-        tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'latest' }}
+        name: ${{ needs.resolve-version.outputs.release_name }}
+        tag_name: ${{ needs.resolve-version.outputs.release_tag }}
+        prerelease: ${{ needs.resolve-version.outputs.prerelease }}
+        make_latest: ${{ needs.resolve-version.outputs.make_latest }}
         files: |
           MaxCall/MaxCall.exe
+        body: |
+          Download **MaxCall.exe**, put it in a folder named `MaxCall` and run it.
+          No installer and no companion files - future versions install themselves.
+
+          Current version: **${{ needs.resolve-version.outputs.version }}**
         generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    # The manifest lives on its own prerelease so it is never shown as the
+    # latest build and never appears next to the download people click.
+    - name: Publish updater manifest
+      uses: softprops/action-gh-release@v2
+      with:
+        name: MaxCall updater manifest (${{ needs.resolve-version.outputs.channel }})
+        tag_name: ${{ needs.resolve-version.outputs.manifest_tag }}
+        prerelease: true
+        make_latest: false
+        files: |
+          MaxCall/update.json
+          MaxCall/update.json.sig
+        body: Machine-only metadata consumed by MaxCall's self-updater. Do not download.
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

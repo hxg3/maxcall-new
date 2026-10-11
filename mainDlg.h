@@ -25,6 +25,7 @@
 #include "define.h"
 #include "json.h"
 #include "addons.h"
+#include "AppUpdater.h"
 #include <pjsua-lib/pjsua.h>
 #include <pjsua-lib/pjsua_internal.h>
 
@@ -276,7 +277,28 @@ public:
 
 	afx_msg void OnCheckUpdates();
 	afx_msg void CheckUpdates();
-	afx_msg LRESULT OnUpdateCheckerLoaded(WPARAM wParam, LPARAM lParam);
+
+	// --- self update (AppUpdater) -------------------------------------------
+	void CheckForUpdates(bool manual);
+	void InstallUpdate();
+	void DismissUpdate();
+	void PushUpdateStateToShell();
+	void ApplyUpdateAndRestart();
+	afx_msg void OnMenuCheckUpdates();
+	afx_msg void OnMenuInstallUpdate();
+	afx_msg void OnMenuUpdateChannel(UINT nID);
+	afx_msg LRESULT OnUpdateEvent(WPARAM wParam, LPARAM lParam);
+	void ScheduleUpdateCheck();
+
+	AppUpdate::SManifest m_updateManifest;
+	AppUpdate::SProgress m_updateProgress;
+	int m_updateState;
+	int m_updatePercent;
+	CString m_updateMessage;
+	bool m_updateBusy;
+	bool m_updateDismissed;
+	HANDLE m_updateThread;
+
 #ifdef _GLOBAL_VIDEO
 	afx_msg void createPreviewWin();
 #endif

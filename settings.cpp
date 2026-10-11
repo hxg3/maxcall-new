@@ -534,6 +534,11 @@ void AccountSettings::Init()
 	str.ReleaseBuffer();
 	checkUpdatesTime = _wtoi(str);
 
+	ptr = str.GetBuffer(255);
+	GetPrivateProfileString(section, _T("updateChannel"), _T("0"), ptr, 256, iniFile);
+	str.ReleaseBuffer();
+	updateChannel = (str == _T("1")) ? 1 : 0;
+
 	// load ini settings
 
 	ptr = str.GetBuffer(255);
@@ -1086,6 +1091,7 @@ void AccountSettings::SettingsSave()
 	WritePrivateProfileString(section, _T("updatesInterval"), updatesInterval, iniFile);
 	str.Format(_T("%d"), checkUpdatesTime);
 	WritePrivateProfileString(section, _T("checkUpdatesTime"), str, iniFile);
+	WritePrivateProfileString(section, _T("updateChannel"), updateChannel ? _T("1") : _T("0"), iniFile);
 
 	// save ini settings
 
