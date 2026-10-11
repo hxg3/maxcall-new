@@ -281,9 +281,34 @@ void LoginWebDlg::InitWebView2()
 	CreateCoreWebView2Environment(cb);
 }
 
+// The WebView2 bootstrap used to swallow every failure, so a missing runtime or
+// a blocked runtime folder produced a completely blank window with nothing in
+// the log. Every step now records its HRESULT and reports it to the user.
+static void LoginDiag(const CString& step, HRESULT hr)
+{
+	CString line;
+	line.Format(_T("[login] %s hr=0x%08lX"), (LPCTSTR)step, (unsigned long)hr);
+	FILE* f = fopen("maxcall_debug.log", "a");
+	if (f) {
+		fprintf(f, "%ls\n", (LPCTSTR)line);
+		fclose(f);
+	}
+}
+
+static void LoginFail(HWND hWnd, const CString& detail)
+{
+	LoginDiag(_T("FAILED ") + detail, E_FAIL);
+	MessageBox(hWnd,
+		_T("MaxCall could not start its display engine.\n\n")
+		_T("Install or repair the Microsoft Edge WebView2 Runtime, then run MaxCall again.\n\n")
+		_T("Details: ") + detail,
+		_T("MaxCall"), MB_ICONERROR | MB_OK);
+}
+
 // LoginEnvCallback implementation
 HRESULT LoginEnvCallback::Invoke(HRESULT result, ICoreWebView2Environment* env)
 {
+	LoginDiag(_T("CreateCoreWebView2Environment"), result);
 	if (SUCCEEDED(result) && env) {
 		m_dlg->m_env = env;
 		env->AddRef();
@@ -292,12 +317,16 @@ HRESULT LoginEnvCallback::Invoke(HRESULT result, ICoreWebView2Environment* env)
 		env->CreateCoreWebView2Controller(m_dlg->m_hWnd, ctrlCb);
 		ctrlCb->Release();
 	}
+	else {
+		LoginFail(m_dlg->m_hWnd, _T("the WebView2 runtime is unavailable"));
+	}
 	return S_OK;
 }
 
 // LoginCtrlCallback implementation
 HRESULT LoginCtrlCallback::Invoke(HRESULT result, ICoreWebView2Controller* controller)
 {
+	LoginDiag(_T("CreateCoreWebView2Controller"), result);
 	if (SUCCEEDED(result) && controller) {
 		m_dlg->m_controller = controller;
 		controller->AddRef();
@@ -324,6 +353,9 @@ HRESULT LoginCtrlCallback::Invoke(HRESULT result, ICoreWebView2Controller* contr
 				&token);
 
 			HRSRC hRes = FindResource(NULL, MAKEINTRESOURCE(IDR_LOGIN_HTML), RT_RCDATA);
+			if (!hRes) {
+				LoginFail(m_dlg->m_hWnd, _T("the sign-in page is missing from this build"));
+			}
 			if (hRes) {
 				HGLOBAL hData = LoadResource(NULL, hRes);
 				if (hData) {
@@ -335,7 +367,11 @@ HRESULT LoginCtrlCallback::Invoke(HRESULT result, ICoreWebView2Controller* contr
 							CStringW htmlStr;
 							MultiByteToWideChar(CP_UTF8, 0, data, size, htmlStr.GetBuffer(wideLen), wideLen);
 							htmlStr.ReleaseBuffer(wideLen);
+							LoginDiag(_T("NavigateToString login.html chars=") + CString((int)wideLen), S_OK);
 							wv->NavigateToString(htmlStr.GetString());
+						}
+						else {
+							LoginFail(m_dlg->m_hWnd, _T("the sign-in page could not be decoded"));
 						}
 						UnlockResource(hData);
 					}
@@ -343,6 +379,9 @@ HRESULT LoginCtrlCallback::Invoke(HRESULT result, ICoreWebView2Controller* contr
 				FreeResource(hRes);
 			}
 		}
+	}
+	else {
+		LoginFail(m_dlg->m_hWnd, _T("the WebView2 controller could not be created"));
 	}
 	return S_OK;
 }
