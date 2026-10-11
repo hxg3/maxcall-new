@@ -354,7 +354,7 @@ void CrmPopupDlg::LoadCallerInfo()
 	if (cleanNumber.IsEmpty()) cleanNumber = callerNumber;
 
 	CString url;
-	url.Format(_T("http://192.168.1.165:3001/api/callers/%s"), UrlEncodeCallerNumber(cleanNumber));
+	url.Format(_T("http://maxcall.local:3001/api/callers/%s"), UrlEncodeCallerNumber(cleanNumber));
 
 	URLGetAsync(url, m_hWnd, WM_CRM_LOAD_RESULT);
 }
@@ -372,7 +372,7 @@ void CrmPopupDlg::FetchCallerHistory()
 		return;
 	}
 	CString url;
-	url.Format(_T("http://192.168.1.165:3001/api/callers/%s/history"), UrlEncodeCallerNumber(cleanNumber));
+	url.Format(_T("http://maxcall.local:3001/api/callers/%s/history"), UrlEncodeCallerNumber(cleanNumber));
 
 	URLGetAsync(url, m_hWnd, WM_CRM_HISTORY);
 }
@@ -451,7 +451,7 @@ void CrmPopupDlg::SaveCallerInfo()
 	cleanNumber.Trim();
 	if (cleanNumber.IsEmpty()) cleanNumber = callerNumber;
 
-	CString url = _T("http://192.168.1.165:3001/api/callers");
+	CString url = _T("http://maxcall.local:3001/api/callers");
 
 	if(fp = fopen("maxcall_debug.log", "a")) { fprintf(fp, "Calling EscapeJson\n"); fclose(fp); }
 	CString phone = EscapeJson(cleanNumber);
