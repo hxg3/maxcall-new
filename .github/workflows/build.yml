@@ -277,7 +277,20 @@ jobs:
           throw "MAXCALL_SIGNING_KEY is not configured"
         }
 
-        $pem = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($env:SIGNING_KEY))
+        # The secret may hold either the raw PEM (what `gh secret set < file`
+        # stores) or its base64 form, so both are accepted.
+        $raw = $env:SIGNING_KEY
+        if ($raw -match '-----BEGIN') {
+          $pem = $raw
+        }
+        else {
+          $compact = ($raw -replace '\s', '')
+          $pem = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($compact))
+        }
+        if ($pem -notmatch '-----BEGIN') {
+          throw "MAXCALL_SIGNING_KEY is set but holds neither a PEM nor a base64 encoded PEM"
+        }
+
         $rsa = [System.Security.Cryptography.RSA]::Create()
         $rsa.ImportFromPem($pem)
         $signature = $rsa.SignData(
