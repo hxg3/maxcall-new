@@ -288,17 +288,23 @@ CString SignatureUrl(EUpdateChannel channel)
 // but not for a channel that ends in running a downloaded executable.
 // ---------------------------------------------------------------------------
 
-// Transport uses MFC's CInternetSession wrapper, the same API global.cpp already
-// relies on for URLGetAsync. Certificate validation is left at its default (on):
-// unlike that helper we never disable any of the SECURITY_FLAG_IGNORE_* checks,
-// because this channel ends in running a downloaded executable.
+// Transport reuses MFC's CInternetSession wrapper through exactly the calls
+// global.cpp already makes for URLGetAsync (GetHttpConnection / OpenRequest /
+// SendRequest / QueryInfoStatusCode / QueryInfo / Read), so nothing here depends
+// on an API this project has not already proven it can compile and link.
+//
+// Certificate validation is deliberately left at its default (on). URLGetAsync
+// switches every SECURITY_FLAG_IGNORE_* check off, which is tolerable for a CRM
+// lookup but not for a channel that ends in running a downloaded executable.
 struct SHttpSession
 {
 	CInternetSession session;
 	CHttpConnection* connection;
 	CHttpFile* file;
+	DWORD contentLength;
+	DWORD statusCode;
 
-	SHttpSession() : connection(NULL), file(NULL) {}
+	SHttpSession() : connection(NULL), file(NULL), contentLength(0), statusCode(0) {}
 	~SHttpSession() { Close(); }
 
 	void Close()
@@ -309,7 +315,7 @@ struct SHttpSession
 };
 
 // Splits an absolute URL into the parts the transport needs. Deliberately hand
-// rolled: MFC offers AfxParseURL and AfxParseURLEx with different parameter
+// rolled: MFC ships AfxParseURL and AfxParseURLEx with different parameter
 // lists, and this module needs neither userinfo nor a service-type enum.
 static bool SplitUrl(const CString& url, CString& scheme, CString& host,
 	INTERNET_PORT& port, CString& object)
@@ -357,11 +363,24 @@ static bool IsAllowedUpdateHost(const CString& host)
 		|| host.CompareNoCase(_T("github-releases.githubusercontent.com")) == 0;
 }
 
-static bool HttpOpen(const CString& url, SHttpSession& http, DWORD& statusCode,
-	CString& error, DWORD timeoutMs)
+// Content-Length straight out of the raw header block, so the progress bar and
+// the truncation check do not depend on a typed QueryInfo overload.
+static DWORD ParseContentLength(const CString& rawHeaders)
 {
-	statusCode = 0;
+	for (CString line = rawHeaders; !line.IsEmpty(); ) {
+		int eol = line.Find(_T("\r\n"));
+		CString header = (eol < 0) ? line : line.Left(eol);
+		line = (eol < 0) ? CString() : line.Mid(eol + 2);
+		int colon = header.Find(_T(':'));
+		if (colon > 0 && header.Left(colon).CompareNoCase(_T("Content-Length")) == 0) {
+			return (DWORD)_ttoi(header.Mid(colon + 1));
+		}
+	}
+	return 0;
+}
 
+static bool HttpOpen(const CString& url, SHttpSession& http, CString& error, DWORD timeoutMs)
+{
 	CString scheme, host, object;
 	INTERNET_PORT port = INTERNET_DEFAULT_HTTPS_PORT;
 	if (!SplitUrl(url, scheme, host, port, object)) {
@@ -375,37 +394,58 @@ static bool HttpOpen(const CString& url, SHttpSession& http, DWORD& statusCode,
 		return false;
 	}
 
-	DWORD timeout = timeoutMs / 1000;
-	if (timeout == 0) {
-		timeout = 1;
-	}
-	http.session.SetOption(INTERNET_OPTION_CONNECT_TIMEOUT, &timeout, sizeof(timeout));
+	try {
+		http.connection = http.session.GetHttpConnection(host, INTERNET_FLAG_SECURE, port);
+		if (!http.connection) {
+			error = _T("Cannot reach the update server.");
+			return false;
+		}
 
-	http.connection = http.session.GetHttpConnection(host, INTERNET_FLAG_SECURE, port);
-	if (!http.connection) {
-		error = _T("Cannot reach the update server.");
+		http.file = http.connection->OpenRequest(_T("GET"), object, NULL, 1, NULL, 0,
+			INTERNET_FLAG_RELOAD | INTERNET_FLAG_DONT_CACHE | INTERNET_FLAG_KEEP_CONNECTION);
+		if (!http.file) {
+			error = _T("Cannot create the update request.");
+			return false;
+		}
+
+		DWORD timeout = timeoutMs / 1000;
+		if (timeout == 0) {
+			timeout = 1;
+		}
+		http.file->SetOption(INTERNET_OPTION_CONNECT_TIMEOUT, timeout);
+		http.file->SetOption(INTERNET_OPTION_RECEIVE_TIMEOUT, timeout);
+		http.file->SetOption(INTERNET_OPTION_SEND_TIMEOUT, timeout);
+
+		if (!http.file->SendRequest()) {
+			error = _T("The update server did not answer.");
+			return false;
+		}
+
+		http.file->QueryInfoStatusCode(http.statusCode);
+
+		CString rawHeaders;
+		if (http.file->QueryInfo(HTTP_QUERY_RAW_HEADERS_CRLF, rawHeaders)) {
+			http.contentLength = ParseContentLength(rawHeaders);
+		}
+	}
+	catch (CInternetException* e) {
+		error = _T("The update server could not be reached.");
+		e->Delete();
 		return false;
 	}
-	http.connection->SetOption(INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof(timeout));
-	http.connection->SetOption(INTERNET_OPTION_SEND_TIMEOUT, &timeout, sizeof(timeout));
-
-	http.file = http.connection->OpenRequest(_T("GET"), object, NULL, NULL, NULL,
-		INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE | INTERNET_FLAG_KEEP_CONNECTION, 0);
-	if (!http.file) {
-		error = _T("Cannot create the update request.");
+	catch (...) {
+		error = _T("The update server could not be reached.");
 		return false;
 	}
-
-	statusCode = http.file->GetStatusCode();
 	return true;
 }
 
-// Reads one response body. CHttpFile reports end of stream as a zero-length read
+// Reads the response body. CHttpFile reports end of stream as a zero-length read
 // and does not distinguish it from a failure, so a short body is caught afterwards
-// by comparing against Content-Length. maxBytes stops a hostile or broken server
-// from making the client allocate without bound.
-static bool ReadBody(CHttpFile* file, CByteArray& out, DWORD expected, DWORD maxBytes,
-	CString& error)
+// by comparing against Content-Length. maxBytes stops a broken server from making
+// the client allocate without bound.
+static bool ReadBody(CHttpFile* file, DWORD expected, DWORD maxBytes,
+	CByteArray& out, CString& error)
 {
 	out.SetSize(0);
 	CByteArray chunk;
@@ -433,18 +473,27 @@ static bool ReadBody(CHttpFile* file, CByteArray& out, DWORD expected, DWORD max
 bool HttpGet(const CString& url, CByteArray& body, DWORD& statusCode, CString& error, DWORD timeoutMs)
 {
 	body.SetSize(0);
+	statusCode = 0;
 
 	SHttpSession http;
-	if (!HttpOpen(url, http, statusCode, error, timeoutMs)) {
+	if (!HttpOpen(url, http, error, timeoutMs)) {
 		return false;
 	}
+	statusCode = http.statusCode;
 	if (statusCode != HTTP_STATUS_OK) {
 		CString msg;
 		msg.Format(_T("The update server returned HTTP %u."), statusCode);
 		error = msg;
 		return false;
 	}
-	return ReadBody(http.file, body, http.file->GetLength(), 512 * 1024, error);
+	try {
+		return ReadBody(http.file, http.contentLength, 512 * 1024, body, error);
+	}
+	catch (CInternetException* e) {
+		error = _T("The update metadata could not be read.");
+		e->Delete();
+		return false;
+	}
 }
 
 bool HttpDownloadToFile(const CString& url, const CString& path, DWORD& totalBytes,
@@ -454,20 +503,18 @@ bool HttpDownloadToFile(const CString& url, const CString& path, DWORD& totalByt
 	downloadedBytes = 0;
 
 	SHttpSession http;
-	DWORD statusCode = 0;
-	if (!HttpOpen(url, http, statusCode, error, timeoutMs)) {
+	if (!HttpOpen(url, http, error, timeoutMs)) {
 		return false;
 	}
-	if (statusCode != HTTP_STATUS_OK) {
+	if (http.statusCode != HTTP_STATUS_OK) {
 		CString msg;
-		msg.Format(_T("The update server returned HTTP %u."), statusCode);
+		msg.Format(_T("The update server returned HTTP %u."), http.statusCode);
 		error = msg;
 		return false;
 	}
-	// CHttpFile records Content-Length while parsing the headers. When the server
-	// answers with chunked encoding the total is unknown and the UI simply shows an
-	// indeterminate bar rather than inventing a percentage.
-	totalBytes = http.file->GetLength();
+	// When the server answers with chunked encoding the length stays unknown and
+	// the UI shows an indeterminate bar rather than inventing a percentage.
+	totalBytes = http.contentLength;
 
 	HANDLE hOut = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
 		FILE_ATTRIBUTE_NORMAL, NULL);
@@ -479,38 +526,45 @@ bool HttpDownloadToFile(const CString& url, const CString& path, DWORD& totalByt
 	CByteArray chunk;
 	chunk.SetSize((int)kChunkSize);
 	bool ok = true;
-	for (;;) {
-		if (progress && progress->Cancelled()) {
-			error = _T("cancelled");
-			ok = false;
-			break;
-		}
-		UINT read = http.file->Read(chunk.GetData(), (UINT)chunk.GetSize());
-		if (read == 0) {
-			break;
-		}
-		DWORD written = 0;
-		if (!WriteFile(hOut, chunk.GetData(), read, &written, NULL) || written != read) {
-			error = _T("Writing the update to disk failed.");
-			ok = false;
-			break;
-		}
-		downloadedBytes += read;
-		if (progress) {
-			// ULONGLONG keeps the percentage correct past ~42 MB, and only a real
-			// change is reported so the message queue stays at ~100 entries.
-			int pct = totalBytes
-				? (int)(((ULONGLONG)downloadedBytes * 100) / totalBytes) : 0;
-			if (pct != progress->percent) {
-				progress->Report(pct);
+	try {
+		for (;;) {
+			if (progress && progress->Cancelled()) {
+				error = _T("cancelled");
+				ok = false;
+				break;
+			}
+			UINT read = http.file->Read(chunk.GetData(), (UINT)chunk.GetSize());
+			if (read == 0) {
+				break;
+			}
+			DWORD written = 0;
+			if (!WriteFile(hOut, chunk.GetData(), read, &written, NULL) || written != read) {
+				error = _T("Writing the update to disk failed.");
+				ok = false;
+				break;
+			}
+			downloadedBytes += read;
+			if (progress) {
+				// ULONGLONG keeps the percentage correct past ~42 MB, and only a
+				// real change is reported so the queue stays around 100 messages.
+				int pct = totalBytes
+					? (int)(((ULONGLONG)downloadedBytes * 100) / totalBytes) : 0;
+				if (pct != progress->percent) {
+					progress->Report(pct);
+				}
 			}
 		}
+	}
+	catch (CInternetException* e) {
+		error = _T("The update download was interrupted.");
+		e->Delete();
+		ok = false;
 	}
 
 	CloseHandle(hOut);
 
 	// A short read means the transfer was cut, not that the server had nothing
-	// more to say; the caller's checksum would catch it but the message is clearer.
+	// more to say.
 	if (ok && totalBytes > 0 && downloadedBytes != totalBytes) {
 		error = _T("The update download was cut short. Try again.");
 		ok = false;
