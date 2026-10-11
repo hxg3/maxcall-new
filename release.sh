@@ -201,7 +201,10 @@ cmd_verify() {
 
   say ""
   say "  Releases a user opens should list exactly one asset:"
-  for t in "$BETA_TAG" $(gh release list --repo "$REPO" --limit 5 --json tagName --jq '.[].tagName'); do
+  local tags
+  tags="$(gh release list --repo "$REPO" --limit 8 --json tagName --jq '.[].tagName' 2>/dev/null \
+    | grep -v '^manifest-' || true)"
+  for t in $tags; do
     local assets
     assets="$(gh release view "$t" --repo "$REPO" --json assets --jq '.assets[].name' 2>/dev/null | tr '\n' ' ')"
     if [[ "$assets" == "MaxCall.exe " ]]; then
