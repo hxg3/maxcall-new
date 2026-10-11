@@ -3,10 +3,9 @@
 #include "UpdatePublicKey.h"
 #include "define.h"
 
-#include <wininet.h>
+#include <afxinet.h>
 #include <shlobj.h>
 
-#pragma comment(lib, "wininet.lib")
 #pragma comment(lib, "shell32.lib")
 
 // targetver.h still pins _WIN32_WINNT to the XP level. BCrypt is Vista+, and we
@@ -64,7 +63,6 @@ static void BytesToHex(const unsigned char* data, int len, CString& hexOut)
 {
 	static const TCHAR* digits = _T("0123456789abcdef");
 	hexOut.Empty();
-	hexOut.PreAllocate(len * 2);
 	for (int i = 0; i < len; i++) {
 		hexOut.AppendChar(digits[(data[i] >> 4) & 0x0F]);
 		hexOut.AppendChar(digits[data[i] & 0x0F]);
@@ -95,7 +93,7 @@ static bool Base64Decode(const CByteArray& input, CByteArray& out)
 		bits += 6;
 		if (bits >= 8) {
 			bits -= 8;
-			out.AddElement((char)((acc >> bits) & 0xFF));
+			out.Add((BYTE)((acc >> bits) & 0xFF));
 		}
 	}
 	return out.GetSize() > 0;
@@ -185,7 +183,7 @@ static void SplitCore(const CString& core, long long parts[3])
 	for (int i = 0; i < 3; i++) {
 		int dot = rest.Find(_T('.'));
 		CString piece = (dot < 0) ? rest : rest.Left(dot);
-		parts[i] = piece.IsEmpty() ? 0 : _tcstoi64(piece);
+		parts[i] = piece.IsEmpty() ? 0 : _tcstoi64(piece, NULL, 10);
 		if (dot < 0) {
 			break;
 		}
@@ -231,7 +229,7 @@ static int ComparePreRelease(const CString& a, const CString& b)
 
 		int cmp;
 		if (na && nb) {
-			long long va = _tcstoi64(ia), vb = _tcstoi64(ib);
+			long long va = _tcstoi64(ia, NULL, 10), vb = _tcstoi64(ib, NULL, 10);
 			cmp = (va < vb) ? -1 : (va > vb) ? 1 : 0;
 		}
 		else if (na != nb) {
@@ -290,26 +288,29 @@ CString SignatureUrl(EUpdateChannel channel)
 // but not for a channel that ends in running a downloaded executable.
 // ---------------------------------------------------------------------------
 
+// Transport uses MFC's CInternetSession wrapper, the same API global.cpp already
+// relies on for URLGetAsync. Certificate validation is left at its default (on):
+// unlike that helper we never disable any of the SECURITY_FLAG_IGNORE_* checks,
+// because this channel ends in running a downloaded executable.
 struct SHttpSession
 {
-	HINTERNET hInternet;
-	HINTERNET hConnect;
-	HINTERNET hRequest;
+	CInternetSession session;
+	CHttpConnection* connection;
+	CHttpFile* file;
 
-	SHttpSession() : hInternet(NULL), hConnect(NULL), hRequest(NULL) {}
+	SHttpSession() : connection(NULL), file(NULL) {}
 	~SHttpSession() { Close(); }
 
 	void Close()
 	{
-		if (hRequest) { InternetCloseHandle(hRequest); hRequest = NULL; }
-		if (hConnect) { InternetCloseHandle(hConnect); hConnect = NULL; }
-		if (hInternet) { InternetCloseHandle(hInternet); hInternet = NULL; }
+		if (file) { file->Close(); delete file; file = NULL; }
+		if (connection) { connection->Close(); delete connection; connection = NULL; }
 	}
 };
 
-// Splits an absolute URL into the parts WinInet wants. Deliberately hand rolled:
-// AfxParseURL and AfxParseURLEx have different parameter lists across MFC
-// versions, and this module needs neither userinfo nor a service-type enum.
+// Splits an absolute URL into the parts the transport needs. Deliberately hand
+// rolled: MFC offers AfxParseURL and AfxParseURLEx with different parameter
+// lists, and this module needs neither userinfo nor a service-type enum.
 static bool SplitUrl(const CString& url, CString& scheme, CString& host,
 	INTERNET_PORT& port, CString& object)
 {
@@ -346,7 +347,7 @@ static bool SplitUrl(const CString& url, CString& scheme, CString& host,
 }
 
 // Release assets live on github.com and are served from GitHub's CDN. Anything
-// else means the manifest was tampered with or the repo moved.
+// else means the manifest was tampered with or the repository moved.
 static bool IsAllowedUpdateHost(const CString& host)
 {
 	return host.CompareNoCase(_T("github.com")) == 0
@@ -356,93 +357,85 @@ static bool IsAllowedUpdateHost(const CString& host)
 		|| host.CompareNoCase(_T("github-releases.githubusercontent.com")) == 0;
 }
 
-static void ApplyTimeouts(HINTERNET h, DWORD timeoutMs)
-{
-	if (h && timeoutMs) {
-		InternetSetOptionW(h, INTERNET_OPTION_CONNECT_TIMEOUT, &timeoutMs, sizeof(timeoutMs));
-		InternetSetOptionW(h, INTERNET_OPTION_SEND_TIMEOUT, &timeoutMs, sizeof(timeoutMs));
-		InternetSetOptionW(h, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeoutMs, sizeof(timeoutMs));
-	}
-}
-
-static bool HttpOpen(const CString& url, SHttpSession& session, DWORD& statusCode,
+static bool HttpOpen(const CString& url, SHttpSession& http, DWORD& statusCode,
 	CString& error, DWORD timeoutMs)
 {
 	statusCode = 0;
 
-	CString scheme, strServer, strObject;
-	INTERNET_PORT nPort = INTERNET_DEFAULT_HTTPS_PORT;
-	if (!SplitUrl(url, scheme, strServer, nPort, strObject)) {
+	CString scheme, host, object;
+	INTERNET_PORT port = INTERNET_DEFAULT_HTTPS_PORT;
+	if (!SplitUrl(url, scheme, host, port, object)) {
 		error = _T("The update URL is malformed or is not HTTPS.");
 		return false;
 	}
 	// The manifest is signed, so this is defence in depth rather than the primary
-	// control: nothing outside the release host may ever receive an executable.
-	if (!IsAllowedUpdateHost(strServer)) {
+	// control: no executable may be fetched from anywhere but the release host.
+	if (!IsAllowedUpdateHost(host)) {
 		error = _T("The update is hosted on an unexpected server and was refused.");
 		return false;
 	}
 
-	session.hInternet = InternetOpenW(_T("MaxCall"), INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
-	if (!session.hInternet) {
-		error = _T("The network stack is unavailable.");
-		return false;
+	DWORD timeout = timeoutMs / 1000;
+	if (timeout == 0) {
+		timeout = 1;
 	}
-	ApplyTimeouts(session.hInternet, timeoutMs);
-	// Never surface a proxy credential prompt: this client only talks to public URLs.
-	DWORD anon = INTERNET_AUTOLOGON_ANONYMOUS;
-	InternetSetOptionW(session.hInternet, INTERNET_OPTION_AUTOLOGON_POLICY, &anon, sizeof(anon));
-	// releases/latest/... is a redirect to a per-tag URL; make the policy explicit
-	// instead of relying on the machine-wide default.
-	DWORD follow = TRUE;
-	InternetSetOptionW(session.hInternet, INTERNET_OPTION_FOLLOW_REDIRECTS, &follow, sizeof(follow));
+	http.session.SetOption(INTERNET_OPTION_CONNECT_TIMEOUT, &timeout, sizeof(timeout));
 
-	session.hConnect = InternetConnectW(session.hInternet, strServer, nPort, NULL, NULL,
-		INTERNET_SERVICE_HTTP, INTERNET_FLAG_SECURE, 0);
-	if (!session.hConnect) {
+	http.connection = http.session.GetHttpConnection(host, INTERNET_FLAG_SECURE, port);
+	if (!http.connection) {
 		error = _T("Cannot reach the update server.");
 		return false;
 	}
+	http.connection->SetOption(INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof(timeout));
+	http.connection->SetOption(INTERNET_OPTION_SEND_TIMEOUT, &timeout, sizeof(timeout));
 
-	session.hRequest = HttpOpenRequestW(session.hConnect, _T("GET"), strObject, NULL, NULL, NULL,
-		INTERNET_FLAG_RELOAD | INTERNET_FLAG_SECURE, 0);
-	if (!session.hRequest) {
+	http.file = http.connection->OpenRequest(_T("GET"), object, NULL, NULL, NULL,
+		INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE | INTERNET_FLAG_KEEP_CONNECTION, 0);
+	if (!http.file) {
 		error = _T("Cannot create the update request.");
 		return false;
 	}
 
-	ApplyTimeouts(session.hRequest, timeoutMs);
+	statusCode = http.file->GetStatusCode();
+	return true;
+}
 
-	if (!HttpSendRequestW(session.hRequest, NULL, 0, NULL, 0)
-		|| !HttpEndRequestW(session.hRequest, NULL, 0)) {
-		error = _T("The update server did not answer.");
-		return false;
+// Reads one response body. CHttpFile reports end of stream as a zero-length read
+// and does not distinguish it from a failure, so a short body is caught afterwards
+// by comparing against Content-Length. maxBytes stops a hostile or broken server
+// from making the client allocate without bound.
+static bool ReadBody(CHttpFile* file, CByteArray& out, DWORD expected, DWORD maxBytes,
+	CString& error)
+{
+	out.SetSize(0);
+	CByteArray chunk;
+	chunk.SetSize((int)kChunkSize);
+	for (;;) {
+		UINT read = file->Read(chunk.GetData(), (UINT)chunk.GetSize());
+		if (read == 0) {
+			break;
+		}
+		int at = out.GetSize();
+		out.SetSize(at + (int)read);
+		memcpy(out.GetData() + at, chunk.GetData(), read);
+		if ((DWORD)out.GetSize() > maxBytes) {
+			error = _T("The update metadata is implausibly large.");
+			return false;
+		}
 	}
-
-	DWORD dwLength = sizeof(statusCode), dwIndex = 0;
-	if (InternetQueryInfoW(session.hRequest, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER,
-		&statusCode, &dwLength, &dwIndex)) {
-		statusCode = htonl(statusCode);
+	if (expected > 0 && (DWORD)out.GetSize() != expected) {
+		error = _T("The update metadata arrived truncated.");
+		return false;
 	}
 	return true;
 }
 
-static DWORD QueryContentLength(HINTERNET hRequest)
-{
-	DWORD total = 0, len = sizeof(total), idx = 0;
-	if (InternetQueryInfoW(hRequest, HTTP_QUERY_CONTENT_LENGTH | HTTP_QUERY_FLAG_NUMBER,
-		&total, &len, &idx)) {
-		return htonl(total);
-	}
-	return 0;
-}
-
 bool HttpGet(const CString& url, CByteArray& body, DWORD& statusCode, CString& error, DWORD timeoutMs)
 {
-	body.RemoveAll();
+	body.SetSize(0);
 
-	SHttpSession session;
-	if (!HttpOpen(url, session, statusCode, error, timeoutMs)) {
+	SHttpSession http;
+	if (!HttpOpen(url, http, statusCode, error, timeoutMs)) {
 		return false;
 	}
 	if (statusCode != HTTP_STATUS_OK) {
@@ -451,25 +444,7 @@ bool HttpGet(const CString& url, CByteArray& body, DWORD& statusCode, CString& e
 		error = msg;
 		return false;
 	}
-
-	CByteArray chunk;
-	chunk.SetSize((int)kChunkSize);
-	for (;;) {
-		DWORD read = 0;
-		if (!InternetReadFile(session.hRequest, chunk.GetData(), kChunkSize, &read)) {
-			error = _T("The connection dropped while reading the update manifest.");
-			return false;
-		}
-		if (read == 0) {
-			break;
-		}
-		body.Append(chunk.GetData(), (int)read);
-		if (body.GetSize() > 512 * 1024) {
-			error = _T("The update manifest is implausibly large.");
-			return false;
-		}
-	}
-	return true;
+	return ReadBody(http.file, body, http.file->GetLength(), 512 * 1024, error);
 }
 
 bool HttpDownloadToFile(const CString& url, const CString& path, DWORD& totalBytes,
@@ -478,9 +453,9 @@ bool HttpDownloadToFile(const CString& url, const CString& path, DWORD& totalByt
 	totalBytes = 0;
 	downloadedBytes = 0;
 
-	SHttpSession session;
+	SHttpSession http;
 	DWORD statusCode = 0;
-	if (!HttpOpen(url, session, statusCode, error, timeoutMs)) {
+	if (!HttpOpen(url, http, statusCode, error, timeoutMs)) {
 		return false;
 	}
 	if (statusCode != HTTP_STATUS_OK) {
@@ -489,7 +464,10 @@ bool HttpDownloadToFile(const CString& url, const CString& path, DWORD& totalByt
 		error = msg;
 		return false;
 	}
-	totalBytes = QueryContentLength(session.hRequest);
+	// CHttpFile records Content-Length while parsing the headers. When the server
+	// answers with chunked encoding the total is unknown and the UI simply shows an
+	// indeterminate bar rather than inventing a percentage.
+	totalBytes = http.file->GetLength();
 
 	HANDLE hOut = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
 		FILE_ATTRIBUTE_NORMAL, NULL);
@@ -507,12 +485,7 @@ bool HttpDownloadToFile(const CString& url, const CString& path, DWORD& totalByt
 			ok = false;
 			break;
 		}
-		DWORD read = 0;
-		if (!InternetReadFile(session.hRequest, chunk.GetData(), kChunkSize, &read)) {
-			error = _T("The connection dropped while downloading the update.");
-			ok = false;
-			break;
-		}
+		UINT read = http.file->Read(chunk.GetData(), (UINT)chunk.GetSize());
 		if (read == 0) {
 			break;
 		}
@@ -535,6 +508,13 @@ bool HttpDownloadToFile(const CString& url, const CString& path, DWORD& totalByt
 	}
 
 	CloseHandle(hOut);
+
+	// A short read means the transfer was cut, not that the server had nothing
+	// more to say; the caller's checksum would catch it but the message is clearer.
+	if (ok && totalBytes > 0 && downloadedBytes != totalBytes) {
+		error = _T("The update download was cut short. Try again.");
+		ok = false;
+	}
 	if (!ok) {
 		DeleteFileW(path);
 	}
