@@ -367,7 +367,9 @@ HRESULT LoginCtrlCallback::Invoke(HRESULT result, ICoreWebView2Controller* contr
 							CStringW htmlStr;
 							MultiByteToWideChar(CP_UTF8, 0, data, size, htmlStr.GetBuffer(wideLen), wideLen);
 							htmlStr.ReleaseBuffer(wideLen);
-							LoginDiag(_T("NavigateToString login.html chars=") + CString((int)wideLen), S_OK);
+							CString navigated;
+							navigated.Format(_T("NavigateToString login.html chars=%d"), wideLen);
+							LoginDiag(navigated, S_OK);
 							wv->NavigateToString(htmlStr.GetString());
 						}
 						else {
