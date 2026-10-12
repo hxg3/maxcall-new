@@ -46,13 +46,15 @@ protected:
 	DECLARE_MESSAGE_MAP()
 
 public:
+	// Driven from the WebView2 callback objects, which are not members.
+	void ArmWebViewWatchdog();
+
 	void* m_controller;
 	void* m_webView;
 	void* m_env;
 
 private:
 	void InitWebView2();
-	void ArmWebViewWatchdog();
 	void ReportWebViewTimeout();
 	bool m_webReady;
 	void ExecuteLoginScript(const CString& js);

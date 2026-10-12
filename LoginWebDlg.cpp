@@ -255,8 +255,8 @@ END_MESSAGE_MAP()
 
 static CString LoginWindowTitle()
 {
-	CString title = _T(_GLOBAL_NAME_NICE) + _T(" - Sign in ");
-	title += _T(_GLOBAL_VERSION);
+	CString title;
+	title.Format(_T("%s - Sign in %s"), _T(_GLOBAL_NAME_NICE), _T(_GLOBAL_VERSION));
 	return title;
 }
 
@@ -427,7 +427,7 @@ void LoginWebDlg::ReportWebViewTimeout()
 		_T("Install or repair it, then start MaxCall again.\n\n")
 		_T("Technical details were written to maxcall_debug.log next to this program."),
 		(LPCTSTR)_T(_GLOBAL_VERSION));
-	MessageBox(m_hWnd, message, _T("MaxCall"), MB_ICONERROR | MB_OK);
+	::MessageBox(m_hWnd, message, _T("MaxCall"), MB_ICONERROR | MB_OK);
 	EndDialog(IDCANCEL);
 }
 
