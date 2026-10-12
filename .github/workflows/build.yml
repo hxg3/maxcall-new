@@ -64,15 +64,37 @@ jobs:
           echo "prerelease=false"      >> "$GITHUB_OUTPUT"
           echo "make_latest=true"      >> "$GITHUB_OUTPUT"
         else
-          # A commit on main: ship the next patch as a beta so it always sorts
-          # above the last stable release (6.1.5 -> 6.1.6-beta.<run>).
           if [[ -n "$last_tag" && "${last_tag#v}" != "$declared" ]]; then
             echo "::warning::const.h still says $declared while $last_tag is released."
             echo "::warning::Bump it, or release the next version with ./release.sh release <x.y.z>."
           fi
-          last_tag="${last_tag:-v$declared}"
-          core="${last_tag#v}"
-          IFS=. read -r maj min pat <<< "$core"
+
+          # Beta numbering is its own counter and never shares state with the
+          # stable tags. Each build takes the highest base version seen so far -
+          # from the last stable tag OR from the beta manifest already published -
+          # and adds one, so a testing run walks 6.1.6, 6.1.7, 6.1.8 ... and the
+          # final release lands on whatever comes next. Users never see any of it
+          # because the beta manifest lives on its own channel.
+          current_beta=""
+          if published=$(gh release download "$MANIFEST_BETA_TAG" \
+                 --repo "$GITHUB_REPOSITORY" --pattern 'update.json' \
+                 --dir "$RUNNER_TEMP" --clobber 2>/dev/null); then
+            current_beta=$(python3 -c \
+              "import json,sys;print(json.load(open(sys.argv[1]))['version'])" \
+              "$RUNNER_TEMP/update.json" 2>/dev/null || echo "")
+          fi
+          echo "previous beta build: ${current_beta:-none}"
+
+          base="${last_tag#v}"
+          if [[ -n "$current_beta" ]]; then
+            beta_base="${current_beta%%-*}"
+            # Numeric compare per component, so 6.1.9 never beats 6.1.10.
+            highest=$(printf '%s\n%s\n' "$base" "$beta_base" | sort -t. -k1,1n -k2,2n -k3,3n | tail -n1)
+            base="$highest"
+          fi
+          base="${base%%-*}"
+          base="${base:-$declared}"
+          IFS=. read -r maj min pat <<< "$base"
           next_patch=$((pat + 1))
           version="${maj}.${min}.${next_patch}-beta.${GITHUB_RUN_NUMBER}"
           echo "version=$version"     >> "$GITHUB_OUTPUT"

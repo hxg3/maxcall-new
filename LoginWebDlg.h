@@ -11,6 +11,9 @@ struct ICoreWebView2Environment;
 #define WM_LOGIN_WEB_MESSAGE (WM_USER + 112)
 #define WM_LOGIN_WEB_RESULT (WM_USER + 113)
 
+// Give up on the WebView2 bootstrap rather than sitting on a blank window.
+#define IDT_LOGIN_WEBVIEW_TIMEOUT 1
+
 // LoginWebDlg — شاشة تسجيل الدخول الحديثة (WebView2).
 // نفس منطق LoginDlg تماماً (POST إلى /api/agent/login ثم تعبئة
 // accountSettings في الذاكرة) لكن الواجهة web-shell/login.html.
@@ -39,6 +42,7 @@ protected:
 	virtual void PostNcDestroy();
 	afx_msg LRESULT OnLoginWebMessage(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnLoginWebResult(WPARAM wParam, LPARAM lParam);
+	afx_msg void OnTimer(UINT_PTR nIDEvent);
 	DECLARE_MESSAGE_MAP()
 
 public:
@@ -48,6 +52,9 @@ public:
 
 private:
 	void InitWebView2();
+	void ArmWebViewWatchdog();
+	void ReportWebViewTimeout();
+	bool m_webReady;
 	void ExecuteLoginScript(const CString& js);
 	void ProcessLoginMessage(CString& message);
 	void PushLoginBusy(bool busy);

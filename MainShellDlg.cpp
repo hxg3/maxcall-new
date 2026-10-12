@@ -181,6 +181,15 @@ BEGIN_MESSAGE_MAP(MainShellDlg, CBaseDialog)
 	ON_MESSAGE(WM_SHELL_HISTORY, &MainShellDlg::OnShellHistory)
 END_MESSAGE_MAP()
 
+// The version belongs on screen: beta and stable builds sit side by side during
+// testing, and a build that cannot be identified cannot be reported on.
+static CString ShellWindowTitle()
+{
+	CString title = _T(_GLOBAL_NAME_NICE);
+	title.AppendFormat(_T(" %s"), (LPCTSTR)_T(_GLOBAL_VERSION));
+	return title;
+}
+
 BOOL MainShellDlg::OnInitDialog()
 {
 	CBaseDialog::OnInitDialog();
@@ -190,6 +199,8 @@ BOOL MainShellDlg::OnInitDialog()
 	HICON hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
 	SetIcon(hIcon, TRUE);
 	SetIcon(hIcon, FALSE);
+
+	SetWindowText(ShellWindowTitle());
 
 	SetClassLongPtr(m_hWnd, GCLP_HBRBACKGROUND, (LONG_PTR)CreateSolidBrush(MAXCALL_SURFACE));
 

@@ -219,6 +219,7 @@ LoginWebDlg::LoginWebDlg(CWnd* pParent)
 	m_controller = nullptr;
 	m_webView = nullptr;
 	m_env = nullptr;
+	m_webReady = false;
 }
 
 LoginWebDlg::~LoginWebDlg(void)
@@ -247,9 +248,17 @@ void LoginWebDlg::DoDataExchange(CDataExchange* pDX)
 BEGIN_MESSAGE_MAP(LoginWebDlg, CBaseDialog)
 	ON_WM_SIZE()
 	ON_WM_CLOSE()
+	ON_WM_TIMER()
 	ON_MESSAGE(WM_LOGIN_WEB_MESSAGE, &LoginWebDlg::OnLoginWebMessage)
 	ON_MESSAGE(WM_LOGIN_WEB_RESULT, &LoginWebDlg::OnLoginWebResult)
 END_MESSAGE_MAP()
+
+static CString LoginWindowTitle()
+{
+	CString title = _T(_GLOBAL_NAME_NICE) + _T(" - Sign in ");
+	title += _T(_GLOBAL_VERSION);
+	return title;
+}
 
 BOOL LoginWebDlg::OnInitDialog()
 {
@@ -260,6 +269,10 @@ BOOL LoginWebDlg::OnInitDialog()
 	HICON hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
 	SetIcon(hIcon, TRUE);
 	SetIcon(hIcon, FALSE);
+
+	// Beta and stable builds are tested side by side, so the window has to say
+	// which one it is even before the page paints.
+	SetWindowText(LoginWindowTitle());
 
 	SetClassLongPtr(m_hWnd, GCLP_HBRBACKGROUND, (LONG_PTR)CreateSolidBrush(MAXCALL_SURFACE));
 
@@ -370,6 +383,7 @@ HRESULT LoginCtrlCallback::Invoke(HRESULT result, ICoreWebView2Controller* contr
 							CString navigated;
 							navigated.Format(_T("NavigateToString login.html chars=%d"), wideLen);
 							LoginDiag(navigated, S_OK);
+							m_dlg->ArmWebViewWatchdog();
 							wv->NavigateToString(htmlStr.GetString());
 						}
 						else {
@@ -388,8 +402,50 @@ HRESULT LoginCtrlCallback::Invoke(HRESULT result, ICoreWebView2Controller* contr
 	return S_OK;
 }
 
+// The sign-in page talks to C++ as soon as it loads. If nothing arrives the
+// engine never painted, and the honest thing is to say so instead of leaving
+// the user staring at a white rectangle.
+void LoginWebDlg::ArmWebViewWatchdog()
+{
+	if (!m_webReady) {
+		SetTimer(IDT_LOGIN_WEBVIEW_TIMEOUT, 12000, NULL);
+	}
+}
+
+void LoginWebDlg::ReportWebViewTimeout()
+{
+	KillTimer(IDT_LOGIN_WEBVIEW_TIMEOUT);
+	if (m_webReady) {
+		return;
+	}
+	LoginDiag(_T("watchdog expired before the page reported ready"), E_FAIL);
+
+	CString message;
+	message.Format(
+		_T("MaxCall %s could not display its sign-in screen.\n\n")
+		_T("The Microsoft Edge WebView2 runtime is either missing or blocked.\n")
+		_T("Install or repair it, then start MaxCall again.\n\n")
+		_T("Technical details were written to maxcall_debug.log next to this program."),
+		(LPCTSTR)_T(_GLOBAL_VERSION));
+	MessageBox(m_hWnd, message, _T("MaxCall"), MB_ICONERROR | MB_OK);
+	EndDialog(IDCANCEL);
+}
+
+void LoginWebDlg::OnTimer(UINT_PTR nIDEvent)
+{
+	if (nIDEvent == IDT_LOGIN_WEBVIEW_TIMEOUT) {
+		ReportWebViewTimeout();
+		return;
+	}
+}
+
 LRESULT LoginWebDlg::OnLoginWebMessage(WPARAM wParam, LPARAM lParam)
 {
+	// The first message off the page means it painted and the bridge is alive.
+	if (!m_webReady) {
+		m_webReady = true;
+		KillTimer(IDT_LOGIN_WEBVIEW_TIMEOUT);
+	}
 	CString* msg = reinterpret_cast<CString*>(lParam);
 	if (msg) {
 		ProcessLoginMessage(*msg);
