@@ -27,6 +27,40 @@ static bool IsAllDigits(const CString& s)
 	return true;
 }
 
+// The sign-in page has no "ready" handshake - it stays silent until the user
+// submits the form. NavigationCompleted is therefore the only trustworthy proof
+// that the page rendered, and it is what disarms the startup watchdog.
+class LoginNavHandler : public ICoreWebView2NavigationCompletedEventHandler
+{
+public:
+	LoginWebDlg* m_dlg;
+	ULONG m_refCount;
+
+	LoginNavHandler(LoginWebDlg* dlg) : m_dlg(dlg), m_refCount(1) {}
+
+	ULONG STDMETHODCALLTYPE AddRef() override { return ++m_refCount; }
+	ULONG STDMETHODCALLTYPE Release() override {
+		ULONG count = --m_refCount;
+		if (count == 0) delete this;
+		return count;
+	}
+	HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
+		if (riid == IID_IUnknown || riid == IID_ICoreWebView2NavigationCompletedEventHandler) {
+			*ppv = static_cast<ICoreWebView2NavigationCompletedEventHandler*>(this);
+			AddRef();
+			return S_OK;
+		}
+		*ppv = nullptr;
+		return E_NOINTERFACE;
+	}
+	HRESULT STDMETHODCALLTYPE Invoke(ICoreWebView2* sender, ICoreWebView2NavigationCompletedEventArgs* args) override {
+		if (m_dlg && ::IsWindow(m_dlg->m_hWnd)) {
+			::PostMessage(m_dlg->m_hWnd, WM_LOGIN_PAGE_READY, 0, 0);
+		}
+		return S_OK;
+	}
+};
+
 class LoginMsgHandler : public ICoreWebView2WebMessageReceivedEventHandler
 {
 public:
@@ -251,6 +285,7 @@ BEGIN_MESSAGE_MAP(LoginWebDlg, CBaseDialog)
 	ON_WM_TIMER()
 	ON_MESSAGE(WM_LOGIN_WEB_MESSAGE, &LoginWebDlg::OnLoginWebMessage)
 	ON_MESSAGE(WM_LOGIN_WEB_RESULT, &LoginWebDlg::OnLoginWebResult)
+	ON_MESSAGE(WM_LOGIN_PAGE_READY, &LoginWebDlg::OnLoginPageReady)
 END_MESSAGE_MAP()
 
 static CString LoginWindowTitle()
@@ -365,6 +400,11 @@ HRESULT LoginCtrlCallback::Invoke(HRESULT result, ICoreWebView2Controller* contr
 				new LoginMsgHandler(m_dlg),
 				&token);
 
+			EventRegistrationToken navToken;
+			wv->add_NavigationCompleted(
+				new LoginNavHandler(m_dlg),
+				&navToken);
+
 			HRSRC hRes = FindResource(NULL, MAKEINTRESOURCE(IDR_LOGIN_HTML), RT_RCDATA);
 			if (!hRes) {
 				LoginFail(m_dlg->m_hWnd, _T("the sign-in page is missing from this build"));
@@ -418,17 +458,31 @@ void LoginWebDlg::ReportWebViewTimeout()
 	if (m_webReady) {
 		return;
 	}
-	LoginDiag(_T("watchdog expired before the page reported ready"), E_FAIL);
+	// This only fires when the engine never finished a navigation at all, so the
+	// message stays factual instead of guessing at a missing runtime.
+	LoginDiag(_T("watchdog expired: the page never finished loading"), E_FAIL);
 
 	CString message;
 	message.Format(
-		_T("MaxCall %s could not display its sign-in screen.\n\n")
-		_T("The Microsoft Edge WebView2 runtime is either missing or blocked.\n")
-		_T("Install or repair it, then start MaxCall again.\n\n")
-		_T("Technical details were written to maxcall_debug.log next to this program."),
+		_T("MaxCall %s could not finish loading its sign-in screen.\n\n")
+		_T("This is not a credential problem. Common causes:\n")
+		_T("  - MaxCall sits in a folder it cannot write to\n")
+		_T("  - the Microsoft Edge WebView2 runtime is missing or blocked\n")
+		_T("  - a security product is inspecting the embedded page\n\n")
+		_T("Details were written to maxcall_debug.log next to this program."),
 		(LPCTSTR)_T(_GLOBAL_VERSION));
 	::MessageBox(m_hWnd, message, _T("MaxCall"), MB_ICONERROR | MB_OK);
 	EndDialog(IDCANCEL);
+}
+
+LRESULT LoginWebDlg::OnLoginPageReady(WPARAM wParam, LPARAM lParam)
+{
+	if (!m_webReady) {
+		m_webReady = true;
+		KillTimer(IDT_LOGIN_WEBVIEW_TIMEOUT);
+		LoginDiag(_T("page loaded"), S_OK);
+	}
+	return 0;
 }
 
 void LoginWebDlg::OnTimer(UINT_PTR nIDEvent)

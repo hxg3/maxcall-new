@@ -11,7 +11,12 @@ struct ICoreWebView2Environment;
 #define WM_LOGIN_WEB_MESSAGE (WM_USER + 112)
 #define WM_LOGIN_WEB_RESULT (WM_USER + 113)
 
+// Raised by the WebView2 navigation event: the page rendered.
+#define WM_LOGIN_PAGE_READY (WM_USER + 114)
+
 // Give up on the WebView2 bootstrap rather than sitting on a blank window.
+// Only reached when navigation never completes at all - never on an idle page,
+// which is silent until the user submits.
 #define IDT_LOGIN_WEBVIEW_TIMEOUT 1
 
 // LoginWebDlg — شاشة تسجيل الدخول الحديثة (WebView2).
@@ -43,6 +48,7 @@ protected:
 	afx_msg LRESULT OnLoginWebMessage(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnLoginWebResult(WPARAM wParam, LPARAM lParam);
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
+	afx_msg LRESULT OnLoginPageReady(WPARAM wParam, LPARAM lParam);
 	DECLARE_MESSAGE_MAP()
 
 public:
