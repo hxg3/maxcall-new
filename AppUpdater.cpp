@@ -296,6 +296,15 @@ CString SignatureUrl(EUpdateChannel channel)
 // Certificate validation is deliberately left at its default (on). URLGetAsync
 // switches every SECURITY_FLAG_IGNORE_* check off, which is tolerable for a CRM
 // lookup but not for a channel that ends in running a downloaded executable.
+// Older Windows builds negotiate TLS 1.0/1.1 by default and GitHub refuses
+// both. The constants are guarded because older SDKs do not declare them.
+#ifndef INTERNET_OPTION_SECURE_PROTOCOLS
+#define INTERNET_OPTION_SECURE_PROTOCOLS 84
+#endif
+#ifndef INTERNET_FLAG_SECURE_PROTOCOL_TLS1_2
+#define INTERNET_FLAG_SECURE_PROTOCOL_TLS1_2 0x00000800
+#endif
+
 struct SHttpSession
 {
 	CInternetSession session;
@@ -304,7 +313,15 @@ struct SHttpSession
 	DWORD contentLength;
 	DWORD statusCode;
 
-	SHttpSession() : connection(NULL), file(NULL), contentLength(0), statusCode(0) {}
+	explicit SHttpSession(DWORD accessType)
+		: session(accessType, _T("MaxCall/1.0 (Windows NT)")),
+		  connection(NULL), file(NULL), contentLength(0), statusCode(0)
+	{
+		// TLS 1.2 for this session; without it the handshake can fail on machines
+		// whose Schannel defaults predate it.
+		DWORD protocols = INTERNET_FLAG_SECURE_PROTOCOL_TLS1_2;
+		session.SetOption(INTERNET_OPTION_SECURE_PROTOCOLS, &protocols, sizeof(protocols));
+	}
 	~SHttpSession() { Close(); }
 
 	void Close()
@@ -379,7 +396,20 @@ static DWORD ParseContentLength(const CString& rawHeaders)
 	return 0;
 }
 
-static bool HttpOpen(const CString& url, SHttpSession& http, CString& error, DWORD timeoutMs)
+// Records what WinInet actually complained about. Losing this behind a generic
+// sentence is what made the previous failure impossible to diagnose.
+static void HttpDiag(const CString& text)
+{
+	CString line = _T("[update] ") + text;
+	FILE* f = fopen("maxcall_debug.log", "a");
+	if (f) {
+		fprintf(f, "%ls\n", (LPCTSTR)line);
+		fclose(f);
+	}
+}
+
+static bool HttpOpenOnce(const CString& url, SHttpSession& http, CString& error,
+	DWORD timeoutMs)
 {
 	CString scheme, host, object;
 	INTERNET_PORT port = INTERNET_DEFAULT_HTTPS_PORT;
@@ -397,14 +427,18 @@ static bool HttpOpen(const CString& url, SHttpSession& http, CString& error, DWO
 	try {
 		http.connection = http.session.GetHttpConnection(host, INTERNET_FLAG_SECURE, port);
 		if (!http.connection) {
-			error = _T("Cannot reach the update server.");
+			error = _T("Cannot open a connection to the update server.");
+			HttpDiag(_T("GetHttpConnection returned null for ") + host);
 			return false;
 		}
 
-		http.file = http.connection->OpenRequest(_T("GET"), object, NULL, 1, NULL, 0,
-			INTERNET_FLAG_RELOAD | INTERNET_FLAG_DONT_CACHE | INTERNET_FLAG_KEEP_CONNECTION);
+		// Every optional argument is NULL. Passing a non-null "referer" that is
+		// not a string is what the previous version did here.
+		http.file = http.connection->OpenRequest(_T("GET"), object, NULL, NULL, NULL,
+			INTERNET_FLAG_RELOAD | INTERNET_FLAG_DONT_CACHE);
 		if (!http.file) {
 			error = _T("Cannot create the update request.");
+			HttpDiag(_T("OpenRequest returned null for ") + object);
 			return false;
 		}
 
@@ -417,7 +451,8 @@ static bool HttpOpen(const CString& url, SHttpSession& http, CString& error, DWO
 		http.file->SetOption(INTERNET_OPTION_SEND_TIMEOUT, timeout);
 
 		if (!http.file->SendRequest()) {
-			error = _T("The update server did not answer.");
+			error = _T("The update server did not answer the request.");
+			HttpDiag(_T("SendRequest failed for ") + url);
 			return false;
 		}
 
@@ -427,17 +462,65 @@ static bool HttpOpen(const CString& url, SHttpSession& http, CString& error, DWO
 		if (http.file->QueryInfo(HTTP_QUERY_RAW_HEADERS_CRLF, rawHeaders)) {
 			http.contentLength = ParseContentLength(rawHeaders);
 		}
+
+		CString status;
+		status.Format(_T("%s -> HTTP %u, %u bytes"), (LPCTSTR)url, http.statusCode, http.contentLength);
+		HttpDiag(status);
 	}
 	catch (CInternetException* e) {
-		error = _T("The update server could not be reached.");
+		DWORD code = 0;
+		CString detail;
+		try {
+			code = (DWORD)e->GetErrorCode();
+			detail = e->GetErrorMessage();
+		}
+		catch (...) {
+		}
 		e->Delete();
+
+		CString logged;
+		logged.Format(_T("%s -> WinInet error %u: %s"), (LPCTSTR)url, code, (LPCTSTR)detail);
+		HttpDiag(logged);
+
+		CString message;
+		message.Format(_T("The update server could not be reached (error %u)."), code);
+		error = message;
+		return false;
+	}
+	catch (DWORD code) {
+		CString logged;
+		logged.Format(_T("%s -> structured exception 0x%08lX"), (LPCTSTR)url, (unsigned long)code);
+		HttpDiag(logged);
+		error = _T("The update server could not be reached.");
 		return false;
 	}
 	catch (...) {
+		HttpDiag(url + _T(" -> unknown exception"));
 		error = _T("The update server could not be reached.");
 		return false;
 	}
 	return true;
+}
+
+// System settings first, then a direct connection. A machine whose proxy needs
+// credentials fails the first attempt and succeeds on the second, which is the
+// usual reason an internal client cannot reach the release host. Returns the
+// session that worked, or null; both sessions stay owned by the caller.
+static SHttpSession* HttpOpenWithFallback(const CString& url, SHttpSession& configured,
+	SHttpSession& direct, CString& error, DWORD timeoutMs)
+{
+	if (HttpOpenOnce(url, configured, error, timeoutMs)) {
+		return &configured;
+	}
+	CString firstReason = error;
+	HttpDiag(_T("retrying without the system proxy"));
+	if (HttpOpenOnce(url, direct, error, timeoutMs)) {
+		HttpDiag(_T("direct connection worked - the system proxy was the obstacle"));
+		return &direct;
+	}
+	// Report the first, more informative failure rather than the retry's.
+	error = firstReason;
+	return NULL;
 }
 
 // Reads the response body. CHttpFile reports end of stream as a zero-length read
@@ -475,11 +558,13 @@ bool HttpGet(const CString& url, CByteArray& body, DWORD& statusCode, CString& e
 	body.SetSize(0);
 	statusCode = 0;
 
-	SHttpSession http;
-	if (!HttpOpen(url, http, error, timeoutMs)) {
+	SHttpSession configured(INTERNET_OPEN_TYPE_PRECONFIG);
+	SHttpSession direct(INTERNET_OPEN_TYPE_DIRECT);
+	SHttpSession* http = HttpOpenWithFallback(url, configured, direct, error, timeoutMs);
+	if (!http) {
 		return false;
 	}
-	statusCode = http.statusCode;
+	statusCode = http->statusCode;
 	if (statusCode != HTTP_STATUS_OK) {
 		CString msg;
 		msg.Format(_T("The update server returned HTTP %u."), statusCode);
@@ -487,7 +572,7 @@ bool HttpGet(const CString& url, CByteArray& body, DWORD& statusCode, CString& e
 		return false;
 	}
 	try {
-		return ReadBody(http.file, http.contentLength, 512 * 1024, body, error);
+		return ReadBody(http->file, http->contentLength, 512 * 1024, body, error);
 	}
 	catch (CInternetException* e) {
 		error = _T("The update metadata could not be read.");
@@ -502,19 +587,21 @@ bool HttpDownloadToFile(const CString& url, const CString& path, DWORD& totalByt
 	totalBytes = 0;
 	downloadedBytes = 0;
 
-	SHttpSession http;
-	if (!HttpOpen(url, http, error, timeoutMs)) {
+	SHttpSession configured(INTERNET_OPEN_TYPE_PRECONFIG);
+	SHttpSession direct(INTERNET_OPEN_TYPE_DIRECT);
+	SHttpSession* http = HttpOpenWithFallback(url, configured, direct, error, timeoutMs);
+	if (!http) {
 		return false;
 	}
-	if (http.statusCode != HTTP_STATUS_OK) {
+	if (http->statusCode != HTTP_STATUS_OK) {
 		CString msg;
-		msg.Format(_T("The update server returned HTTP %u."), http.statusCode);
+		msg.Format(_T("The update server returned HTTP %u."), http->statusCode);
 		error = msg;
 		return false;
 	}
 	// When the server answers with chunked encoding the length stays unknown and
 	// the UI shows an indeterminate bar rather than inventing a percentage.
-	totalBytes = http.contentLength;
+	totalBytes = http->contentLength;
 
 	HANDLE hOut = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
 		FILE_ATTRIBUTE_NORMAL, NULL);
@@ -533,7 +620,7 @@ bool HttpDownloadToFile(const CString& url, const CString& path, DWORD& totalByt
 				ok = false;
 				break;
 			}
-			UINT read = http.file->Read(chunk.GetData(), (UINT)chunk.GetSize());
+			UINT read = http->file->Read(chunk.GetData(), (UINT)chunk.GetSize());
 			if (read == 0) {
 				break;
 			}
