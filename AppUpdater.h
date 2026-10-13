@@ -118,6 +118,12 @@ CString VersionCore(const CString& version);
 CString ManifestUrl(EUpdateChannel channel);
 CString SignatureUrl(EUpdateChannel channel);
 
+// Mirrors. Sites that cannot reach github.com from their network can serve the
+// same signed manifests themselves; the manifest stays verifiable either way
+// because the signature is checked against the embedded key, not the host.
+void SetMirrorBase(const CString& base);
+CString MirrorBase();
+
 // --- transport -------------------------------------------------------------
 
 // TLS with full certificate validation. Unlike URLGetAsync, this never disables

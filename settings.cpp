@@ -539,6 +539,11 @@ void AccountSettings::Init()
 	str.ReleaseBuffer();
 	updateChannel = (str == _T("1")) ? 1 : 0;
 
+	ptr = updateBaseUrl.GetBuffer(1023);
+	GetPrivateProfileString(section, _T("updateBaseUrl"), NULL, ptr, 1024, iniFile);
+	updateBaseUrl.ReleaseBuffer();
+	updateBaseUrl.Trim();
+
 	// load ini settings
 
 	ptr = str.GetBuffer(255);
@@ -1092,6 +1097,7 @@ void AccountSettings::SettingsSave()
 	str.Format(_T("%d"), checkUpdatesTime);
 	WritePrivateProfileString(section, _T("checkUpdatesTime"), str, iniFile);
 	WritePrivateProfileString(section, _T("updateChannel"), updateChannel ? _T("1") : _T("0"), iniFile);
+	WritePrivateProfileString(section, _T("updateBaseUrl"), updateBaseUrl, iniFile);
 
 	// save ini settings
 

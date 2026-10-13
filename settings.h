@@ -138,6 +138,10 @@ struct AccountSettings {
 	// 1 = beta (published on every push to main, developer builds only).
 	int updateChannel;
 
+	// Optional internal mirror that serves the signed manifests, for sites whose
+	// network cannot reach github.com. Empty means "use GitHub".
+	CString updateBaseUrl;
+
 	bool minimized;
 	bool hidden;
 	bool silent;

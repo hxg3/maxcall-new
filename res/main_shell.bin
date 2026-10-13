@@ -863,8 +863,8 @@ const MaxCallBridge = {
       prog?.setAttribute('aria-valuenow', String(Math.round(pct)));
     };
 
-    if (verEl) verEl.textContent = ver ? 'Update ' + ver : 'Update available';
-    if (msgEl) msgEl.textContent = msg || 'A new version is ready to install';
+    // No default heading here: writing "Update available" before the state is
+    // known made a failed check look like a real update offer.
     progress(st === 3);
     _setUpdateTone(st === 7 ? 'error' : 'info');
 
@@ -873,10 +873,13 @@ const MaxCallBridge = {
       _setUpdateButtonsDisabled(false);
     } else if (st === 1) {
       // Keep the banner hidden during a silent background check; only refresh it if already open.
-      if (msgEl) msgEl.textContent = 'Checking for updates…';
+      if (verEl) verEl.textContent = 'Checking…';
+      if (msgEl) msgEl.textContent = 'Contacting the update server…';
       _setUpdateButtonsDisabled(true);
       _showUpdateBanner(!document.getElementById('updateBanner')?.classList.contains('hidden'));
     } else if (st === 2) {
+      if (verEl) verEl.textContent = ver ? 'Update ' + ver : 'Update available';
+      if (msgEl) msgEl.textContent = msg || 'A new version is ready to install';
       btnNow?.classList.remove('hidden');
       btnNow?.classList.add('flex');
       btnRetry?.classList.add('hidden');
@@ -899,7 +902,8 @@ const MaxCallBridge = {
       _setUpdateButtonsDisabled(true);
       _showUpdateBanner(true);
     } else if (st === 7) {
-      if (msgEl) msgEl.textContent = msg || 'Update failed';
+      if (verEl) verEl.textContent = 'Update check failed';
+      if (msgEl) msgEl.textContent = msg || 'MaxCall could not reach the update server.';
       btnNow?.classList.add('hidden');
       btnNow?.classList.remove('flex');
       btnRetry?.classList.remove('hidden');

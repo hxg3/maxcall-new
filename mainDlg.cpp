@@ -5731,6 +5731,8 @@ void CmainDlg::CheckForUpdates(bool manual)
 		m_updateThread = NULL;
 	}
 
+	AppUpdate::SetMirrorBase(accountSettings.updateBaseUrl);
+
 	m_updateBusy = true;
 	m_updateDismissed = false;
 	m_updateState = AppUpdate::StateChecking;

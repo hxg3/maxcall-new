@@ -266,8 +266,31 @@ bool IsNewer(const CString& candidate, const CString& current)
 	return CompareVersion(candidate, current) > 0;
 }
 
+// An on-premise mirror has to be reachable before any request is made, so the
+// host allow list is relaxed for it: the signature check is what actually
+// guarantees integrity, and the mirror operator is the same operator who signs.
+static CString g_mirrorBase;
+
+void SetMirrorBase(const CString& base)
+{
+	CString trimmed = base;
+	while (!trimmed.IsEmpty() && trimmed[trimmed.GetLength() - 1] == _T('/')) {
+		trimmed = trimmed.Left(trimmed.GetLength() - 1);
+	}
+	g_mirrorBase = trimmed;
+}
+
+CString MirrorBase()
+{
+	return g_mirrorBase;
+}
+
 CString ManifestUrl(EUpdateChannel channel)
 {
+	if (!g_mirrorBase.IsEmpty()) {
+		return g_mirrorBase + _T("/") +
+			(channel == ChannelBeta ? _T("update.json.beta") : _T("update.json"));
+	}
 	return (channel == ChannelBeta)
 		? CString(_T(_GLOBAL_UPDATE_BETA_URL))
 		: CString(_T(_GLOBAL_UPDATE_STABLE_URL));
@@ -275,6 +298,10 @@ CString ManifestUrl(EUpdateChannel channel)
 
 CString SignatureUrl(EUpdateChannel channel)
 {
+	if (!g_mirrorBase.IsEmpty()) {
+		return g_mirrorBase + _T("/") +
+			(channel == ChannelBeta ? _T("update.json.beta.sig") : _T("update.json.sig"));
+	}
 	return (channel == ChannelBeta)
 		? CString(_T(_GLOBAL_UPDATE_BETA_SIG_URL))
 		: CString(_T(_GLOBAL_UPDATE_STABLE_SIG_URL));
@@ -418,8 +445,9 @@ static bool HttpOpenOnce(const CString& url, SHttpSession& http, CString& error,
 		return false;
 	}
 	// The manifest is signed, so this is defence in depth rather than the primary
-	// control: no executable may be fetched from anywhere but the release host.
-	if (!IsAllowedUpdateHost(host)) {
+	// control. It is skipped for an explicitly configured mirror, whose operator
+	// also holds the signing key.
+	if (!IsAllowedUpdateHost(host) && g_mirrorBase.IsEmpty()) {
 		error = _T("The update is hosted on an unexpected server and was refused.");
 		return false;
 	}
