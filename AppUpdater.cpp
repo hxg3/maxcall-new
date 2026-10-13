@@ -313,14 +313,14 @@ struct SHttpSession
 	DWORD contentLength;
 	DWORD statusCode;
 
-	explicit SHttpSession(DWORD accessType)
-		: session(accessType, _T("MaxCall/1.0 (Windows NT)")),
-		  connection(NULL), file(NULL), contentLength(0), statusCode(0)
+	SHttpSession() : connection(NULL), file(NULL), contentLength(0), statusCode(0)
 	{
-		// TLS 1.2 for this session; without it the handshake can fail on machines
-		// whose Schannel defaults predate it.
-		DWORD protocols = INTERNET_FLAG_SECURE_PROTOCOL_TLS1_2;
-		session.SetOption(INTERNET_OPTION_SECURE_PROTOCOLS, &protocols, sizeof(protocols));
+		// TLS 1.2 for this session; without it the handshake fails outright on
+		// machines whose Schannel defaults predate it, while the browser still
+		// works because it ships its own TLS stack. The LONG overload of SetOption
+		// hands WinInet a pointer to the value, which is what this option expects.
+		session.SetOption(INTERNET_OPTION_SECURE_PROTOCOLS,
+			(LONG)INTERNET_FLAG_SECURE_PROTOCOL_TLS1_2);
 	}
 	~SHttpSession() { Close(); }
 
@@ -432,10 +432,11 @@ static bool HttpOpenOnce(const CString& url, SHttpSession& http, CString& error,
 			return false;
 		}
 
-		// Every optional argument is NULL. Passing a non-null "referer" that is
-		// not a string is what the previous version did here.
-		http.file = http.connection->OpenRequest(_T("GET"), object, NULL, NULL, NULL,
-			INTERNET_FLAG_RELOAD | INTERNET_FLAG_DONT_CACHE);
+		// Argument shape mirrors global.cpp, which this project already builds;
+		// the reference to a non-string literal the earlier version passed here is
+		// replaced with nulls.
+		http.file = http.connection->OpenRequest(_T("GET"), object, 0, 0, 0, 0,
+			INTERNET_FLAG_RELOAD | INTERNET_FLAG_DONT_CACHE | INTERNET_FLAG_KEEP_CONNECTION);
 		if (!http.file) {
 			error = _T("Cannot create the update request.");
 			HttpDiag(_T("OpenRequest returned null for ") + object);
@@ -467,60 +468,31 @@ static bool HttpOpenOnce(const CString& url, SHttpSession& http, CString& error,
 		status.Format(_T("%s -> HTTP %u, %u bytes"), (LPCTSTR)url, http.statusCode, http.contentLength);
 		HttpDiag(status);
 	}
-	catch (CInternetException* e) {
-		DWORD code = 0;
-		CString detail;
-		try {
-			code = (DWORD)e->GetErrorCode();
-			detail = e->GetErrorMessage();
-		}
-		catch (...) {
-		}
-		e->Delete();
+	catch (...) {
+		// WinInet records its failure in the thread's last error; asking MFC for it
+		// depends on accessors this toolchain does not expose.
+		DWORD code = ::GetLastError();
+		TCHAR detail[256];
+		detail[0] = 0;
+		::FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+			NULL, code, 0, detail, sizeof(detail) / sizeof(TCHAR) - 1, NULL);
 
 		CString logged;
-		logged.Format(_T("%s -> WinInet error %u: %s"), (LPCTSTR)url, code, (LPCTSTR)detail);
+		logged.Format(_T("%s -> WinInet error %u: %s"), (LPCTSTR)url, code, detail);
 		HttpDiag(logged);
 
 		CString message;
-		message.Format(_T("The update server could not be reached (error %u)."), code);
+		message.Format(_T("The update server could not be reached (network error %u). "
+			_T("Details are in maxcall_debug.log next to this program.")), code);
 		error = message;
-		return false;
-	}
-	catch (DWORD code) {
-		CString logged;
-		logged.Format(_T("%s -> structured exception 0x%08lX"), (LPCTSTR)url, (unsigned long)code);
-		HttpDiag(logged);
-		error = _T("The update server could not be reached.");
-		return false;
-	}
-	catch (...) {
-		HttpDiag(url + _T(" -> unknown exception"));
-		error = _T("The update server could not be reached.");
 		return false;
 	}
 	return true;
 }
 
-// System settings first, then a direct connection. A machine whose proxy needs
-// credentials fails the first attempt and succeeds on the second, which is the
-// usual reason an internal client cannot reach the release host. Returns the
-// session that worked, or null; both sessions stay owned by the caller.
-static SHttpSession* HttpOpenWithFallback(const CString& url, SHttpSession& configured,
-	SHttpSession& direct, CString& error, DWORD timeoutMs)
+static bool HttpOpen(const CString& url, SHttpSession& http, CString& error, DWORD timeoutMs)
 {
-	if (HttpOpenOnce(url, configured, error, timeoutMs)) {
-		return &configured;
-	}
-	CString firstReason = error;
-	HttpDiag(_T("retrying without the system proxy"));
-	if (HttpOpenOnce(url, direct, error, timeoutMs)) {
-		HttpDiag(_T("direct connection worked - the system proxy was the obstacle"));
-		return &direct;
-	}
-	// Report the first, more informative failure rather than the retry's.
-	error = firstReason;
-	return NULL;
+	return HttpOpenOnce(url, http, error, timeoutMs);
 }
 
 // Reads the response body. CHttpFile reports end of stream as a zero-length read
@@ -558,13 +530,11 @@ bool HttpGet(const CString& url, CByteArray& body, DWORD& statusCode, CString& e
 	body.SetSize(0);
 	statusCode = 0;
 
-	SHttpSession configured(INTERNET_OPEN_TYPE_PRECONFIG);
-	SHttpSession direct(INTERNET_OPEN_TYPE_DIRECT);
-	SHttpSession* http = HttpOpenWithFallback(url, configured, direct, error, timeoutMs);
-	if (!http) {
+	SHttpSession http;
+	if (!HttpOpen(url, http, error, timeoutMs)) {
 		return false;
 	}
-	statusCode = http->statusCode;
+	statusCode = http.statusCode;
 	if (statusCode != HTTP_STATUS_OK) {
 		CString msg;
 		msg.Format(_T("The update server returned HTTP %u."), statusCode);
@@ -572,7 +542,7 @@ bool HttpGet(const CString& url, CByteArray& body, DWORD& statusCode, CString& e
 		return false;
 	}
 	try {
-		return ReadBody(http->file, http->contentLength, 512 * 1024, body, error);
+		return ReadBody(http.file, http.contentLength, 512 * 1024, body, error);
 	}
 	catch (CInternetException* e) {
 		error = _T("The update metadata could not be read.");
@@ -587,21 +557,19 @@ bool HttpDownloadToFile(const CString& url, const CString& path, DWORD& totalByt
 	totalBytes = 0;
 	downloadedBytes = 0;
 
-	SHttpSession configured(INTERNET_OPEN_TYPE_PRECONFIG);
-	SHttpSession direct(INTERNET_OPEN_TYPE_DIRECT);
-	SHttpSession* http = HttpOpenWithFallback(url, configured, direct, error, timeoutMs);
-	if (!http) {
+	SHttpSession http;
+	if (!HttpOpen(url, http, error, timeoutMs)) {
 		return false;
 	}
-	if (http->statusCode != HTTP_STATUS_OK) {
+	if (http.statusCode != HTTP_STATUS_OK) {
 		CString msg;
-		msg.Format(_T("The update server returned HTTP %u."), http->statusCode);
+		msg.Format(_T("The update server returned HTTP %u."), http.statusCode);
 		error = msg;
 		return false;
 	}
 	// When the server answers with chunked encoding the length stays unknown and
 	// the UI shows an indeterminate bar rather than inventing a percentage.
-	totalBytes = http->contentLength;
+	totalBytes = http.contentLength;
 
 	HANDLE hOut = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
 		FILE_ATTRIBUTE_NORMAL, NULL);
@@ -620,7 +588,7 @@ bool HttpDownloadToFile(const CString& url, const CString& path, DWORD& totalByt
 				ok = false;
 				break;
 			}
-			UINT read = http->file->Read(chunk.GetData(), (UINT)chunk.GetSize());
+			UINT read = http.file->Read(chunk.GetData(), (UINT)chunk.GetSize());
 			if (read == 0) {
 				break;
 			}
