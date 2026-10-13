@@ -5706,8 +5706,9 @@ void CmainDlg::ScheduleUpdateCheck()
 	if (now - last < (time_t)_GLOBAL_UPDATE_CHECK_INTERVAL_HOURS * 3600) {
 		return;
 	}
-	accountSettings.checkUpdatesTime = (int)now;
-	accountSettings.SettingsSave();
+	// Deliberately not stamping the time here: it is recorded in OnUpdateEvent
+	// once the manifest actually arrives, so a network failure does not buy the
+	// client six silent hours.
 	CheckForUpdates(false);
 }
 
@@ -5885,6 +5886,12 @@ LRESULT CmainDlg::OnUpdateEvent(WPARAM wParam, LPARAM lParam)
 	if (terminal) {
 		m_updateBusy = false;
 		m_updateProgress.hNotify = NULL;
+	}
+	// Only a manifest that actually arrived counts as "checked". A failure leaves
+	// the old timestamp alone, so the next tick retries instead of staying quiet.
+	if (!ev->manual && (ev->state == AppUpdate::StateAvailable || ev->state == AppUpdate::StateNone)) {
+		accountSettings.checkUpdatesTime = (int)time(NULL);
+		accountSettings.SettingsSave();
 	}
 
 	m_updatePercent = ev->percent;
