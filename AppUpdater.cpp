@@ -435,6 +435,35 @@ static void HttpDiag(const CString& text)
 	}
 }
 
+// The WinInet codes worth naming in plain language. FORMAT_MESSAGE cannot help:
+// these live in wininet.dll, not in the system table, which is why the previous
+// log showed a blank reason next to the number.
+static CString DescribeWinInetError(DWORD code)
+{
+	CString text;
+	switch (code) {
+	case 12152: text = _T("- secure connection failed (clock, TLS interception, or missing root certificates)");
+		break;
+	case 12007: text = _T("- host not found (DNS cannot resolve it)");
+		break;
+	case 12029: text = _T("- cannot connect (blocked by firewall or the server is down)");
+		break;
+	case 12002: text = _T("- the operation timed out before the server answered");
+		break;
+	case 12057: text = _T("- the secure connection was reset");
+		break;
+	default: {
+		TCHAR detail[256];
+		detail[0] = 0;
+		::FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+			NULL, code, 0, detail, sizeof(detail) / sizeof(TCHAR) - 1, NULL);
+		text.Format(_T("- %s"), detail);
+		break;
+	}
+	}
+	return text;
+}
+
 static bool HttpOpenOnce(const CString& url, SHttpSession& http, CString& error,
 	DWORD timeoutMs)
 {
@@ -500,18 +529,18 @@ static bool HttpOpenOnce(const CString& url, SHttpSession& http, CString& error,
 		// WinInet records its failure in the thread's last error; asking MFC for it
 		// depends on accessors this toolchain does not expose.
 		DWORD code = ::GetLastError();
-		TCHAR detail[256];
-		detail[0] = 0;
-		::FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-			NULL, code, 0, detail, sizeof(detail) / sizeof(TCHAR) - 1, NULL);
-
-		CString logged;
-		logged.Format(_T("%s -> WinInet error %u: %s"), (LPCTSTR)url, code, detail);
-		HttpDiag(logged);
+		CString number;
+		number.Format(_T("%u"), code);
+		HttpDiag(url + _T(" -> WinInet error ") + number + DescribeWinInetError(code));
 
 		CString message;
-		message.Format(_T("The update server could not be reached (network error %u). "
-			_T("Details are in maxcall_debug.log next to this program.")), code);
+		message.Format(
+			_T("MaxCall could not reach the update server (network error %u).\n\n")
+			_T("This machine cannot complete a secure connection to GitHub, usually "
+			  L"because of a TLS-inspecting proxy, an out-of-date clock, or missing "
+			  L"root certificates. A company network that blocks it needs an internal "
+			  L"mirror instead: set updateBaseUrl in MaxCall.ini under [Settings]."),
+			code);
 		error = message;
 		return false;
 	}
