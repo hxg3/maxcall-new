@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MaxCall — لوحة المشرف</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<script>tailwind.config={theme:{extend:{colors:{ink:"#0f172a",muted:"#64748b",line:"#e2e8f0"}}}}</script>
+</head>
+<body class="bg-[#f8fafc] text-ink font-[Segoe UI,Tahoma]">
+
+<!-- Top bar -->
+<header class="sticky top-0 z-10 bg-white border-b border-line">
+  <div class="max-w-[1300px] mx-auto px-6 h-[64px] flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 rounded-xl bg-ink text-white grid place-items-center"><i class="fa-solid fa-hospital"></i></div>
+      <div>
+        <div class="font-bold leading-none">MaxCall Dashboard</div>
+        <div class="text-xs text-muted">مركز الاتصال — الإشراف</div>
+      </div>
+      <span class="mr-4 text-xs bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-full">● متصل VitalPBX</span>
+    </div>
+    <div class="flex items-center gap-3">
+      <div class="hidden md:flex items-center gap-2 text-sm">
+        <span class="text-muted">المشرف:</span><b>عبدالله برهم</b>
+        <img src="https://i.pravatar.cc/80?img=12" class="w-8 h-8 rounded-full">
+      </div>
+      <button class="w-8 h-8 rounded-full border border-line grid place-items-center"><i class="fa-regular fa-bell text-muted"></i></button>
+    </div>
+  </div>
+</header>
+
+<div class="max-w-[1300px] mx-auto px-6 py-6 grid grid-cols-12 gap-6">
+
+  <!-- KPIs -->
+  <div class="col-span-12 grid grid-cols-2 lg:grid-cols-4 gap-4">
+    <div class="bg-white rounded-2xl border border-line p-4">
+      <div class="text-xs text-muted">مكالمات اليوم</div>
+      <div class="text-2xl font-black mt-1">127 <span class="text-emerald-600 text-sm font-bold">↑ 12%</span></div>
+      <div class="mt-3 h-1.5 bg-slate-100 rounded-full"><div class="h-1.5 bg-ink rounded-full" style="width:68%"></div></div>
+    </div>
+    <div class="bg-white rounded-2xl border border-line p-4">
+      <div class="text-xs text-muted">تم الرد</div>
+      <div class="text-2xl font-black mt-1">112 <span class="text-xs text-muted">88%</span></div>
+      <div class="mt-2 text-xs text-emerald-600"><i class="fa-solid fa-phone"></i> 15 فائتة</div>
+    </div>
+    <div class="bg-white rounded-2xl border border-line p-4">
+      <div class="text-xs text-muted">متوسط الانتظار</div>
+      <div class="text-2xl font-black mt-1">18<span class="text-sm font-bold">ث</span></div>
+      <div class="mt-2 text-xs text-amber-600">هدف: &lt; 25ث</div>
+    </div>
+    <div class="bg-white rounded-2xl border border-line p-4">
+      <div class="text-xs text-muted">تسجيلات اليوم</div>
+      <div class="text-2xl font-black mt-1">112 <span class="text-xs text-muted">/ 4.2GB</span></div>
+      <div class="mt-2 text-xs text-muted">تنظيف تلقائي عند 80%</div>
+    </div>
+  </div>
+
+  <!-- Chart + Agents -->
+  <div class="col-span-12 lg:col-span-8 bg-white rounded-2xl border border-line p-5">
+    <div class="flex items-center justify-between">
+      <h3 class="font-bold">حجم المكالمات — آخر 7 أيام</h3>
+      <span class="text-xs bg-slate-100 px-2.5 py-1 rounded-full">تحديث كل دقيقة</span>
+    </div>
+    <div class="mt-4 grid grid-cols-7 gap-2 items-end h-[160px]">
+      <div class="text-center"><div class="mx-auto w-8 bg-slate-200 rounded-t" style="height:60px"></div><div class="text-xs text-muted mt-1">السبت</div><div class="text-xs font-bold">42</div></div>
+      <div class="text-center"><div class="mx-auto w-8 bg-slate-200 rounded-t" style="height:90px"></div><div class="text-xs text-muted mt-1">الأحد</div><div class="text-xs font-bold">78</div></div>
+      <div class="text-center"><div class="mx-auto w-8 bg-slate-200 rounded-t" style="height:110px"></div><div class="text-xs text-muted mt-1">الإثنين</div><div class="text-xs font-bold">95</div></div>
+      <div class="text-center"><div class="mx-auto w-8 bg-ink rounded-t" style="height:140px"></div><div class="text-xs text-muted mt-1">الثلاثاء</div><div class="text-xs font-bold">127</div></div>
+      <div class="text-center"><div class="mx-auto w-8 bg-slate-200 rounded-t" style="height:80px"></div><div class="text-xs text-muted mt-1">الأربعاء</div><div class="text-xs font-bold">66</div></div>
+      <div class="text-center"><div class="mx-auto w-8 bg-slate-200 rounded-t" style="height:100px"></div><div class="text-xs text-muted mt-1">الخميس</div><div class="text-xs font-bold">84</div></div>
+      <div class="text-center"><div class="mx-auto w-8 bg-slate-100 rounded-t" style="height:40px"></div><div class="text-xs text-muted mt-1">الجمعة</div><div class="text-xs font-bold">21</div></div>
+    </div>
+  </div>
+
+  <div class="col-span-12 lg:col-span-4 bg-white rounded-2xl border border-line p-5">
+    <h3 class="font-bold">الموظفون</h3>
+    <div class="mt-4 space-y-3">
+      <div class="flex items-center justify-between p-3 rounded-xl border border-line">
+        <div class="flex items-center gap-3">
+          <img src="https://i.pravatar.cc/80?img=15" class="w-9 h-9 rounded-full"><div><div class="font-bold text-sm">Agent 101 — أحمد</div><div class="text-xs text-emerald-600">● متاح</div></div>
+        </div>
+        <div class="text-left"><div class="font-black">38</div><div class="text-xs text-muted">مكالمة</div></div>
+      </div>
+      <div class="flex items-center justify-between p-3 rounded-xl border border-line">
+        <div class="flex items-center gap-3">
+          <img src="https://i.pravatar.cc/80?img=22" class="w-9 h-9 rounded-full"><div><div class="font-bold text-sm">Agent 102 — سارة</div><div class="text-xs text-amber-600">● في مكالمة 02:14</div></div>
+        </div>
+        <div class="text-left"><div class="font-black">47</div><div class="text-xs text-muted">مكالمة</div></div>
+      </div>
+      <button class="w-full mt-2 text-sm bg-ink text-white rounded-xl py-2.5"><i class="fa-solid fa-user-plus ml-1"></i> إضافة موظف</button>
+    </div>
+  </div>
+
+  <!-- Call log -->
+  <div class="col-span-12 bg-white rounded-2xl border border-line overflow-hidden">
+    <div class="p-5 flex flex-col md:flex-row md:items-center justify-between gap-3">
+      <h3 class="font-bold">سجل المكالمات — مباشر من VitalPBX</h3>
+      <div class="flex gap-2">
+        <div class="relative"><i class="fa-solid fa-magnifying-glass absolute right-3 top-2.5 text-muted text-sm"></i><input id="q" placeholder="بحث برقم أو اسم" class="pr-8 pl-3 py-2 border border-line rounded-xl text-sm w-56"></div>
+        <select class="border border-line rounded-xl px-3 py-2 text-sm"><option>الكل</option><option>تم الرد</option><option>فائتة</option></select>
+        <button class="bg-white border border-line px-3 py-2 rounded-xl text-sm"><i class="fa-solid fa-download ml-1"></i> تصدير</button>
+      </div>
+    </div>
+    <div class="overflow-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-50 text-muted">
+          <tr>
+            <th class="p-3 font-normal text-right">الوقت</th>
+            <th class="p-3 font-normal text-right">المتصل</th>
+            <th class="p-3 font-normal text-right">الموظف</th>
+            <th class="p-3 font-normal text-right">المدة</th>
+            <th class="p-3 font-normal text-right">الحالة</th>
+            <th class="p-3 font-normal text-right">تسجيل</th>
+            <th class="p-3 font-normal text-right"></th>
+          </tr>
+        </thead>
+        <tbody id="rows" class="divide-y divide-line">
+          <tr><td class="p-3 text-muted">10:42</td><td class="p-3"><b>77181992</b><div class="text-xs text-muted">سعود الذهين</div></td><td class="p-3">101</td><td class="p-3">01:42</td><td class="p-3"><span class="bg-emerald-50 text-emerald-700 px-2 py-1 rounded-full text-xs">تم الرد</span></td><td class="p-3"><button class="w-7 h-7 rounded-full border border-line grid place-items-center"><i class="fa-solid fa-play text-xs"></i></button></td><td class="p-3"><button class="text-ink"><i class="fa-regular fa-pen-to-square"></i></button></td></tr>
+          <tr><td class="p-3 text-muted">10:18</td><td class="p-3"><b>93744242</b><div class="text-xs text-muted">مختار بامخالف</div></td><td class="p-3">102</td><td class="p-3">00:00</td><td class="p-3"><span class="bg-red-50 text-red-600 px-2 py-1 rounded-full text-xs">فائتة</span></td><td class="p-3"><span class="text-muted">—</span></td><td class="p-3"><button class="text-ink text-xs border border-line px-2.5 py-1 rounded-full">معاودة</button></td></tr>
+          <tr><td class="p-3 text-muted">09:55</td><td class="p-3"><b>99431622</b><div class="text-xs text-muted">الحسين الشحري</div></td><td class="p-3">101</td><td class="p-3">03:11</td><td class="p-3"><span class="bg-emerald-50 text-emerald-700 px-2 py-1 rounded-full text-xs">تم الرد</span></td><td class="p-3"><button class="w-7 h-7 rounded-full border border-line grid place-items-center"><i class="fa-solid fa-play text-xs"></i></button></td><td class="p-3"><button class="text-ink"><i class="fa-regular fa-pen-to-square"></i></button></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="p-3 text-center text-xs text-muted border-t">متصل مباشر بـ Asterisk CDR (asterisk.cdr) — تحديث كل 10 ثوانٍ</div>
+  </div>
+
+  <div class="col-span-12 text-xs text-muted text-center py-2">© MaxCall — Dashboard للمشرف فقط — منفصل عن Admin VitalPBX — صلاحيات: عرض الإحصائيات + إدارة المستخدمين + سجل كامل + تصدير</div>
+</div>
+
+<script>
+document.getElementById('q').addEventListener('input', e=>{
+  const v=e.target.value.trim(); document.querySelectorAll('#rows tr').forEach(tr=>{ tr.style.display = tr.innerText.includes(v) ? '' : 'none' })
+})
+</script>
+</body>
+</html>

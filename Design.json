@@ -1,0 +1,942 @@
+{
+    "brand_identity_file": {
+        "document": {
+            "title": "MaxCare Hospital Salalah — Complete Visual Identity Analysis & Design System",
+            "version": "1.0.0",
+            "language": "ar",
+            "secondary_language": "en",
+            "status": "design_ready",
+            "purpose": "تحليل وبناء نظام هوية بصرية متكامل وقابل للتطبيق لمستشفى ماكس كير في صلالة",
+            "brand": {
+                "name_ar": "مستشفى ماكس كير",
+                "name_en": "MaxCare Hospital",
+                "location": "Salalah, Dhofar, Sultanate of Oman",
+                "industry": "Healthcare / Hospital",
+                "positioning": "مستشفى خاص يركز على الرعاية الطبية المهنية، الثقة، سهولة الوصول، والتجربة الإنسانية للمريض.",
+                "current_public_tagline": "We Care, We Listen, We Help!",
+                "brand_promise": "رعاية طبية موثوقة تجمع بين الخبرة الطبية والاهتمام الإنساني بالمريض.",
+                "brand_idea": "Care with Precision",
+                "recommended_ar_brand_idea": "رعاية بدقة واهتمام",
+                "brand_personality": [
+                    "موثوق",
+                    "إنساني",
+                    "طبي",
+                    "حديث",
+                    "هادئ",
+                    "دقيق",
+                    "قريب من المجتمع",
+                    "مهني"
+                ]
+            },
+            "research_basis": {
+                "confidence": "medium_high",
+                "note": "التحليل مبني على الهوية المرئية المنشورة علنًا والمعلومات المتاحة عن المستشفى. لا يوجد في المصادر العامة التي تم الوصول إليها Brand Guidelines رسمي كامل.",
+                "observed_logo": {
+                    "description": "رمز نبض/تخطيط قلب يتوسطه شكل M بصري، مع قوس ذهبي يشبه الشمس أو الهلال/الحماية، وأسفل الرمز الاسم العربي والإنجليزي.",
+                    "visual_source": "الشعار الظاهر في مادة منشورة على صفحة MaxCare Hospital Salalah."
+                },
+                "public_information": {
+                    "ownership": "100% Omani investment",
+                    "location": "23 July Street, Salalah, Oman",
+                    "sector": "Hospitals and Health Care",
+                    "public_positioning": "We Care, We Listen, We Help!"
+                }
+            },
+            "brand_audit": {
+                "overall_score": 7.1,
+                "scores": {
+                    "logo_concept": 8.0,
+                    "memorability": 7.0,
+                    "medical_relevance": 9.0,
+                    "color_harmony": 8.0,
+                    "typography": 5.8,
+                    "arabic_typography": 5.8,
+                    "english_typography": 6.5,
+                    "system_consistency": 5.5,
+                    "digital_readiness": 6.0,
+                    "premium_perception": 6.5,
+                    "humanity": 7.5,
+                    "scalability": 6.0
+                },
+                "summary": "الهوية الحالية تحمل أساسًا جيدًا جدًا بسبب وضوح الرمز الطبي والألوان الهادئة، لكنها تحتاج إلى نظام تصميم موحد أكثر صرامة، تحسين العلاقة بين الخط العربي والإنجليزي، ونظام رقمي متكامل يجعل العلامة تبدو أكثر حداثة واحترافية.",
+                "strengths": [
+                    "الرمز مرتبط مباشرة بمفهوم النبض والصحة.",
+                    "وجود عنصر M داخل شكل النبض يخلق ارتباطًا باسم MaxCare.",
+                    "اللون التركوازي/الأخضر يعطي إحساسًا طبيًا وهادئًا.",
+                    "القوس الذهبي يضيف دفئًا وإنسانية ويمنع الهوية من أن تكون باردة جدًا.",
+                    "الشعار قابل للفهم حتى دون قراءة الاسم.",
+                    "وجود النسخة العربية والإنجليزية مناسب للسوق العماني متعدد اللغات."
+                ],
+                "weaknesses": [
+                    "التكوين الحالي للشعار يحتوي على تفاصيل دقيقة قد تفقد وضوحها عند الأحجام الصغيرة.",
+                    "الخط العربي والإنجليزي لا يبدوان كنظام Typography واحد متكامل.",
+                    "الهوية تحتاج إلى نظام واضح للألوان الثانوية.",
+                    "لا يوجد نظام واضح ظاهر للعناصر الرسومية المساندة.",
+                    "المواد الرقمية تحتاج إلى توحيد أكبر في التكوين والمساحات والهرمية.",
+                    "استخدام الصور والعناصر الطبية يحتاج إلى Art Direction موحد.",
+                    "الهوية يمكن تطويرها لتصبح أكثر Premium دون فقدان الطابع الإنساني."
+                ]
+            },
+            "logo_analysis": {
+                "logo_type": "Combination Mark",
+                "components": {
+                    "symbol": {
+                        "primary_form": "ECG / Heartbeat",
+                        "secondary_form": "Letter M",
+                        "tertiary_form": "Protective arc / sun-like curve",
+                        "meaning": [
+                            "الحياة",
+                            "نبض القلب",
+                            "الرعاية الصحية",
+                            "MaxCare",
+                            "الحماية",
+                            "الأمل",
+                            "الدفء الإنساني"
+                        ]
+                    },
+                    "wordmark_ar": "مستشفى ماكس كير",
+                    "wordmark_en": "MaxCare Hospital"
+                },
+                "semantic_analysis": {
+                    "heartbeat": {
+                        "meaning": "الحياة والدقة الطبية والاستجابة السريعة.",
+                        "score": 9
+                    },
+                    "M": {
+                        "meaning": "اختصار بصري ذكي لكلمة MaxCare.",
+                        "score": 8
+                    },
+                    "gold_arc": {
+                        "meaning": "الأمل والحماية والدفء.",
+                        "score": 7
+                    }
+                },
+                "recommended_logo_structure": {
+                    "primary_lockup": "symbol + Arabic name + English name",
+                    "secondary_lockup": "symbol + MaxCare Hospital",
+                    "icon_only": "heartbeat-M symbol",
+                    "arabic_only": "symbol + مستشفى ماكس كير",
+                    "english_only": "symbol + MaxCare Hospital",
+                    "horizontal": true,
+                    "stacked": true
+                },
+                "logo_clear_space": {
+                    "unit": "X",
+                    "definition": "X = ارتفاع حرف M داخل الرمز",
+                    "minimum_clear_space": "1X حول جميع جوانب الشعار"
+                },
+                "minimum_size": {
+                    "print": "25 mm width",
+                    "digital": "120 px width",
+                    "icon_only": "24 px minimum for digital UI, 16 px only for favicon/system contexts"
+                },
+                "recommended_logo_refinement": [
+                    "تبسيط خطوط النبض في النسخة الصغيرة.",
+                    "توحيد سماكة Stroke.",
+                    "ضبط المسافة بين الرمز والـ Wordmark.",
+                    "رفع وضوح الاسم العربي.",
+                    "تحسين العلاقة البصرية بين العربي والإنجليزي.",
+                    "إنتاج نسخة Monochrome رسمية.",
+                    "إنتاج نسخة Reversed رسمية.",
+                    "إنتاج Icon Mark مستقل للاستخدام الرقمي."
+                ],
+                "logo_do": [
+                    "استخدام الشعار بنسبة أبعاده الأصلية.",
+                    "الحفاظ على مساحة الحماية.",
+                    "استخدام الخلفيات المعتمدة.",
+                    "استخدام النسخة المناسبة لحجم الاستخدام."
+                ],
+                "logo_dont": [
+                    "عدم تغيير ألوان الشعار بشكل عشوائي.",
+                    "عدم تمديد الشعار أفقيًا أو عموديًا.",
+                    "عدم إضافة Drop Shadow.",
+                    "عدم وضع الشعار فوق صور مزدحمة دون حماية.",
+                    "عدم تغيير ترتيب العناصر.",
+                    "عدم تدوير الرمز.",
+                    "عدم استخدام Gradient داخل الشعار الأساسي.",
+                    "عدم إضافة أيقونات طبية خارجية إلى الشعار."
+                ]
+            },
+            "color_system": {
+                "important_note": "القيم التالية مقترحة ومقاربة بصريًا من الشعار المنشور وليست أكوادًا رسمية مؤكدة من دليل هوية صادر عن المستشفى.",
+                "primary": {
+                    "maxcare_teal": {
+                        "hex": "#087B78",
+                        "rgb": "8, 123, 120",
+                        "cmyk_approx": "94, 0, 2, 52",
+                        "role": "Primary brand color",
+                        "meaning": [
+                            "الثقة",
+                            "الطب",
+                            "الهدوء",
+                            "النظافة",
+                            "الحياة"
+                        ]
+                    },
+                    "maxcare_gold": {
+                        "hex": "#D6A62A",
+                        "rgb": "214, 166, 42",
+                        "cmyk_approx": "0, 22, 80, 16",
+                        "role": "Accent brand color",
+                        "meaning": [
+                            "الأمل",
+                            "الدفء",
+                            "التميز",
+                            "الإنسانية"
+                        ]
+                    }
+                },
+                "secondary": {
+                    "deep_teal": {
+                        "hex": "#075B59",
+                        "usage": "العناوين الداكنة، الأزرار، الخلفيات الداكنة"
+                    },
+                    "soft_teal": {
+                        "hex": "#DDF2F0",
+                        "usage": "الخلفيات الطبية الهادئة"
+                    },
+                    "pale_teal": {
+                        "hex": "#F1FAF9",
+                        "usage": "صفحات المعلومات والـ UI"
+                    },
+                    "warm_gold": {
+                        "hex": "#F4E7BF",
+                        "usage": "Highlights وخلفيات خفيفة"
+                    },
+                    "medical_blue": {
+                        "hex": "#2F80A8",
+                        "usage": "المعلومات الطبية والبيانات الثانوية"
+                    }
+                },
+                "neutrals": {
+                    "white": "#FFFFFF",
+                    "off_white": "#F8FAFA",
+                    "cool_gray_50": "#F3F6F6",
+                    "cool_gray_100": "#E7ECEC",
+                    "cool_gray_300": "#B9C4C4",
+                    "cool_gray_500": "#718080",
+                    "cool_gray_700": "#3D4B4B",
+                    "charcoal": "#1F2929"
+                },
+                "semantic_colors": {
+                    "success": "#218A67",
+                    "info": "#2F80A8",
+                    "warning": "#D49A24",
+                    "error": "#C94A4A"
+                },
+                "color_ratios": {
+                    "primary_teal": "45%",
+                    "white_neutrals": "35%",
+                    "secondary_teal": "10%",
+                    "gold": "7%",
+                    "semantic_colors": "3%"
+                },
+                "rule": "يجب ألا يسيطر اللون الذهبي على الهوية. دوره Accent وليس Primary."
+            },
+            "typography": {
+                "principle": "الهوية تحتاج إلى Typography حديثة وواضحة ثنائية اللغة مع أولوية للقراءة الطبية.",
+                "recommended_arabic": {
+                    "primary": "IBM Plex Sans Arabic",
+                    "alternative": "Noto Sans Arabic",
+                    "display": "IBM Plex Sans Arabic",
+                    "weights": [
+                        400,
+                        500,
+                        600,
+                        700
+                    ]
+                },
+                "recommended_english": {
+                    "primary": "Inter",
+                    "alternative": "Manrope",
+                    "display": "Inter",
+                    "weights": [
+                        400,
+                        500,
+                        600,
+                        700,
+                        800
+                    ]
+                },
+                "type_scale": {
+                    "display_xl": "48px / 56px",
+                    "display_l": "40px / 48px",
+                    "h1": "36px / 44px",
+                    "h2": "30px / 38px",
+                    "h3": "24px / 32px",
+                    "h4": "20px / 28px",
+                    "body_l": "18px / 30px",
+                    "body": "16px / 26px",
+                    "body_s": "14px / 22px",
+                    "caption": "12px / 18px"
+                },
+                "arabic_rules": [
+                    "استخدام وزن 600 للعناوين.",
+                    "استخدام وزن 400 أو 500 للنصوص.",
+                    "عدم استخدام الخطوط المزخرفة في المعلومات الطبية.",
+                    "زيادة Line Height بسبب طبيعة النص العربي.",
+                    "الحفاظ على محاذاة RTL في المحتوى العربي."
+                ],
+                "english_rules": [
+                    "استخدام Inter 600/700 للعناوين.",
+                    "استخدام Inter 400/500 للنصوص.",
+                    "عدم استخدام All Caps في الفقرات.",
+                    "يمكن استخدام Uppercase فقط في Labels القصيرة."
+                ]
+            },
+            "visual_language": {
+                "core_concept": "Heartbeat + Care + Human Connection",
+                "graphic_motifs": [
+                    "ECG line",
+                    "soft arc",
+                    "rounded medical cards",
+                    "subtle pulse pattern",
+                    "organic curves",
+                    "clean clinical grids"
+                ],
+                "recommended_pattern": {
+                    "description": "خط نبض مجرد يستخدم كعنصر زخرفي ثانوي وليس كبديل عن الشعار.",
+                    "opacity": "5%-12%",
+                    "colors": [
+                        "#087B78",
+                        "#D6A62A"
+                    ]
+                },
+                "shapes": {
+                    "preferred": [
+                        "rounded rectangles",
+                        "soft circles",
+                        "organic arcs",
+                        "thin lines"
+                    ],
+                    "avoid": [
+                        "sharp aggressive diagonals",
+                        "excessive gradients",
+                        "heavy shadows",
+                        "complex decorative shapes"
+                    ]
+                },
+                "corner_radius": {
+                    "small": "8px",
+                    "medium": "12px",
+                    "large": "20px",
+                    "pill": "999px"
+                },
+                "stroke": {
+                    "default": "1.5px",
+                    "emphasis": "2px",
+                    "icon": "1.75px-2px"
+                }
+            },
+            "iconography": {
+                "style": "Rounded Outline Medical Icons",
+                "stroke_width": "1.75px-2px",
+                "corner_style": "rounded",
+                "color": "#087B78",
+                "secondary_color": "#718080",
+                "rules": [
+                    "عدم خلط Filled Icons مع Outline Icons داخل نفس المجموعة.",
+                    "استخدام نفس سماكة الخط.",
+                    "تجنب التفاصيل الدقيقة.",
+                    "الأيقونات الطبية يجب أن تكون واضحة حتى عند 24px.",
+                    "استخدام أيقونات أصلية أو مرخصة."
+                ],
+                "recommended_categories": [
+                    "Emergency",
+                    "Cardiology",
+                    "Radiology",
+                    "Laboratory",
+                    "Pharmacy",
+                    "Pediatrics",
+                    "Gynecology",
+                    "Orthopedics",
+                    "Dental",
+                    "Internal Medicine",
+                    "Home Care",
+                    "Appointments",
+                    "Doctors",
+                    "Location",
+                    "Phone",
+                    "WhatsApp"
+                ]
+            },
+            "photography_direction": {
+                "objective": "إظهار المستشفى كجهة طبية موثوقة وإنسانية وليست مؤسسة باردة.",
+                "style": [
+                    "natural lighting",
+                    "real doctors",
+                    "real patients where consent exists",
+                    "human interaction",
+                    "clean clinical environments",
+                    "warm skin tones",
+                    "authentic expressions"
+                ],
+                "preferred_scenes": [
+                    "طبيب يتحدث مع المريض",
+                    "طاقم طبي يعمل معًا",
+                    "رعاية الأطفال والعائلة",
+                    "الاستقبال بطريقة إنسانية",
+                    "الأجهزة الطبية الحديثة",
+                    "التشخيص والفحص",
+                    "لقطات تفصيلية للأيدي أثناء الرعاية"
+                ],
+                "avoid": [
+                    "صور Stock مبالغ في ابتسامتها",
+                    "أطباء ينظرون للكاميرا دون سياق",
+                    "صور مستشفيات مظلمة",
+                    "صور مرضى دون موافقات",
+                    "صور طبية صادمة",
+                    "صور دموية أو مزعجة"
+                ],
+                "color_grade": {
+                    "temperature": "neutral_warm",
+                    "contrast": "medium_low",
+                    "saturation": "natural",
+                    "teal_usage": "subtle"
+                }
+            },
+            "layout_system": {
+                "grid": {
+                    "desktop": "12 columns",
+                    "tablet": "8 columns",
+                    "mobile": "4 columns"
+                },
+                "spacing_base": "4px",
+                "spacing_scale": [
+                    "4px",
+                    "8px",
+                    "12px",
+                    "16px",
+                    "24px",
+                    "32px",
+                    "40px",
+                    "48px",
+                    "64px",
+                    "80px"
+                ],
+                "content_width": {
+                    "max": "1200px",
+                    "comfortable": "960px",
+                    "text": "720px"
+                },
+                "alignment": {
+                    "arabic": "RTL",
+                    "english": "LTR",
+                    "mixed_content": "contextual"
+                }
+            },
+            "digital_design_system": {
+                "buttons": {
+                    "primary": {
+                        "background": "#087B78",
+                        "text": "#FFFFFF",
+                        "radius": "12px",
+                        "height": "48px"
+                    },
+                    "secondary": {
+                        "background": "#DDF2F0",
+                        "text": "#075B59",
+                        "border": "none",
+                        "radius": "12px",
+                        "height": "48px"
+                    },
+                    "accent": {
+                        "background": "#D6A62A",
+                        "text": "#1F2929",
+                        "radius": "12px",
+                        "height": "48px"
+                    }
+                },
+                "cards": {
+                    "background": "#FFFFFF",
+                    "border": "#E7ECEC",
+                    "radius": "16px",
+                    "shadow": "0 6px 24px rgba(31,41,41,0.06)"
+                },
+                "input_fields": {
+                    "height": "48px",
+                    "radius": "10px",
+                    "border": "#B9C4C4",
+                    "focus_border": "#087B78"
+                },
+                "navigation": {
+                    "desktop": "white background with teal active state",
+                    "mobile": "compact with clear emergency/appointment actions"
+                }
+            },
+            "social_media_system": {
+                "primary_format": "1080x1350",
+                "square": "1080x1080",
+                "story": "1080x1920",
+                "reel_cover": "1080x1920",
+                "visual_ratio": {
+                    "photo": "60%",
+                    "text": "25%",
+                    "brand_elements": "15%"
+                },
+                "template_types": [
+                    "Doctor Announcement",
+                    "Medical Tip",
+                    "Health Awareness",
+                    "Department Promotion",
+                    "Package Offer",
+                    "Visiting Consultant",
+                    "Hospital News",
+                    "Patient Education",
+                    "Emergency Notice",
+                    "Holiday Greeting"
+                ],
+                "template_rule": "لا ينبغي أن تتحول المنشورات إلى إعلانات مزدحمة؛ يجب الحفاظ على مساحة بيضاء وهوية طبية هادئة."
+            },
+            "print_identity": {
+                "business_card": {
+                    "front": "Logo + name",
+                    "back": "Name + title + contact + QR",
+                    "primary_color": "#087B78",
+                    "accent": "#D6A62A"
+                },
+                "letterhead": {
+                    "paper": "A4",
+                    "logo_position": "top right for Arabic / top left for English",
+                    "footer": "contact information + address + digital channels"
+                },
+                "envelope": {
+                    "style": "minimal white with teal logo and thin gold accent"
+                },
+                "prescription": {
+                    "style": "high readability, minimal decoration",
+                    "priority": "medical information over branding"
+                },
+                "patient_folder": {
+                    "style": "white + teal with subtle heartbeat pattern"
+                },
+                "id_card": {
+                    "front": "photo + name + role + department",
+                    "back": "hospital information + emergency contact"
+                }
+            },
+            "environmental_branding": {
+                "principle": "Wayfinding first, branding second.",
+                "hospital_signage": {
+                    "primary": "#087B78",
+                    "secondary": "#FFFFFF",
+                    "accent": "#D6A62A"
+                },
+                "departments": {
+                    "Emergency": {
+                        "semantic_color": "#C94A4A",
+                        "icon": "emergency"
+                    },
+                    "Radiology": {
+                        "semantic_color": "#2F80A8",
+                        "icon": "radiology"
+                    },
+                    "Laboratory": {
+                        "semantic_color": "#6B5AA6",
+                        "icon": "laboratory"
+                    },
+                    "Pharmacy": {
+                        "semantic_color": "#218A67",
+                        "icon": "pharmacy"
+                    },
+                    "Pediatrics": {
+                        "semantic_color": "#E49A54",
+                        "icon": "pediatrics"
+                    },
+                    "Women_Health": {
+                        "semantic_color": "#A85C7A",
+                        "icon": "women_health"
+                    }
+                },
+                "rule": "ألوان الأقسام لا تستبدل اللون الأساسي للهوية؛ تستخدم فقط كـ Wayfinding أو معلومات مساعدة."
+            },
+            "uniform_direction": {
+                "doctors": {
+                    "base": "white",
+                    "accent": "#087B78",
+                    "badge": "MaxCare logo"
+                },
+                "nurses": {
+                    "base": "soft teal",
+                    "accent": "#087B78"
+                },
+                "support_staff": {
+                    "base": "white/light gray",
+                    "accent": "#075B59"
+                },
+                "principle": "يجب أن تكون الملابس نظيفة وبسيطة، مع استخدام الشعار بحجم صغير وواضح."
+            },
+            "brand_voice": {
+                "tone": [
+                    "إنساني",
+                    "واضح",
+                    "مطمئن",
+                    "مهني",
+                    "غير متعالٍ",
+                    "مباشر"
+                ],
+                "arabic": {
+                    "style": "لغة عربية بسيطة ومطمئنة.",
+                    "avoid": [
+                        "المبالغة الطبية",
+                        "الوعود المطلقة",
+                        "التخويف",
+                        "المصطلحات المعقدة دون شرح"
+                    ]
+                },
+                "english": {
+                    "style": "Simple, confident, compassionate healthcare English.",
+                    "avoid": [
+                        "overclaiming",
+                        "fear-based marketing",
+                        "unnecessary medical jargon"
+                    ]
+                },
+                "messaging_pillars": [
+                    "Care",
+                    "Expertise",
+                    "Accessibility",
+                    "Technology",
+                    "Community",
+                    "Trust"
+                ]
+            },
+            "tagline_system": {
+                "current_public_tagline": "We Care, We Listen, We Help!",
+                "recommended_primary": "Care with Precision",
+                "recommended_arabic": "رعاية بدقة واهتمام",
+                "alternative_taglines": [
+                    {
+                        "en": "Your Health. Our Care.",
+                        "ar": "صحتك... رعايتنا."
+                    },
+                    {
+                        "en": "Expert Care, Human Touch.",
+                        "ar": "خبرة طبية بلمسة إنسانية."
+                    },
+                    {
+                        "en": "Better Care. Closer to You.",
+                        "ar": "رعاية أفضل، أقرب إليك."
+                    }
+                ],
+                "recommendation": "إذا لم توجد رغبة في تغيير الرسالة الحالية، يفضل الاحتفاظ بـ We Care, We Listen, We Help! كـ Corporate Tagline، واستخدام Care with Precision كـ Campaign/Positioning Line."
+            },
+            "brand_architecture": {
+                "master_brand": "MaxCare Hospital",
+                "sub_services": [
+                    "MaxCare Emergency",
+                    "MaxCare Clinics",
+                    "MaxCare Diagnostics",
+                    "MaxCare Laboratory",
+                    "MaxCare Pharmacy",
+                    "MaxCare Home Care",
+                    "MaxCare Women's Health",
+                    "MaxCare Pediatrics"
+                ],
+                "rule": "جميع الخدمات يجب أن تحافظ على Master Brand نفسه ولا تنشئ شعارات مستقلة إلا عند وجود سبب استراتيجي قوي."
+            },
+            "accessibility": {
+                "minimum_contrast": "WCAG AA",
+                "body_text": "يجب ألا يستخدم اللون الذهبي كلون للنص الأساسي على الأبيض.",
+                "recommended_text_colors": [
+                    "#1F2929",
+                    "#075B59"
+                ],
+                "interactive_states": [
+                    "default",
+                    "hover",
+                    "focus",
+                    "active",
+                    "disabled",
+                    "error",
+                    "success"
+                ],
+                "focus_color": "#D6A62A"
+            },
+            "brand_application_matrix": {
+                "website": {
+                    "priority": "high",
+                    "primary_color": "#087B78",
+                    "accent": "#D6A62A"
+                },
+                "mobile_app": {
+                    "priority": "medium_high",
+                    "style": "clean medical UI"
+                },
+                "social_media": {
+                    "priority": "high",
+                    "style": "human + educational"
+                },
+                "signage": {
+                    "priority": "very_high",
+                    "style": "high contrast + wayfinding"
+                },
+                "stationery": {
+                    "priority": "high",
+                    "style": "minimal clinical"
+                },
+                "uniforms": {
+                    "priority": "medium",
+                    "style": "professional clinical"
+                },
+                "vehicle": {
+                    "priority": "medium",
+                    "style": "white base + teal graphic + gold accent"
+                },
+                "packaging": {
+                    "priority": "medium",
+                    "style": "white + teal + subtle pattern"
+                }
+            },
+            "recommended_logo_variants": {
+                "A_primary": {
+                    "description": "Full logo with symbol + Arabic + English",
+                    "use": "official documents and main communications"
+                },
+                "B_horizontal": {
+                    "description": "Symbol + MaxCare Hospital",
+                    "use": "website header and digital layouts"
+                },
+                "C_arabic": {
+                    "description": "Symbol + مستشفى ماكس كير",
+                    "use": "Arabic-first communications"
+                },
+                "D_icon": {
+                    "description": "Heartbeat-M symbol only",
+                    "use": "favicon, app icon, social avatar"
+                },
+                "E_monochrome": {
+                    "description": "single-color logo",
+                    "colors": [
+                        "#075B59",
+                        "#FFFFFF",
+                        "#1F2929"
+                    ]
+                },
+                "F_reversed": {
+                    "description": "white logo for dark teal background",
+                    "use": "signage and premium dark backgrounds"
+                }
+            },
+            "design_tokens": {
+                "color": {
+                    "brand": {
+                        "primary": "#087B78",
+                        "primaryDark": "#075B59",
+                        "accent": "#D6A62A",
+                        "accentSoft": "#F4E7BF"
+                    },
+                    "surface": {
+                        "white": "#FFFFFF",
+                        "soft": "#F8FAFA",
+                        "tealSoft": "#DDF2F0"
+                    },
+                    "text": {
+                        "primary": "#1F2929",
+                        "secondary": "#3D4B4B",
+                        "muted": "#718080"
+                    },
+                    "border": "#E7ECEC"
+                },
+                "radius": {
+                    "sm": "8px",
+                    "md": "12px",
+                    "lg": "16px",
+                    "xl": "20px",
+                    "pill": "999px"
+                },
+                "shadow": {
+                    "sm": "0 2px 8px rgba(31,41,41,0.05)",
+                    "md": "0 6px 24px rgba(31,41,41,0.06)",
+                    "lg": "0 12px 40px rgba(31,41,41,0.08)"
+                },
+                "spacing": {
+                    "1": "4px",
+                    "2": "8px",
+                    "3": "12px",
+                    "4": "16px",
+                    "6": "24px",
+                    "8": "32px",
+                    "10": "40px",
+                    "12": "48px",
+                    "16": "64px",
+                    "20": "80px"
+                }
+            },
+            "figma_structure": {
+                "file_name": "MaxCare_Hospital_Brand_System",
+                "pages": [
+                    "00_Cover",
+                    "01_Brand_Strategy",
+                    "02_Logo_System",
+                    "03_Color_System",
+                    "04_Typography",
+                    "05_Iconography",
+                    "06_Visual_Language",
+                    "07_Photography",
+                    "08_Grid_And_Spacing",
+                    "09_Social_Media",
+                    "10_Stationery",
+                    "11_Signage",
+                    "12_Uniforms",
+                    "13_Digital_UI",
+                    "14_Templates",
+                    "15_Brand_Guidelines"
+                ],
+                "components": [
+                    "Logo_Primary",
+                    "Logo_Horizontal",
+                    "Logo_Arabic",
+                    "Logo_Icon",
+                    "Logo_Monochrome",
+                    "Logo_Reversed",
+                    "Button_Primary",
+                    "Button_Secondary",
+                    "Card_Service",
+                    "Card_Doctor",
+                    "Card_HealthTip",
+                    "Social_Post",
+                    "Social_Story",
+                    "Doctor_Profile",
+                    "Department_Badge",
+                    "Emergency_Banner",
+                    "Appointment_CTA"
+                ]
+            },
+            "social_template_specs": {
+                "doctor_announcement": {
+                    "background": "#F8FAFA",
+                    "photo_area": "55%",
+                    "content_area": "45%",
+                    "headline_color": "#075B59",
+                    "accent": "#D6A62A"
+                },
+                "health_tip": {
+                    "background": "#DDF2F0",
+                    "icon_color": "#087B78",
+                    "headline": "#075B59"
+                },
+                "offer": {
+                    "background": "#FFFFFF",
+                    "primary": "#087B78",
+                    "accent": "#D6A62A",
+                    "rule": "عدم جعل السعر أكبر بصريًا من اسم الخدمة أو الرسالة الطبية."
+                },
+                "hospital_news": {
+                    "background": "#FFFFFF",
+                    "top_bar": "#087B78",
+                    "accent_line": "#D6A62A"
+                }
+            },
+            "content_examples": {
+                "arabic": {
+                    "headline": "رعايتك تبدأ من هنا",
+                    "subheadline": "خبرة طبية، تقنيات حديثة، واهتمام يضعك أولًا.",
+                    "cta": "احجز موعدك",
+                    "secondary_cta": "تعرّف على خدماتنا"
+                },
+                "english": {
+                    "headline": "Your Care Starts Here",
+                    "subheadline": "Expert care, modern technology, and a human approach.",
+                    "cta": "Book an Appointment",
+                    "secondary_cta": "Explore Our Services"
+                }
+            },
+            "implementation_priority": {
+                "phase_1": [
+                    "تثبيت نسخ الشعار.",
+                    "توحيد الألوان.",
+                    "اعتماد Typography.",
+                    "إنتاج Brand Guidelines.",
+                    "إنتاج Logo Clear Space.",
+                    "إنتاج Monochrome/Reversed logos."
+                ],
+                "phase_2": [
+                    "نظام Social Media.",
+                    "نظام الأيقونات.",
+                    "نظام التصوير.",
+                    "قوالب الأطباء.",
+                    "قوالب الخدمات.",
+                    "قوالب العروض."
+                ],
+                "phase_3": [
+                    "Wayfinding.",
+                    "Stationery.",
+                    "Uniforms.",
+                    "Website UI.",
+                    "Digital Patient Journey.",
+                    "Hospital environmental branding."
+                ]
+            },
+            "final_strategic_recommendation": {
+                "direction": "Modern Human Healthcare",
+                "description": "أفضل اتجاه للهوية ليس إعادة تصميم كاملة للشعار، بل تطوير الهوية حول الرمز الحالي مع الحفاظ على جوهره. يجب أن تصبح العلامة أكثر هدوءًا، أكثر نظافة، وأكثر اتساقًا رقميًا.",
+                "retain": [
+                    "Heartbeat",
+                    "M concept",
+                    "Teal",
+                    "Gold accent",
+                    "Arabic + English identity",
+                    "Human care positioning"
+                ],
+                "improve": [
+                    "Typography",
+                    "Logo scalability",
+                    "Spacing",
+                    "Digital templates",
+                    "Photography",
+                    "Icon system",
+                    "Wayfinding",
+                    "Content hierarchy"
+                ],
+                "avoid": [
+                    "إعادة بناء شعار مختلف تمامًا دون ضرورة.",
+                    "استخدام الأزرق الطبي التقليدي فقط.",
+                    "الإفراط في اللون الذهبي.",
+                    "تصميم منشورات مليئة بالنصوص.",
+                    "استخدام Stock photography غير واقعية.",
+                    "تعدد الخطوط.",
+                    "تعدد درجات الألوان دون نظام."
+                ]
+            },
+            "brand_guideline_summary": {
+                "one_sentence": "MaxCare Hospital should look like a modern, trusted and human hospital — clinically precise but emotionally warm.",
+                "arabic": "يجب أن تبدو ماكس كير كمستشفى حديث وموثوق وإنساني؛ دقيق طبيًا ودافئ إنسانيًا.",
+                "visual_formula": "TEAL + WHITE + GOLD + HEARTBEAT + HUMAN PHOTOGRAPHY + CLEAN TYPOGRAPHY",
+                "brand_formula": "TRUST + EXPERTISE + CARE + ACCESSIBILITY"
+            },
+            "quality_control_checklist": [
+                "هل الشعار واضح عند 120px؟",
+                "هل توجد مساحة حماية كافية؟",
+                "هل الألوان متوافقة مع النظام؟",
+                "هل النص العربي مقروء؟",
+                "هل النص الإنجليزي متناسق مع العربي؟",
+                "هل المنشور يحتوي على نقطة تركيز واحدة؟",
+                "هل اللون الذهبي مستخدم كAccent فقط؟",
+                "هل الصورة تبدو إنسانية وحقيقية؟",
+                "هل CTA واضح؟",
+                "هل المعلومات الطبية أكثر بروزًا من الزخرفة؟",
+                "هل التصميم يعمل على الهاتف؟",
+                "هل التباين يحقق متطلبات الوصول؟",
+                "هل يمكن التعرف على MaxCare دون قراءة النص؟"
+            ],
+            "deliverables": {
+                "brand_strategy": true,
+                "logo_guidelines": true,
+                "color_palette": true,
+                "typography": true,
+                "iconography": true,
+                "photography_direction": true,
+                "social_media_system": true,
+                "stationery_system": true,
+                "signage_system": true,
+                "uniform_direction": true,
+                "digital_design_system": true,
+                "design_tokens": true,
+                "figma_structure": true,
+                "brand_voice": true,
+                "implementation_roadmap": true
+            }
+        }
+    }
+}

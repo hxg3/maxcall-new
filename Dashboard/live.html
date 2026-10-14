@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MaxCall — Live</title>
+<script src="https://cdn.tailwindcss.com"></script><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<script>tailwind.config={theme:{extend:{colors:{ink:"#0f172a",muted:"#64748b",line:"#e2e8f0"}}}}</script></head>
+<body class="bg-[#f8fafc] text-ink font-[Segoe UI,Tahoma]">
+<header class="sticky top-0 bg-white border-b border-line"><div class="max-w-[1300px] mx-auto px-6 h-[64px] flex items-center justify-between"><div class="flex items-center gap-3"><div class="w-9 h-9 rounded-xl bg-ink text-white grid place-items-center"><i class="fa-solid fa-hospital"></i></div><div><div class="font-bold">MaxCall Live</div><div class="text-xs text-muted">مباشر من VitalPBX <span id="conn" class="mr-2 text-xs bg-slate-100 px-2 py-1 rounded-full">جاري الاتصال...</span></div></div></div><div class="text-xs text-muted" id="clock"></div></div></header>
+<div class="max-w-[1300px] mx-auto px-6 py-6 grid grid-cols-12 gap-6">
+<div class="col-span-12 grid grid-cols-2 lg:grid-cols-4 gap-4">
+<div class="bg-white rounded-2xl border border-line p-4"><div class="text-xs text-muted">مكالمات اليوم</div><div class="text-2xl font-black mt-1" id="k_total">-</div></div>
+<div class="bg-white rounded-2xl border border-line p-4"><div class="text-xs text-muted">تم الرد</div><div class="text-2xl font-black mt-1" id="k_ans">-</div><div class="text-xs text-emerald-600" id="k_miss"></div></div>
+<div class="bg-white rounded-2xl border border-line p-4"><div class="text-xs text-muted">متوسط الانتظار</div><div class="text-2xl font-black mt-1"><span id="k_avg">-</span><span class="text-sm">ث</span></div></div>
+<div class="bg-white rounded-2xl border border-line p-4"><div class="text-xs text-muted">الموظفون</div><div class="text-sm mt-1">101: <b id="k_101">-</b> — 102: <b id="k_102">-</b></div></div>
+</div>
+<div class="col-span-12 bg-white rounded-2xl border border-line overflow-hidden"><div class="p-5 flex justify-between"><h3 class="font-bold">سجل مباشر — asterisk.cdr</h3><span class="text-xs bg-emerald-50 text-emerald-700 px-2 py-1 rounded-full" id="live_dot">● LIVE كل 5 ث</span></div><div class="overflow-auto"><table class="w-full text-sm"><thead class="bg-slate-50 text-muted"><tr><th class="p-3 text-right">الوقت</th><th class="p-3 text-right">المتصل</th><th class="p-3 text-right">إلى</th><th class="p-3 text-right">المدة</th><th class="p-3 text-right">الحالة</th></tr></thead><tbody id="rows" class="divide-y divide-line"></tbody></table></div></div>
+</div>
+<script>
+setInterval(()=>document.getElementById('clock').textContent=new Date().toLocaleString('ar-EG'),1000)
+async function refresh(){
+  try{
+    const s=await fetch('/api/stats').then(r=>r.json())
+    document.getElementById('k_total').textContent=s.total
+    document.getElementById('k_ans').textContent=s.answered
+    document.getElementById('k_miss').textContent=s.missed+' فائتة'
+    document.getElementById('k_avg').textContent=s.avg_wait
+    document.getElementById('k_101').textContent=s.agents['101']||0
+    document.getElementById('k_102').textContent=s.agents['102']||0
+    document.getElementById('conn').textContent='● متصل VitalPBX'
+    document.getElementById('conn').className='mr-2 text-xs bg-emerald-50 text-emerald-700 px-2 py-1 rounded-full'
+  }catch{ document.getElementById('conn').textContent='● غير متصل (بيانات تجريبية)'; document.getElementById('conn').className='mr-2 text-xs bg-amber-50 text-amber-700 px-2 py-1 rounded-full' }
+  try{
+    const rows=await fetch('/api/cdr').then(r=>r.json())
+    document.getElementById('rows').innerHTML=rows.map(r=>`<tr><td class="p-3 text-muted">${r.time}</td><td class="p-3"><b>${r.src}</b><div class="text-xs text-muted">${r.clid}</div></td><td class="p-3">${r.dst}</td><td class="p-3">${Math.floor(r.billsec/60)}:${String(r.billsec%60).padStart(2,'0')}</td><td class="p-3">${r.disposition==='ANSWERED'?'<span class="bg-emerald-50 text-emerald-700 px-2 py-1 rounded-full text-xs">تم الرد</span>':'<span class="bg-red-50 text-red-600 px-2 py-1 rounded-full text-xs">فائتة</span>'}</td></tr>`).join('')
+  }catch{}
+}
+refresh(); setInterval(refresh,5000)
+</script></body></html>

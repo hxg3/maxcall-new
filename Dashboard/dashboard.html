@@ -1,0 +1,1095 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MaxCall — Call Center Dashboard</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  darkMode: 'class',
+  theme: {
+    extend: {
+      colors: { brand: '#087B78', brandDark: '#06605E', gold: '#D6A62A' },
+      fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'] },
+      boxShadow: { soft: '0 1px 3px rgba(15,23,42,0.08)' }
+    }
+  }
+};
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+.modal-bg{background:rgba(15,23,42,0.5);backdrop-filter:blur(4px);animation:fadeIn 200ms ease}
+.modal-bg.modal-leave{animation:modalOut 150ms ease forwards}
+.modal-bg.modal-leave>div{animation:panelOut 150ms ease forwards}
+@keyframes modalOut{to{opacity:0}}
+@keyframes panelOut{to{opacity:0;transform:scale(.96) translateY(4px)}}
+main section.section-enter{animation:secIn 150ms ease}
+main section.section-enter *,main section.section-enter *::before,main section.section-enter *::after{animation:none!important}
+#agents_list button{position:relative}
+#agents_list button *,#agents_list button svg{pointer-events:none}
+#agents_list button::after{content:"";position:absolute;inset:-6px;background:transparent}
+@keyframes secIn{from{opacity:0}to{opacity:1}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+.modal-panel{animation:popIn 200ms ease}
+@keyframes popIn{from{opacity:0;transform:scale(.96) translateY(4px)}to{opacity:1;transform:scale(1) translateY(0)}}
+.skel{position:relative;overflow:hidden;background:rgba(148,163,184,.25);border-radius:.5rem}
+.skel::after{content:"";position:absolute;inset:0;transform:translateX(-100%);background:linear-gradient(90deg,transparent,rgba(255,255,255,.55),transparent);animation:shimmer 1.2s infinite}
+@keyframes shimmer{to{transform:translateX(100%)}}
+button:active,a:active{scale:.95}
+button,a{transition:transform 150ms ease,background-color 150ms ease,box-shadow 200ms ease}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+input[type="date"],select{color-scheme:light}
+.dark input[type="date"],.dark select{color-scheme:dark}
+.dark select option{background-color:#0f172a;color:#e2e8f0}
+#ctip{position:fixed;z-index:100;pointer-events:none;display:none;background:rgba(15,23,42,.95);color:#f8fafc;padding:6px 10px;border-radius:10px;font-size:12px;line-height:1.5;max-width:260px;box-shadow:0 6px 24px rgba(0,0,0,.25)}
+</style>
+<script>
+(function(){try{var t=localStorage.getItem('maxcall-theme');if(t==='light'){document.documentElement.classList.remove('dark');}else{document.documentElement.classList.add('dark');}}catch(e){document.documentElement.classList.add('dark');}})();
+</script>
+</head>
+<body class="bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans antialiased">
+
+<!-- Top bar -->
+<header class="sticky top-0 z-20 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
+  <div class="max-w-[1400px] mx-auto px-6 h-[64px] flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <img src="data:image/png;base64,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" alt="MaxCall" class="h-9 w-9 rounded-full">
+      <div>
+        <div class="font-extrabold leading-none">MaxCall</div>
+        <div class="text-xs text-slate-500 dark:text-slate-400">Call Center</div>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <span class="relative flex h-2.5 w-2.5" title="Live" aria-hidden="true"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span></span>
+      <button onclick="toggleTheme()" title="Toggle dark mode" class="w-9 h-9 rounded-xl border border-slate-200 dark:border-slate-700 grid place-items-center hover:bg-slate-50 dark:hover:bg-slate-800 transition duration-150 active:scale-95">
+        <svg id="ic_sun" class="w-5 h-5 hidden" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path stroke-linecap="round" d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        <svg id="ic_moon" class="w-5 h-5 hidden" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+      </button>
+      <span class="text-sm hidden sm:inline">{{user.display_name}}</span>
+      <a href="/logout" class="text-sm border border-slate-200 dark:border-slate-700 px-3 py-1.5 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition duration-150 active:scale-95">Logout</a>
+    </div>
+  </div>
+</header>
+
+<div class="max-w-[1400px] mx-auto px-6 py-6 grid grid-cols-12 gap-6">
+  <!-- Sidebar -->
+  <aside class="col-span-12 lg:col-span-3">
+    <nav class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-soft p-3 flex lg:flex-col flex-row flex-wrap gap-1">
+      <button onclick="show('overview')" id="b_overview" class="flex-1 lg:flex-none text-left px-3 py-2.5 rounded-xl font-bold flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" d="M3 17l6-6 4 4 8-8"/><path stroke-linecap="round" d="M15 7h6v6"/></svg> Overview
+      </button>
+      <button onclick="show('calls')" id="b_calls" class="flex-1 lg:flex-none text-left px-3 py-2.5 rounded-xl flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 5.5C3 4.1 4.1 3 5.5 3h2L9.5 8 7.5 9.5a12 12 0 0 0 7 7L16 14.5l5 2v2c0 1.4-1.1 2.5-2.5 2.5C10.4 21 3 13.6 3 5.5z"/></svg> Calls
+      </button>
+      <button onclick="show('missed')" id="b_missed" class="flex-1 lg:flex-none text-left px-3 py-2.5 rounded-xl flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 5.5C3 4.1 4.1 3 5.5 3h2L9.5 8 7.5 9.5a12 12 0 0 0 7 7L16 14.5l5 2v2c0 1.4-1.1 2.5-2.5 2.5C10.4 21 3 13.6 3 5.5z"/><path stroke-linecap="round" d="M4 4l16 16"/></svg> Missed
+        <span id="miss_badge" class="ml-auto bg-red-500 text-white text-xs px-2 py-0.5 rounded-full hidden"></span>
+      </button>
+      <button onclick="show('agents')" id="b_agents" class="flex-1 lg:flex-none text-left px-3 py-2.5 rounded-xl flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path stroke-linecap="round" d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M17.5 14a6.5 6.5 0 0 1 4 6"/></svg> Agents
+      </button>
+      <button onclick="show('recs')" id="b_recs" class="flex-1 lg:flex-none text-left px-3 py-2.5 rounded-xl flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/></svg> Recordings
+      </button>
+      <button onclick="show('callers')" id="b_callers" class="flex-1 lg:flex-none text-left px-3 py-2.5 rounded-xl flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 5h16M4 12h16M4 19h10"/></svg> Callers
+      </button>
+      <button onclick="show('reports')" id="b_reports" class="flex-1 lg:flex-none text-left px-3 py-2.5 rounded-xl flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" d="M4 20V10m6 10V4m6 16v-7m4 7H2"/></svg> Reports
+      </button>
+    </nav>
+  </aside>
+
+  <main class="col-span-12 lg:col-span-9 space-y-6">
+    <!-- OVERVIEW -->
+    <section id="s_overview" class="space-y-4">
+      <div id="stats_status"></div>
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-soft p-4 transition duration-200 hover:-translate-y-0.5 hover:shadow-md">
+          <div class="text-xs text-slate-500 dark:text-slate-400">Calls today</div>
+          <div class="text-2xl font-extrabold mt-1" id="k_total">–</div>
+          <div class="text-xs text-slate-500 dark:text-slate-400 mt-1" id="k_rate"></div>
+        </div>
+        <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-soft p-4 transition duration-200 hover:-translate-y-0.5 hover:shadow-md">
+          <div class="text-xs text-slate-500 dark:text-slate-400">Answered</div>
+          <div class="text-2xl font-extrabold mt-1" id="k_ans">–</div>
+        </div>
+        <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-soft p-4 transition duration-200 hover:-translate-y-0.5 hover:shadow-md">
+          <div class="text-xs text-slate-500 dark:text-slate-400">Missed</div>
+          <div class="text-2xl font-extrabold mt-1 text-red-600 dark:text-red-400" id="k_miss">–</div>
+        </div>
+        <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-soft p-4 transition duration-200 hover:-translate-y-0.5 hover:shadow-md">
+          <div class="text-xs text-slate-500 dark:text-slate-400">Avg talk</div>
+          <div class="text-2xl font-extrabold mt-1"><span id="k_avg">–</span><span class="text-sm font-semibold text-slate-500"> s</span></div>
+        </div>
+      </div>
+      <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-soft p-5">
+        <div class="flex items-center justify-between">
+          <h3 class="font-bold">Call volume — last 7 days</h3>
+        </div>
+        <div class="mt-4 h-[220px]"><canvas id="weekChart"></canvas></div>
+        <div id="week_empty" class="hidden text-sm text-slate-500 dark:text-slate-400 text-center py-6">No call data for the last 7 days yet.</div>
+      </div>
+      <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-soft p-5">
+        <h3 class="font-bold">Agents today</h3>
+        <div id="agents_overview" class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3"></div>
+      </div>
+    </section>
+
+    <!-- CALLS -->
+    <section id="s_calls" class="hidden bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-soft overflow-hidden">
+      <div class="p-5 flex flex-wrap gap-2 items-center justify-between">
+        <h3 class="font-bold">Call log</h3>
+        <div class="flex flex-wrap gap-2">
+          <input id="q" placeholder="Search number / name" oninput="callsAuto()" class="border border-slate-200 dark:border-slate-700 bg-transparent rounded-xl px-3 py-2 text-sm w-48 focus:outline-none focus:ring-2 focus:ring-brand/40">
+          <select id="f_disp" onchange="page=1;loadCalls()" class="border border-slate-200 dark:border-slate-700 bg-transparent rounded-xl px-3 py-2 text-sm focus:outline-none">
+            <option value="all">All</option>
+            <option value="ANSWERED">Answered</option>
+            <option value="NO ANSWER">Missed</option>
+            <option value="BUSY">Busy</option>
+            <option value="FAILED">Failed</option>
+          </select>
+          <input id="f_ext" placeholder="Ext 101" oninput="callsAuto()" class="border border-slate-200 dark:border-slate-700 bg-transparent rounded-xl px-3 py-2 text-sm w-24 focus:outline-none focus:ring-2 focus:ring-brand/40">
+          <button onclick="resetCalls()" class="border border-slate-200 dark:border-slate-700 px-4 py-2 rounded-xl text-sm hover:bg-slate-50 dark:hover:bg-slate-800">Reset</button>
+        </div>
+      </div>
+      <div id="calls_status" class="px-5 pb-2"></div>
+      <div class="overflow-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400">
+            <tr><th class="p-3 text-left font-medium">Time</th><th class="p-3 text-left font-medium">Caller</th><th class="p-3 text-left font-medium">To</th><th class="p-3 text-left font-medium">Duration</th><th class="p-3 text-left font-medium">Status</th><th class="p-3 text-left font-medium">Recording</th></tr>
+          </thead>
+          <tbody id="rows" class="divide-y divide-slate-100 dark:divide-slate-800"></tbody>
+        </table>
+      </div>
+      <div class="p-3 flex items-center justify-between text-sm border-t border-slate-100 dark:border-slate-800">
+        <button onclick="chg(-1)" class="border border-slate-200 dark:border-slate-700 px-3 py-1.5 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800">Prev</button>
+        <span class="text-slate-500 dark:text-slate-400">Page <b id="pg" class="text-slate-900 dark:text-slate-100">1</b> <span id="calls_info"></span></span>
+        <button onclick="chg(1)" class="border border-slate-200 dark:border-slate-700 px-3 py-1.5 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800">Next</button>
+      </div>
+    </section>
+
+    <!-- MISSED -->
+    <section id="s_missed" class="hidden bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-soft p-5">
+      <div class="flex flex-wrap gap-2 items-center justify-between">
+        <h3 class="font-bold">Missed calls report</h3>
+        <div class="flex flex-wrap gap-2 items-center">
+          <select id="miss_preset" lang="en" onchange="missPresetChanged(); loadMissed();" class="border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 rounded-xl px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand/40">
+            <option value="today">Today</option>
+            <option value="week">Last 7 days</option>
+            <option value="month">Last 30 days</option>
+            <option value="quarter">Last 90 days</option>
+            <option value="custom">Custom…</option>
+          </select>
+          <span id="miss_custom" class="hidden flex-wrap gap-2 items-center">
+            <input id="miss_from" type="date" lang="en" onchange="loadMissed()" class="border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 rounded-xl px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand/40">
+            <input id="miss_to" type="date" lang="en" onchange="loadMissed()" class="border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 rounded-xl px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand/40">
+          </span>
+          <select id="miss_agent" lang="en" onchange="loadMissed()" class="border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 rounded-xl px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand/40"><option value="">All agents</option></select>
+        </div>
+      </div>
+      <div id="missed_status" class="mt-2"></div>
+      <div id="missed_summary" class="mt-2 text-sm text-slate-500 dark:text-slate-400"></div>
+      <div id="missed_list" class="mt-3 space-y-2"></div>
+    </section>
+
+    <!-- AGENTS -->
+    <section id="s_agents" class="hidden space-y-4">
+      <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-soft p-5">
+        <div class="flex items-center justify-between">
+          <h3 class="font-bold">Agents</h3>
+          <button onclick="openModal('m_add')" class="bg-brand hover:bg-brandDark text-white px-4 py-2 rounded-xl text-sm font-semibold">+ Add agent</button>
+        </div>
+        <div id="agents_status" class="mt-2"></div>
+        <div id="agents_list" class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3"></div>
+      </div>
+    </section>
+
+    <!-- RECORDINGS -->
+    <section id="s_recs" class="hidden bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-soft p-5">
+      <div class="flex flex-wrap gap-2 items-center justify-between">
+        <h3 class="font-bold">Recordings</h3>
+        <div class="flex gap-2">
+          <input id="recs_q" placeholder="Search number / name" oninput="filterRecs()" class="border border-slate-200 dark:border-slate-700 bg-transparent rounded-xl px-3 py-1.5 text-sm w-56 focus:outline-none focus:ring-2 focus:ring-brand/40">
+        </div>
+      </div>
+      <div id="recs_status" class="mt-2"></div>
+      <div id="recs_list" class="mt-3 space-y-2"></div>
+    </section>
+
+    <!-- CALLERS -->
+    <section id="s_callers" class="hidden bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-soft overflow-hidden">
+      <div class="p-5 flex flex-wrap gap-2 items-center justify-between">
+        <h3 class="font-bold">Callers</h3>
+        <div class="flex gap-2">
+          <input id="callers_q" placeholder="Search phone / name / file no." oninput="callersAuto()" class="border border-slate-200 dark:border-slate-700 bg-transparent rounded-xl px-3 py-2 text-sm w-56 focus:outline-none focus:ring-2 focus:ring-brand/40">
+          <button onclick="exportCallers()" class="border border-slate-200 dark:border-slate-700 px-4 py-2 rounded-xl text-sm hover:bg-slate-50 dark:hover:bg-slate-800">Export CSV</button>
+        </div>
+      </div>
+      <div id="callers_status" class="px-5 pb-2"></div>
+      <div class="overflow-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400">
+            <tr><th class="p-3 text-left font-medium">Phone</th><th class="p-3 text-left font-medium">Name</th><th class="p-3 text-left font-medium">File no.</th><th class="p-3 text-left font-medium">Relation</th><th class="p-3 text-left font-medium">Notes</th><th class="p-3 text-left font-medium">Calls</th><th class="p-3 text-left font-medium">Last call</th><th class="p-3"></th></tr>
+          </thead>
+          <tbody id="callers_rows" class="divide-y divide-slate-100 dark:divide-slate-800"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- REPORTS -->
+    <section id="s_reports" class="hidden space-y-4">
+      <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-soft p-5">
+        <div class="flex flex-wrap gap-2 items-center justify-between">
+          <h3 class="font-bold">Service level — last 7 days</h3>
+        </div>
+        <div id="reports_status" class="mt-2"></div>
+        <div class="overflow-auto mt-3">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400">
+              <tr><th class="p-3 text-left font-medium" data-tip="Calendar day">Day</th><th class="p-3 text-left font-medium" data-tip="Inbound customer calls (internal ext-to-ext excluded)">Inbound</th><th class="p-3 text-left font-medium" data-tip="Inbound calls answered by any agent">Answered</th><th class="p-3 text-left font-medium" data-tip="Inbound calls with no answer from any agent">Missed</th><th class="p-3 text-left font-medium" data-tip="Share of inbound calls answered within 20 seconds of waiting">SL ≤20s</th><th class="p-3 text-left font-medium" data-tip="Average speed of answer: average waiting time of answered calls">ASA</th><th class="p-3 text-left font-medium" data-tip="Average handling time: average talk duration of answered calls">AHT</th></tr>
+            </thead>
+          <tbody id="reports_days" class="divide-y divide-slate-100 dark:divide-slate-800"></tbody>
+        </table>
+        </div>
+      </div>
+      <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-soft p-5">
+        <h3 class="font-bold">Today by hour</h3>
+        <div id="reports_hours" class="mt-3 flex items-end gap-1 h-[120px]"></div>
+      </div>
+      <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-soft p-5">
+        <h3 class="font-bold">Agents — answered &amp; avg talk (7 days)</h3>
+        <div id="reports_agents" class="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3"></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- Modals -->
+<div id="m_add" class="hidden fixed inset-0 modal-bg grid place-items-center p-6 z-30">
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 w-full max-w-[420px]">
+    <h3 class="font-bold text-lg">Add agent</h3>
+    <p class="text-sm text-slate-500 dark:text-slate-400">A new extension will be created in VitalPBX.</p>
+    <div class="mt-4 space-y-3">
+      <input id="add_name" placeholder="Agent name (e.g. Ahmed)" class="w-full border border-slate-200 dark:border-slate-700 bg-transparent rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand/40">
+      <div class="flex gap-2">
+        <input id="add_pw" placeholder="Password (leave empty to auto-generate)" class="flex-1 min-w-0 border border-slate-200 dark:border-slate-700 bg-transparent rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand/40">
+        <button onclick="genAddPw()" title="Generate random password" class="border border-slate-200 dark:border-slate-700 px-3 py-2 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 whitespace-nowrap">Generate</button>
+      </div>
+      <div class="text-xs text-slate-500 dark:text-slate-400">The next free extension number is assigned automatically. Min 4 chars (letters, digits, @ # _ . -).</div>
+      <div id="add_err" class="hidden bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-400 text-sm p-3 rounded-xl"></div>
+      <div id="add_ok" class="hidden bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-sm p-3 rounded-xl"></div>
+    </div>
+    <div class="mt-6 flex gap-2 justify-end">
+      <button onclick="closeModal('m_add')" class="border border-slate-200 dark:border-slate-700 px-4 py-2 rounded-xl">Cancel</button>
+      <button onclick="doAdd()" class="bg-brand hover:bg-brandDark text-white px-6 py-2 rounded-xl font-bold">Add</button>
+    </div>
+  </div>
+</div>
+
+<div id="m_pw" class="hidden fixed inset-0 modal-bg grid place-items-center p-6 z-50">
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 w-full max-w-[420px]">
+    <h3 class="font-bold text-lg">Reset password</h3>
+    <p class="text-sm text-slate-500 dark:text-slate-400" id="pw_ext_label"></p>
+    <div class="mt-4 space-y-3">
+      <input id="pw_new" type="password" placeholder="New password" class="w-full border border-slate-200 dark:border-slate-700 bg-transparent rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand/40">
+      <div class="text-xs text-slate-500 dark:text-slate-400">Use this same password to log in with the app.</div>
+      <div id="pw_err" class="hidden bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-400 text-sm p-3 rounded-xl"></div>
+      <div id="pw_ok" class="hidden bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-sm p-3 rounded-xl"></div>
+    </div>
+    <div class="mt-6 flex gap-2 justify-end">
+      <button onclick="closeModal('m_pw')" class="border border-slate-200 dark:border-slate-700 px-4 py-2 rounded-xl">Cancel</button>
+      <button onclick="doPw()" class="bg-brand hover:bg-brandDark text-white px-6 py-2 rounded-xl font-bold">Save</button>
+    </div>
+  </div>
+</div>
+
+<div id="m_detail" class="hidden fixed inset-0 modal-bg grid place-items-center p-6 z-30">
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 w-full max-w-[600px] max-h-[80vh] overflow-auto">
+    <div class="flex items-center justify-between">
+      <h3 class="font-bold" id="detail_title"></h3>
+      <button onclick="closeModal('m_detail')" class="w-8 h-8 border border-slate-200 dark:border-slate-700 rounded-full">×</button>
+    </div>
+    <div id="detail_body" class="mt-4"></div>
+  </div>
+</div>
+
+<div id="m_caller" class="hidden fixed inset-0 modal-bg grid place-items-center p-6 z-30">
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 w-full max-w-[420px]">
+    <h3 class="font-bold text-lg">Edit caller</h3>
+    <p class="text-sm text-slate-500 dark:text-slate-400" id="caller_phone_label"></p>
+    <div class="mt-4 space-y-3">
+      <input id="caller_name" placeholder="Name" class="w-full border border-slate-200 dark:border-slate-700 bg-transparent rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand/40">
+      <div class="flex gap-2">
+        <input id="caller_file_no" placeholder="File no." class="flex-1 min-w-0 border border-slate-200 dark:border-slate-700 bg-transparent rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand/40">
+        <input id="caller_phone2" placeholder="Alt phone" class="flex-1 min-w-0 border border-slate-200 dark:border-slate-700 bg-transparent rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand/40">
+      </div>
+      <select id="caller_relation" class="w-full border border-slate-200 dark:border-slate-700 bg-transparent rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand/40">
+        <option value="patient">Patient himself/herself</option>
+        <option value="relative">Relative</option>
+        <option value="other">Other</option>
+      </select>
+      <textarea id="caller_notes" placeholder="Notes" rows="3" class="w-full border border-slate-200 dark:border-slate-700 bg-transparent rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand/40"></textarea>
+      <div id="caller_err" class="hidden bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-400 text-sm p-3 rounded-xl"></div>
+      <div id="caller_ok" class="hidden bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-sm p-3 rounded-xl"></div>
+    </div>
+    <div class="mt-6 flex gap-2 justify-end">
+      <button onclick="closeModal('m_caller')" class="border border-slate-200 dark:border-slate-700 px-4 py-2 rounded-xl">Cancel</button>
+      <button onclick="doCallerSave()" class="bg-brand hover:bg-brandDark text-white px-6 py-2 rounded-xl font-bold">Save</button>
+    </div>
+  </div>
+</div>
+
+<div id="m_cfile" class="hidden fixed inset-0 modal-bg grid place-items-center p-6 z-30">
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 w-full max-w-[600px] max-h-[80vh] overflow-auto">
+    <div class="flex items-center justify-between">
+      <h3 class="font-bold" id="cfile_title"></h3>
+      <button onclick="closeModal('m_cfile')" class="w-8 h-8 border border-slate-200 dark:border-slate-700 rounded-full">×</button>
+    </div>
+    <div id="cfile_body" class="mt-4"></div>
+  </div>
+</div>
+
+<script>
+let page = 1, chart = null, pwExt = null, callerPhone = null;
+let lastMissed = [], lastCallers = [], lastRecs = [];
+let extNames = {};
+const SECTIONS = ['overview', 'calls', 'missed', 'agents', 'recs', 'callers', 'reports'];
+const ACTIVE = 'flex-1 lg:flex-none text-left px-3 py-2.5 rounded-xl font-bold flex items-center gap-2 bg-brand text-white transition duration-150 active:scale-95';
+const IDLE = 'flex-1 lg:flex-none text-left px-3 py-2.5 rounded-xl flex items-center gap-2 hover:bg-slate-50 dark:hover:bg-slate-800 transition duration-150 active:scale-95';
+
+/* Silent refresh: per-section JSON fingerprint + scroll/focus preservation. */
+const __fp = {};
+function __sig(v) { try { return JSON.stringify(v); } catch (e) { return String(v); } }
+function __peek(key, data) { return __fp[key] !== undefined && __fp[key] === __sig(data); }
+function __mark(key, data) { __fp[key] = __sig(data); }
+function __setText(id, val) { const el = document.getElementById(id); if (el) el.textContent = val; }
+
+/* ---------- theme ---------- */
+function syncThemeIcon() {
+  const dark = document.documentElement.classList.contains('dark');
+  document.getElementById('ic_sun').classList.toggle('hidden', !dark);
+  document.getElementById('ic_moon').classList.toggle('hidden', dark);
+}
+function toggleTheme() {
+  const dark = document.documentElement.classList.toggle('dark');
+  try { localStorage.setItem('maxcall-theme', dark ? 'dark' : 'light'); } catch (e) {}
+  syncThemeIcon();
+  if (chart) { chart.options.scales.x.ticks.color = dark ? '#94a3b8' : '#64748b'; chart.options.scales.y.ticks.color = dark ? '#94a3b8' : '#64748b'; chart.update(); }
+}
+
+/* ---------- utils ---------- */
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+let __debT = null;
+function debounce(fn, ms) { clearTimeout(__debT); __debT = setTimeout(fn, ms || 400); }
+function callsAuto() { debounce(() => { page = 1; loadCalls(); }); }
+function callersAuto() { debounce(() => loadCallers()); }
+/* ---------- custom tooltip (styled like the chart) ---------- */
+(function () {
+  let tip = null;
+  function ensure() {
+    if (!tip) { tip = document.createElement('div'); tip.id = 'ctip'; document.body.appendChild(tip); }
+    return tip;
+  }
+  document.addEventListener('mouseover', e => {
+    const t = e.target && e.target.closest ? e.target.closest('[data-tip]') : null;
+    const el = ensure();
+    if (t && t.getAttribute('data-tip')) {
+      el.textContent = t.getAttribute('data-tip');
+      el.style.display = 'block';
+    } else {
+      el.style.display = 'none';
+    }
+  });
+  document.addEventListener('mousemove', e => {
+    const el = tip;
+    if (!el || el.style.display === 'none') return;
+    const pad = 14;
+    let x = e.clientX + pad, y = e.clientY + pad;
+    const r = el.getBoundingClientRect();
+    if (x + r.width > window.innerWidth - 8) x = e.clientX - r.width - pad;
+    if (y + r.height > window.innerHeight - 8) y = e.clientY - r.height - pad;
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+  });
+  document.addEventListener('mouseout', e => {
+    const t = e.target && e.target.closest ? e.target.closest('[data-tip]') : null;
+    if (t && tip) tip.style.display = 'none';
+  });
+})();
+function agentLabel(ext) { ext = String(ext == null ? '' : ext).trim(); if (!ext) return ''; const n = extNames[ext]; return n ? n + ' · ' + ext : ext; }
+async function loadExtNames() {
+  try {
+    const r = await api('/api/agents');
+    const list = Array.isArray(r) ? r : (r.rows || r.agents || []);
+    list.forEach(a => { const ext = String(a.extension ?? a.ext ?? '').trim(); const nm = String(a.name ?? '').trim(); if (ext && nm) extNames[ext] = nm; });
+  } catch (e) {}
+}
+function fmtDur(sec) { sec = Math.max(0, parseInt(sec) || 0); return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0'); }
+function skel(rows, h) {
+  rows = rows || 3; h = h || 'h-12';
+  let s = '<div class="space-y-2" aria-busy="true"><span class="sr-only">Loading…</span>';
+  for (let i = 0; i < rows; i++) s += '<div class="skel ' + h + '"></div>';
+  return s + '</div>';
+}
+function setStatus(id, msg, isErr) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (msg === 'Loading…') { el.innerHTML = skel(3, 'h-10'); return; }
+  el.innerHTML = msg ? '<div class="text-sm ' + (isErr ? 'text-red-600 dark:text-red-400' : 'text-slate-500 dark:text-slate-400') + '">' + esc(msg) + (isErr ? ' <button onclick="retry()" class="underline">Retry</button>' : '') + '</div>' : '';
+}
+let lastRetry = null;
+function retry() { if (lastRetry) lastRetry(); }
+function toast(m, ok) {
+  const t = document.createElement('div');
+  t.className = 'fixed bottom-6 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl text-sm text-white ' + (ok === false ? 'bg-red-600' : 'bg-brand');
+  t.textContent = m;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 2600);
+}
+async function api(url, opts) {
+  const r = await fetch(url, opts);
+  if (r.status === 401) throw new Error('Session expired — please log in again.');
+  let j = null;
+  try { j = await r.json(); } catch (e) { throw new Error('Bad server response (' + r.status + ').'); }
+  if (!r.ok) throw new Error((j && (j.error || j.message)) || ('Request failed (' + r.status + ').'));
+  return j;
+}
+function openModal(id) { const m = document.getElementById(id); if (!m) return; if (m.__leaveT) { clearTimeout(m.__leaveT); m.__leaveT = null; } m.classList.remove('modal-leave'); m.classList.remove('hidden'); const p = m.querySelector('div:not(.modal-bg)'); if (p) { p.classList.remove('modal-panel'); void p.offsetWidth; p.classList.add('modal-panel'); } }
+function closeModal(id) { const m = document.getElementById(id); if (!m || m.classList.contains('hidden') || m.classList.contains('modal-leave')) return; const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; if (reduce) { m.classList.add('hidden'); return; } m.classList.add('modal-leave'); m.__leaveT = setTimeout(() => { m.classList.add('hidden'); m.classList.remove('modal-leave'); m.__leaveT = null; }, 150); }
+function countUp(el, target) {
+  if (!el) return;
+  const end = parseFloat(target);
+  if (!isFinite(end) || (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)) { el.textContent = target; return; }
+  const t0 = performance.now(), dur = 600;
+  function tick(t) {
+    const k = Math.min(1, (t - t0) / dur);
+    el.textContent = Math.round(end * (1 - Math.pow(1 - k, 3)));
+    if (k < 1) requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+/* ---------- nav ---------- */
+function show(id) {
+  SECTIONS.forEach(s => document.getElementById('s_' + s).classList.toggle('hidden', s !== id));
+  const sec = document.getElementById('s_' + id);
+  if (sec) {
+    sec.classList.remove('section-enter');
+    void sec.offsetWidth;
+    sec.classList.add('section-enter');
+    if (sec.__enterT) clearTimeout(sec.__enterT);
+    sec.__enterT = setTimeout(() => { sec.classList.remove('section-enter'); sec.__enterT = null; }, 160);
+  }
+  SECTIONS.forEach(s => { const b = document.getElementById('b_' + s); if (b) b.className = (s === id ? ACTIVE : IDLE) + (s === 'missed' ? '' : ''); fixMissedBadge(); });
+  if (id === 'overview') loadStats();
+  if (id === 'calls') loadCalls();
+  if (id === 'missed') loadMissed();
+  if (id === 'agents') loadAgents();
+  if (id === 'recs') loadRecs();
+  if (id === 'callers') loadCallers();
+  if (id === 'reports') loadReports();
+}
+function fixMissedBadge() {
+  const badge = document.getElementById('miss_badge');
+  const b = document.getElementById('b_missed');
+  if (badge && b && !badge.classList.contains('hidden')) b.appendChild(badge);
+}
+
+/* ---------- overview ---------- */
+async function loadStats(opts) {
+  const silent = !!(opts && opts.silent);
+  lastRetry = loadStats;
+  if (!silent) setStatus('stats_status', 'Loading…');
+  try {
+    const s = await api('/api/stats');
+    if (silent && __peek('stats', s)) return;
+    const paint = () => {
+      setStatus('stats_status', '');
+      if (silent) {
+        __setText('k_total', s.total ?? 0);
+        __setText('k_ans', s.answered ?? 0);
+        __setText('k_miss', s.missed ?? 0);
+        __setText('k_avg', s.avg_talk ?? s.avg_wait ?? s.avg ?? 0);
+      } else {
+        __setText('k_total', s.total ?? 0);
+        __setText('k_ans', s.answered ?? 0);
+        __setText('k_miss', s.missed ?? 0);
+        __setText('k_avg', s.avg_talk ?? s.avg_wait ?? s.avg ?? 0);
+      }
+    const _t = s.total ?? 0, _a = s.answered ?? 0;
+    __setText('k_rate', _t ? Math.round(_a / _t * 100) + '% answered' : '');
+    const badge = document.getElementById('miss_badge');
+    badge.textContent = s.missed || '';
+    badge.classList.toggle('hidden', !s.missed);
+    fixMissedBadge();
+    // week chart (accept {d,c} or {date,count})
+    const week = Array.isArray(s.week) ? s.week : [];
+    const WD = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const WDS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const wdates = week.map(x => String(x.d || x.date || ''));
+    const labels = wdates.map(ds => { const d = new Date(ds + 'T12:00:00'); return isNaN(d) ? ds.slice(5) : WDS[d.getDay()]; });
+    const data = week.map(x => x.c ?? x.count ?? 0);
+    document.getElementById('week_empty').classList.toggle('hidden', week.length > 0);
+    if (chart) chart.destroy();
+    const dark = document.documentElement.classList.contains('dark');
+    chart = new Chart(document.getElementById('weekChart'), {
+      type: 'line',
+      data: { labels, datasets: [{ data, borderColor: '#087B78', backgroundColor: 'rgba(8,123,120,0.12)', pointBackgroundColor: '#087B78', pointBorderColor: '#D6A62A', pointRadius: 4, pointHoverRadius: 6, tension: 0.4, fill: true }] },
+      options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { display: false },
+          tooltip: { callbacks: {
+            title: (items) => { const ds = wdates[(items[0] || {}).dataIndex || 0] || ''; const d = new Date(ds + 'T12:00:00'); return isNaN(d) ? ds : WD[d.getDay()] + ' · ' + ds; },
+            label: (item) => ' ' + (item.parsed.y ?? 0) + ' calls'
+          } } },
+        scales: { x: { ticks: { color: dark ? '#94a3b8' : '#64748b' } }, y: { beginAtZero: true, ticks: { color: dark ? '#94a3b8' : '#64748b', precision: 0 } } } }
+    });
+    // agents today (accept object map or array; values may be counts or {total, name})
+    let entries = [];
+    if (Array.isArray(s.agents)) entries = s.agents.map(a => {
+      if (a && typeof a === 'object') {
+        const ext = a.extension || a.ext || a.agent || '';
+        const nm = a.name || '';
+        return [(nm ? nm + ' · ' + ext : String(ext || nm)), a.count ?? a.total ?? a.calls ?? 0];
+      }
+      return [a, 0];
+    });
+    else if (s.agents && typeof s.agents === 'object') entries = Object.entries(s.agents).map(([k, v]) => {
+      if (v && typeof v === 'object') {
+        const nm = v.name || '';
+        return [(nm ? nm + ' · ' + k : String(k)), v.total ?? v.count ?? v.calls ?? 0];
+      }
+      return [k, v];
+    });
+    document.getElementById('agents_overview').innerHTML = entries.length
+      ? entries.map(([k, v]) => '<div class="border border-slate-200 dark:border-slate-700 rounded-xl p-3 flex items-center justify-between transition duration-200 hover:-translate-y-0.5 hover:shadow-md"><div><b>' + esc(k) + '</b><div class="text-xs text-slate-500 dark:text-slate-400">calls today</div></div><div class="text-xl font-extrabold">' + esc(v) + '</div></div>').join('')
+      : '<div class="text-sm text-slate-500 dark:text-slate-400 col-span-2 text-center py-6">No agent activity today yet.</div>';
+    };
+    if (silent) {
+      const x = window.scrollX, y = window.scrollY;
+      paint();
+      __mark('stats', s);
+      window.scrollTo(x, y);
+    } else {
+      paint();
+      __mark('stats', s);
+    }
+  } catch (e) { setStatus('stats_status', e.message, true); }
+}
+
+/* ---------- calls ---------- */
+function resetCalls() {
+  document.getElementById('q').value = '';
+  document.getElementById('f_disp').value = 'all';
+  document.getElementById('f_ext').value = '';
+  page = 1; loadCalls();
+}
+function chg(d) { page = Math.max(1, page + d); loadCalls(); }
+async function loadCalls(opts) {
+  const silent = !!(opts && opts.silent);
+  lastRetry = loadCalls;
+  if (!silent) setStatus('calls_status', 'Loading…');
+  try {
+    const q = document.getElementById('q').value, disp = document.getElementById('f_disp').value, ext = document.getElementById('f_ext').value;
+    const j = await api('/api/cdr?q=' + encodeURIComponent(q) + '&disposition=' + encodeURIComponent(disp) + '&ext=' + encodeURIComponent(ext) + '&page=' + page);
+    const rows = Array.isArray(j) ? j : (j.rows || []);
+    const snap = { page, q, disp, ext, data: j };
+    if (silent && __peek('calls', snap)) return;
+    const paint = () => {
+    setStatus('calls_status', '');
+    document.getElementById('calls_info').textContent = j.total != null ? '· ' + j.total + ' total' : '';
+    document.getElementById('rows').innerHTML = rows.length ? rows.map(r => {
+      const disp2 = r.disposition || '';
+      const answered = disp2 === 'ANSWERED';
+      const rec = r.recfile || r.recording || (r.has_rec ? r.has_rec : null);
+      const recUrl = rec ? ('/api/recordings/' + encodeURIComponent(typeof rec === 'string' ? rec : rec)) : null;
+      const onNames = Array.isArray(r.online_names) ? r.online_names.filter(Boolean) : [];
+      const onLine = (!answered && onNames.length) ? '<div class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Online: ' + esc(onNames.join(', ')) + '</div>' : '';
+      return '<tr class="transition duration-150 hover:bg-slate-50 dark:hover:bg-slate-800/50"><td class="p-3 text-slate-500 dark:text-slate-400 whitespace-nowrap">' + esc(r.calldate || r.time || '') + '</td>'
+        + '<td class="p-3"><b>' + esc(agentLabel(r.src || r.number || '')) + '</b><div class="text-xs text-slate-500 dark:text-slate-400">' + esc(r.caller_name || r.name || r.clid || '') + '</div></td>'
+        + '<td class="p-3">' + esc(agentLabel(r.dst || r.ext || r.answered_by || '')) + '</td>'
+        + '<td class="p-3">' + fmtDur(r.dur ?? r.billsec ?? r.duration ?? 0) + '</td>'
+        + '<td class="p-3">' + (answered ? '<span class="bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 px-2 py-1 rounded-full text-xs">Answered</span>' : '<span class="bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-400 px-2 py-1 rounded-full text-xs">' + esc(disp2 || 'Missed') + '</span>') + onLine + '</td>'
+        + '<td class="p-3">' + (recUrl ? '<audio controls preload="none" src="' + recUrl + '" class="w-40 h-8"></audio>' : '<span class="text-slate-400">—</span>') + '</td></tr>';
+    }).join('') : '<tr><td colspan="6" class="p-8 text-center text-slate-500 dark:text-slate-400">No calls match this filter.</td></tr>';
+    document.getElementById('pg').textContent = page;
+    };
+    if (silent) { const x = window.scrollX, y = window.scrollY; paint(); __mark('calls', snap); window.scrollTo(x, y); }
+    else { paint(); __mark('calls', snap); }
+  } catch (e) { setStatus('calls_status', e.message, true); }
+}
+
+/* ---------- missed ---------- */
+function missPresetChanged() {
+  const p = (document.getElementById('miss_preset') || {}).value || 'today';
+  const box = document.getElementById('miss_custom');
+  if (box) {
+    box.classList.toggle('hidden', p !== 'custom');
+    box.classList.toggle('flex', p === 'custom');
+  }
+}
+function missRange() {
+  const t = new Date();
+  const iso = (d) => d.toISOString().slice(0, 10);
+  const p = (document.getElementById('miss_preset') || {}).value || 'today';
+  const days = p === 'today' ? 1 : p === 'week' ? 7 : p === 'month' ? 30 : p === 'quarter' ? 90 : 0;
+  if (days) {
+    const to = iso(t);
+    const from = iso(new Date(t.getTime() - (days - 1) * 86400000));
+    return { from, to };
+  }
+  const td = iso(t);
+  const f = document.getElementById('miss_from'), o = document.getElementById('miss_to');
+  if (f && !f.value) f.value = td;
+  if (o && !o.value) o.value = td;
+  return { from: (f && f.value) || td, to: (o && o.value) || td };
+}
+function missedDates() {
+  const { from, to } = missRange();
+  return { from, to, agent: ((document.getElementById('miss_agent') || {}).value || '') };
+}
+async function fillMissAgents() {
+  const sel = document.getElementById('miss_agent');
+  if (!sel || sel.options.length > 1) return;
+  try {
+    const r = await api('/api/agents');
+    const list = Array.isArray(r) ? r : (r.rows || r.agents || []);
+    list.forEach(a => {
+      const ext = String(a.extension ?? a.ext ?? '');
+      const nm = String(a.name ?? '');
+      if (!ext) return;
+      const o = document.createElement('option');
+      o.value = ext;
+      o.textContent = nm ? nm + ' · ' + ext : ext;
+      sel.appendChild(o);
+    });
+  } catch (e) {}
+}
+async function loadMissed(opts) {
+  const silent = !!(opts && opts.silent);
+  lastRetry = loadMissed;
+  if (!silent) setStatus('missed_status', 'Loading…');
+  try {
+    await fillMissAgents();
+    const { from, to, agent } = missedDates();
+    const j = await api('/api/missed?from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to) + '&agent=' + encodeURIComponent(agent) + '&limit=100');
+    const rows = Array.isArray(j) ? j : (j.rows || []);
+    if (silent && __peek('missed', j)) return;
+    const paint = () => {
+    lastMissed = rows;
+    setStatus('missed_status', '');
+    document.getElementById('missed_summary').textContent = rows.length ? rows.length + ' missed call' + (rows.length === 1 ? '' : 's') + ' · ' + from + ' → ' + to : '';
+    document.getElementById('missed_list').innerHTML = rows.length ? rows.map((x) => {
+      const num = x.number || x.src || '';
+      const onlineNames = Array.isArray(x.online_names) ? x.online_names.filter(Boolean) : [];
+      const onlineFallback = Array.isArray(x.online) ? x.online.filter(Boolean) : [];
+      const online = onlineNames.length ? onlineNames : onlineFallback;
+      const dt = (x.date ? esc(x.date) + ' ' : '') + esc(x.time || x.calldate || '');
+      return '<div class="border border-slate-200 dark:border-slate-700 rounded-xl p-3 flex flex-wrap items-center gap-2 justify-between transition duration-200 hover:-translate-y-0.5 hover:shadow-md">'
+        + '<div><b>' + esc(num) + '</b><div class="text-xs text-slate-500 dark:text-slate-400">' + esc(x.name || x.clid || '') + (dt ? ' · ' + dt : '') + (x.answered_by ? ' · via ' + esc(x.answered_by) : '') + '</div>'
+        + '<div class="text-xs text-slate-500 dark:text-slate-400">Online at the time: ' + (online.length ? esc(online.join(', ')) : '—') + '</div></div></div>';
+    }).join('') : '<div class="text-sm text-slate-500 dark:text-slate-400 text-center py-6">No missed calls in this period. All caught up.</div>';
+    };
+    if (silent) { const x = window.scrollX, y = window.scrollY; paint(); __mark('missed', j); window.scrollTo(x, y); }
+    else { paint(); __mark('missed', j); }
+  } catch (e) { setStatus('missed_status', e.message, true); }
+}
+
+/* ---------- agents ---------- */
+async function loadAgents(opts) {
+  const silent = !!(opts && opts.silent);
+  lastRetry = loadAgents;
+  if (!silent) setStatus('agents_status', 'Loading…');
+  try {
+    const r = await api('/api/agents');
+    if (silent && __peek('agents', r)) return;
+    const paint = () => {
+    const list = Array.isArray(r) ? r : (r.rows || r.agents || []);
+    list.forEach(a => { const ext = String(a.extension ?? a.ext ?? '').trim(); const nm = String(a.name ?? '').trim(); if (ext && nm) extNames[ext] = nm; });
+    setStatus('agents_status', '');
+    document.getElementById('agents_list').innerHTML = list.length ? list.map(a => {
+      const ext = a.extension || a.ext || '';
+      const avail = (a.status || '').toLowerCase().includes('avail');
+      const pausedTag = a.paused ? ' <span class="text-xs bg-amber-100 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 px-2 py-0.5 rounded-full">Paused</span>' : '';
+      return '<div class="border border-slate-200 dark:border-slate-700 rounded-xl p-4 transition duration-200 hover:-translate-y-0.5 hover:shadow-md"><div class="flex items-start justify-between gap-2"><div><div class="font-bold">' + esc(a.name || '') + ' — ' + esc(ext) + pausedTag + '</div>'
+        + '<div class="text-xs ' + (avail ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400') + '"><span class="inline-block animate-pulse">●</span> ' + esc(a.status || '—') + '</div></div>'
+        + '<div class="text-right"><div class="font-extrabold">' + esc(a.total ?? a.calls ?? 0) + ' / ' + esc(a.answered ?? 0) + '</div><div class="text-xs text-slate-500 dark:text-slate-400">total / answered</div></div></div>'
+        + '<div class="mt-3 flex gap-2"><button onclick="viewAgent(\'' + esc(ext) + '\')" class="flex-1 border border-slate-200 dark:border-slate-700 px-3 py-2 rounded-xl text-sm hover:bg-slate-50 dark:hover:bg-slate-800">Profile</button></div></div>';
+    }).join('') : '<div class="text-sm text-slate-500 dark:text-slate-400 col-span-2 text-center py-6">No agents yet. Add the first one above.</div>';
+    };
+    if (silent) { const x = window.scrollX, y = window.scrollY; paint(); __mark('agents', r); window.scrollTo(x, y); }
+    else { paint(); __mark('agents', r); }
+  } catch (e) { setStatus('agents_status', e.message, true); }
+}
+async function viewAgent(ext) {
+  openModal('m_detail');
+  document.getElementById('detail_title').textContent = 'Agent ' + ext;
+  document.getElementById('detail_body').innerHTML = skel(4, 'h-10');
+  try {
+    const d = await api('/api/agents/' + encodeURIComponent(ext));
+    const info = d.info || {};
+    const week = d.week || [];
+    const recent = d.recent || d.calls || d.rows || [];
+    const recs = d.recs || d.recordings || [];
+    const ans = recent.filter(x => x.disposition === 'ANSWERED').length;
+    const avg = recent.length ? Math.round(recent.reduce((s, x) => s + (+(x.dur ?? x.billsec ?? x.duration ?? 0)), 0) / recent.length) : 0;
+    const aname = info.name || d.name || '';
+    const isPaused = !!d.paused;
+    const mo = d.missed_online || {};
+    const moRows = Array.isArray(mo.recent) ? mo.recent.slice(0, 10) : [];
+    const moHtml = '<div class="mt-4"><div class="text-sm font-bold mb-2">Missed while ' + esc(aname || ('Agent ' + ext)) + ' was online <span class="text-slate-500 font-normal">(' + esc(mo.count ?? moRows.length) + ' in 30 days)</span></div>'
+      + (moRows.length ? '<div class="max-h-[180px] overflow-auto space-y-2">' + moRows.map(x =>
+        '<div class="border border-slate-200 dark:border-slate-700 rounded-xl p-2 flex flex-wrap items-center gap-2 justify-between text-sm"><div><b>' + esc(x.number || '') + '</b>'
+        + '<div class="text-xs text-slate-500 dark:text-slate-400">' + esc(x.date || '') + ' ' + esc(x.time || '') + (x.name ? ' · ' + esc(x.name) : '') + '</div></div></div>'
+      ).join('') + '</div>' : '<div class="text-sm text-slate-500 dark:text-slate-400 text-center py-4">None — nothing slipped while this agent was available.</div>') + '</div>';
+    document.getElementById('detail_title').textContent = 'Profile ' + aname + ' — ' + ext;
+    let weekHtml = '';
+    if (Array.isArray(week) && week.length) {
+      weekHtml = '<div class="mt-4"><div class="text-sm font-bold mb-2">Last 7 days</div><div class="grid grid-cols-7 gap-2 text-center">'
+        + week.map(x => '<div class="border border-slate-200 dark:border-slate-700 rounded-xl p-2"><div class="text-xs text-slate-500 dark:text-slate-400">' + esc(String(x.d || x.date || '').slice(5)) + '</div><div class="font-extrabold">' + esc(x.c ?? x.count ?? 0) + '</div></div>').join('')
+        + '</div></div>';
+    } else if (week && typeof week === 'object' && Object.keys(week).length) {
+      weekHtml = '<div class="mt-4"><div class="text-sm font-bold mb-2">Last 7 days</div><div class="grid grid-cols-7 gap-2 text-center">'
+        + Object.entries(week).map(([k, v]) => '<div class="border border-slate-200 dark:border-slate-700 rounded-xl p-2"><div class="text-xs text-slate-500 dark:text-slate-400">' + esc(String(k).slice(5)) + '</div><div class="font-extrabold">' + esc(v) + '</div></div>').join('')
+        + '</div></div>';
+    }
+    const normT = (t) => String(t == null ? '' : t).trim();
+    const otherOf = (o) => String(o.src || '') === String(ext) ? (o.dst || '') : (o.src || '');
+    function agentRecFile(o) {
+      if (!o || typeof o !== 'object') return null;
+      const cands = [o.rec, o.recfile, o.recording];
+      for (const c of cands) { if (typeof c === 'string' && c.trim() !== '') return c.trim(); }
+      const f2 = o.file || o.name;
+      if (typeof f2 === 'string' && f2.trim() !== '' && /\.(wav|mp3|gsm|ogg|m4a)$/i.test(f2.trim())) return f2.trim();
+      if (typeof o.has_rec === 'string' && o.has_rec.trim() !== '') return o.has_rec.trim();
+      return null;
+    }
+    const usedRec = new Set();
+    function findRecFor(call) {
+      const direct = agentRecFile(call);
+      if (direct) {
+        for (let i = 0; i < recs.length; i++) { if (agentRecFile(recs[i]) === direct) usedRec.add(i); }
+        return direct;
+      }
+      const ct = normT(call.calldate || call.time);
+      const cs = String(call.src || '');
+      const cd = String(call.dst || '');
+      const co = String(otherOf(call));
+      for (let i = 0; i < recs.length; i++) {
+        if (usedRec.has(i)) continue;
+        const r = recs[i];
+        if (normT(r.calldate || r.time) !== ct) continue;
+        if (String(r.src || '') === cs && String(r.dst || '') === cd) { usedRec.add(i); return agentRecFile(r); }
+        if (String(otherOf(r)) === co) { usedRec.add(i); return agentRecFile(r); }
+      }
+      return null;
+    }
+    const unified = recent.map(c => ({ call: c, rec: findRecFor(c) }));
+    recs.forEach((r, i) => { if (!usedRec.has(i)) { const f = agentRecFile(r); if (f) unified.push({ call: r, rec: f }); } });
+    unified.sort((a, b) => String(b.call.calldate || b.call.time || '').localeCompare(String(a.call.calldate || a.call.time || '')));
+    const unifiedHtml = unified.length ? '<div class="mt-4"><div class="text-sm font-bold mb-2">Call history</div><div class="max-h-[260px] overflow-auto"><table class="w-full text-sm"><thead class="bg-slate-50 dark:bg-slate-800/60 text-slate-500"><tr><th class="p-2 text-left font-medium">Time</th><th class="p-2 text-left font-medium">Direction</th><th class="p-2 text-left font-medium">Duration</th><th class="p-2 text-left font-medium">Status</th><th class="p-2 text-left font-medium">Recording</th></tr></thead><tbody>'
+        + unified.map(({ call: x, rec }) => { const out = String(x.src || '') === String(ext); const other = out ? (x.dst || '') : (x.src || ''); const dir = out ? 'Outgoing' : 'Incoming'; const url = rec ? ('/api/recordings/' + encodeURIComponent(rec)) : null; return '<tr class="border-t border-slate-100 dark:border-slate-800 transition duration-150 hover:bg-slate-50 dark:hover:bg-slate-800/50"><td class="p-2">' + esc(x.calldate || x.time || '') + '</td><td class="p-2">' + dir + ' · ' + esc(other) + '</td><td class="p-2">' + fmtDur(x.dur ?? x.billsec ?? x.duration ?? 0) + '</td><td class="p-2">' + esc(x.disposition || x.status || '') + '</td><td class="p-2">' + (url ? '<audio controls preload="none" src="' + url + '" class="w-40 h-8"></audio>' : '<span class="text-slate-400">—</span>') + '</td></tr>'; }).join('')
+        + '</tbody></table></div></div>' : '<div class="mt-4 text-sm text-slate-500 text-center">No recent calls for this agent.</div>';
+    document.getElementById('detail_body').innerHTML = '<div class="border border-slate-200 dark:border-slate-700 rounded-xl p-3 flex flex-wrap items-center gap-2 justify-between">'
+      + '<div><div class="font-bold">' + esc(aname || ('Agent ' + ext)) + '</div><div class="text-xs text-slate-500 dark:text-slate-400">Ext ' + esc(agentLabel(info.extension || info.ext || ext)) + (info.status ? ' · ' + esc(info.status) : '') + '</div></div>'
+      + '<div class="text-xs text-slate-500 dark:text-slate-400">ID ' + esc(info.id ?? '') + '</div></div>'
+      + '<div class="mt-3 grid grid-cols-3 gap-3 text-center">'
+      + '<div class="border border-slate-200 dark:border-slate-700 rounded-xl p-3"><div class="text-xl font-extrabold">' + recent.length + '</div><div class="text-xs text-slate-500">calls</div></div>'
+      + '<div class="border border-slate-200 dark:border-slate-700 rounded-xl p-3"><div class="text-xl font-extrabold">' + ans + '</div><div class="text-xs text-slate-500">answered</div></div>'
+      + '<div class="border border-slate-200 dark:border-slate-700 rounded-xl p-3"><div class="text-xl font-extrabold">' + avg + 's</div><div class="text-xs text-slate-500">avg</div></div></div>'
+      + weekHtml
+      + '<div class="mt-3 flex flex-wrap gap-2 items-center"><input id="rename_name" value="' + esc(aname) + '" placeholder="Agent name" class="flex-1 min-w-[140px] border border-slate-200 dark:border-slate-700 bg-transparent rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand/40">'
+      + '<button onclick="doRename(\'' + esc(ext) + '\')" class="border border-slate-200 dark:border-slate-700 px-3 py-2 rounded-xl text-sm hover:bg-slate-50 dark:hover:bg-slate-800">Rename</button>'
+      + '<button onclick="exportAgent(\'' + esc(ext) + '\')" class="border border-slate-200 dark:border-slate-700 px-3 py-2 rounded-xl text-sm hover:bg-slate-50 dark:hover:bg-slate-800">Export file</button>'
+      + '<button onclick="togglePause(\'' + esc(ext) + '\')" id="pause_btn" class="border border-slate-200 dark:border-slate-700 px-3 py-2 rounded-xl text-sm hover:bg-slate-50 dark:hover:bg-slate-800">' + (isPaused ? 'Resume' : 'Pause') + '</button>'
+      + '<button onclick="openPw(\'' + esc(ext) + '\')" class="bg-slate-100 dark:bg-slate-800 px-3 py-2 rounded-xl text-sm hover:bg-slate-200 dark:hover:bg-slate-700">Reset password</button></div>'
+      + '<div class="text-xs text-slate-500 dark:text-slate-400 mt-1">Reset password: use the new password to log in with the app too.</div>'
+      + '<div id="rename_msg" class="text-xs mt-1"></div>'
+      + moHtml
+      + unifiedHtml;
+  } catch (e) { document.getElementById('detail_body').innerHTML = '<div class="text-sm text-red-600 dark:text-red-400">' + esc(e.message) + '</div>'; }
+}
+async function doRename(ext) {
+  const msg = document.getElementById('rename_msg');
+  const name = (document.getElementById('rename_name') || {}).value || '';
+  if (!name.trim()) { if (msg) { msg.className = 'text-xs mt-1 text-red-600 dark:text-red-400'; msg.textContent = 'Enter a name.'; } return; }
+  if (msg) { msg.className = 'text-xs mt-1 text-slate-500'; msg.textContent = 'Saving…'; }
+  try {
+    const j = await api('/api/agents/' + encodeURIComponent(ext), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) });
+    const nn = (j && (j.name || (j.info && j.info.name))) || name.trim();
+    const inp = document.getElementById('rename_name');
+    if (inp) inp.value = nn;
+    document.getElementById('detail_title').textContent = 'Profile ' + nn + ' — ' + ext;
+    if (msg) { msg.className = 'text-xs mt-1 text-emerald-600 dark:text-emerald-400'; msg.textContent = 'Name updated. Ask the agent to log out and log back in via the app to see the new name.'; }
+    toast('Agent renamed');
+    loadAgents();
+  } catch (e) {
+    if (msg) { msg.className = 'text-xs mt-1 text-red-600 dark:text-red-400'; msg.textContent = e.message; }
+    toast(e.message, false);
+  }
+}
+function exportAgent(ext) {
+  window.open('/api/agents/' + encodeURIComponent(ext) + '/export', '_blank');
+}
+async function togglePause(ext) {
+  try {
+    const list = await api('/api/agents');
+    const arr = Array.isArray(list) ? list : (list.rows || list.agents || []);
+    const a = arr.find(x => String(x.extension || x.ext) === String(ext));
+    const cur = !!(a && a.paused);
+    await api('/api/agents/' + encodeURIComponent(ext) + '/pause', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paused: !cur }) });
+    toast(cur ? 'Agent resumed — will receive calls' : 'Agent paused — no new calls');
+    const b = document.getElementById('pause_btn');
+    if (b) b.textContent = cur ? 'Pause' : 'Resume';
+    loadAgents();
+  } catch (e) { toast(e.message, false); }
+}
+function genAddPw() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789@#_.-';
+  let s = '';
+  const n = 10;
+  const rnd = new Uint32Array(n);
+  (window.crypto || {}).getRandomValues ? crypto.getRandomValues(rnd) : rnd.map((_, i) => rnd[i] = Math.floor(Math.random() * 4294967296));
+  for (let i = 0; i < n; i++) s += chars[rnd[i] % chars.length];
+  document.getElementById('add_pw').value = s;
+}
+async function doAdd() {
+  const name = document.getElementById('add_name').value.trim();
+  const pw = document.getElementById('add_pw').value.trim();
+  const err = document.getElementById('add_err');
+  const ok = document.getElementById('add_ok');
+  if (!name) { err.textContent = 'Enter agent name.'; err.classList.remove('hidden'); return; }
+  if (pw && (pw.length < 4 || /[^A-Za-z0-9@#_.-]/.test(pw))) { err.textContent = 'Password: min 4 chars (letters, digits, @ # _ . -).'; err.classList.remove('hidden'); return; }
+  err.classList.add('hidden');
+  ok.classList.add('hidden');
+  try {
+    const j = await api('/api/agents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, password: pw }) });
+    document.getElementById('add_name').value = '';
+    document.getElementById('add_pw').value = '';
+    if (j.password) {
+      ok.innerHTML = 'Agent <b>' + esc(j.extension || '') + '</b> created. Generated password: <b>' + esc(j.password) + '</b> — copy it now, it will not be shown again.';
+      ok.classList.remove('hidden');
+    } else {
+      closeModal('m_add');
+      toast('Agent added' + (j.extension ? ' — ext ' + j.extension : ''));
+    }
+    loadAgents();
+  } catch (e) { err.textContent = e.message; err.classList.remove('hidden'); }
+}
+function openPw(ext) {
+  pwExt = ext;
+  document.getElementById('pw_ext_label').textContent = 'Agent ' + ext;
+  document.getElementById('pw_new').value = '';
+  document.getElementById('pw_err').classList.add('hidden');
+  document.getElementById('pw_ok').classList.add('hidden');
+  openModal('m_pw');
+}
+async function doPw() {
+  const p = document.getElementById('pw_new').value.trim();
+  const err = document.getElementById('pw_err'), ok = document.getElementById('pw_ok');
+  if (!p) { err.textContent = 'Enter a new password.'; err.classList.remove('hidden'); return; }
+  try {
+    await api('/api/agents/' + encodeURIComponent(pwExt) + '/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: p }) });
+    err.classList.add('hidden');
+    ok.textContent = 'Password updated. Use this same password to log in with the app.';
+    ok.classList.remove('hidden');
+    setTimeout(() => closeModal('m_pw'), 1200);
+  } catch (e) { err.textContent = e.message; err.classList.remove('hidden'); }
+}
+
+/* ---------- recordings ---------- */
+async function loadRecs(opts) {
+  const silent = !!(opts && opts.silent);
+  lastRetry = loadRecs;
+  if (!silent) setStatus('recs_status', 'Loading…');
+  try {
+    const j = await api('/api/recordings');
+    if (silent && __peek('recs', j)) return;
+    const r = Array.isArray(j) ? j : (j.rows || j.recordings || []);
+    lastRecs = r;
+    setStatus('recs_status', '');
+    if (silent) { const x = window.scrollX, y = window.scrollY; renderRecs(); __mark('recs', j); window.scrollTo(x, y); }
+    else { renderRecs(); __mark('recs', j); }
+  } catch (e) { setStatus('recs_status', e.message, true); }
+}
+function recDuration(x) { return fmtDur(x.dur ?? x.billsec ?? x.duration ?? 0); }
+function renderRecs() {
+  const q = ((document.getElementById('recs_q') || {}).value || '').toLowerCase();
+  const r = lastRecs.filter(x => {
+    if (!q) return true;
+    return String(x.agent_name || '').toLowerCase().includes(q) || String(x.agent || '').toLowerCase().includes(q) || String(x.src || '').toLowerCase().includes(q) || String(x.dst || '').toLowerCase().includes(q) || String(x.caller_name || x.name || x.clid || '').toLowerCase().includes(q) || String(x.recfile || x.file || x.name || '').toLowerCase().includes(q);
+  });
+  document.getElementById('recs_list').innerHTML = r.length ? r.map(x => {
+    const f = x.recfile || x.file || x.name || '';
+    const url = '/api/recordings/' + encodeURIComponent(f);
+    const agName = String(x.agent_name || '').trim();
+    const agExt = String(x.agent || '').trim();
+    const agPart = agName ? (agExt ? agName + ' · ' + agExt : agName) : (agExt ? agentLabel(agExt) : '');
+    const s2 = String(x.src || ''), d2 = String(x.dst || '');
+    const callerPart = [s2, d2].find(v => v && !/^\d{3,4}$/.test(v) && v !== 's') || s2 || d2;
+    const title = callerPart && agPart ? callerPart + ' · ' + agPart : (agPart || (s2 + ' → ' + d2));
+    return '<div class="border border-slate-200 dark:border-slate-700 rounded-xl p-3 flex flex-wrap items-center gap-3 justify-between transition duration-200 hover:-translate-y-0.5 hover:shadow-md"><div><b>' + esc(title) + '</b>'
+      + '<div class="text-xs text-slate-500 dark:text-slate-400">' + esc(x.calldate || x.time || '') + ' · ' + recDuration(x) + '</div></div>'
+      + '<div class="flex items-center gap-2"><audio controls preload="none" src="' + url + '" class="w-48 h-8"></audio>'
+      + '<a href="' + url + '" download class="border border-slate-200 dark:border-slate-700 px-3 py-1.5 rounded-xl text-sm hover:bg-slate-50 dark:hover:bg-slate-800">Download</a></div></div>';
+  }).join('') : '<div class="text-sm text-slate-500 dark:text-slate-400 text-center py-6">No recordings yet. Recording starts with the next answered call.</div>';
+}
+function filterRecs() { renderRecs(); }
+
+/* ---------- callers ---------- */
+async function loadCallers(opts) {
+  const silent = !!(opts && opts.silent);
+  lastRetry = loadCallers;
+  if (!silent) setStatus('callers_status', 'Loading…');
+  try {
+    const q = document.getElementById('callers_q').value;
+    const j = await api('/api/callers?q=' + encodeURIComponent(q));
+    const snap = { q, data: j };
+    if (silent && __peek('callers', snap)) return;
+    const paint = () => {
+    const rows = Array.isArray(j) ? j : (j.rows || j.callers || []);
+    lastCallers = rows;
+    setStatus('callers_status', '');
+    document.getElementById('callers_rows').innerHTML = rows.length ? rows.map((c, i) => {
+      const phone = c.phone || c.number || c.src || '';
+      const rel = c.relation && c.relation !== 'patient' ? '<span class="text-xs bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">' + esc(c.relation) + '</span>' : '<span class="text-slate-400">—</span>';
+      return '<tr class="transition duration-150 hover:bg-slate-50 dark:hover:bg-slate-800/50"><td class="p-3 font-semibold">' + esc(phone) + (c.phone2 ? '<div class="text-xs font-normal text-slate-500 dark:text-slate-400">' + esc(c.phone2) + '</div>' : '') + '</td>'
+        + '<td class="p-3">' + (esc(c.name) || '<span class="text-slate-400">—</span>') + '</td>'
+        + '<td class="p-3 text-slate-500 dark:text-slate-400">' + (esc(c.file_no) || '<span class="text-slate-400">—</span>') + '</td>'
+        + '<td class="p-3">' + rel + '</td>'
+        + '<td class="p-3 text-slate-500 dark:text-slate-400 max-w-[240px] truncate">' + (esc(c.notes) || '<span class="text-slate-400">—</span>') + '</td>'
+        + '<td class="p-3">' + esc(c.total_calls ?? c.calls ?? c.count ?? 0) + '</td>'
+        + '<td class="p-3 text-slate-500 dark:text-slate-400">' + esc(c.last_call || c.last || '') + '</td>'
+        + '<td class="p-3 text-right whitespace-nowrap"><button onclick="viewCallerFile(' + i + ')" class="border border-slate-200 dark:border-slate-700 px-3 py-1.5 rounded-xl text-sm hover:bg-slate-50 dark:hover:bg-slate-800">File</button> <button onclick="openCaller(' + i + ')" class="border border-slate-200 dark:border-slate-700 px-3 py-1.5 rounded-xl text-sm hover:bg-slate-50 dark:hover:bg-slate-800">Edit</button></td></tr>';
+    }).join('') : '<tr><td colspan="8" class="p-8 text-center text-slate-500 dark:text-slate-400">No callers found.</td></tr>';
+    };
+    if (silent) { const x = window.scrollX, y = window.scrollY; paint(); __mark('callers', snap); window.scrollTo(x, y); }
+    else { paint(); __mark('callers', snap); }
+  } catch (e) { setStatus('callers_status', e.message, true); }
+}
+function exportCallers() {
+  const q = (document.getElementById('callers_q') || {}).value || '';
+  window.open('/api/callers/export?q=' + encodeURIComponent(q), '_blank');
+}
+function openCaller(i) {
+  const c = lastCallers[i] || {};
+  callerPhone = c.phone || c.number || c.src || '';
+  document.getElementById('caller_phone_label').textContent = callerPhone;
+  document.getElementById('caller_name').value = c.name || '';
+  document.getElementById('caller_file_no').value = c.file_no || '';
+  document.getElementById('caller_phone2').value = c.phone2 || '';
+  document.getElementById('caller_relation').value = c.relation || 'patient';
+  document.getElementById('caller_notes').value = c.notes || '';
+  document.getElementById('caller_err').classList.add('hidden');
+  document.getElementById('caller_ok').classList.add('hidden');
+  openModal('m_caller');
+}
+async function viewCallerFile(i) {
+  const c = lastCallers[i] || {};
+  const phone = c.phone || c.number || c.src || '';
+  openModal('m_cfile');
+  document.getElementById('cfile_title').textContent = 'Caller file — ' + phone;
+  document.getElementById('cfile_body').innerHTML = '<div class="border border-slate-200 dark:border-slate-700 rounded-xl p-3">'
+    + '<div class="font-bold">' + esc(phone) + (c.phone2 ? ' <span class="text-sm font-normal text-slate-500">/ ' + esc(c.phone2) + '</span>' : '') + '</div>'
+    + '<div class="text-sm text-slate-500 dark:text-slate-400">' + esc(c.name || '—') + (c.file_no ? ' · File: ' + esc(c.file_no) : '') + '</div>'
+    + (c.relation && c.relation !== 'patient' ? '<div class="text-xs mt-1"><span class="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">' + esc(c.relation) + '</span></div>' : '')
+    + (c.notes ? '<div class="text-sm mt-1">' + esc(c.notes) + '</div>' : '')
+    + '<div class="text-xs text-slate-500 dark:text-slate-400 mt-1">' + esc(c.total_calls ?? c.calls ?? c.count ?? 0) + ' calls · last: ' + esc(c.last_call || c.last || '—') + '</div></div>'
+    + '<div id="cfile_hist" class="mt-4">' + skel(3, 'h-10') + '</div>';
+  try {
+    const j = await api('/api/callers/' + encodeURIComponent(phone) + '/history');
+    const rows = Array.isArray(j) ? j : (j.rows || j.history || j.calls || []);
+    const summary = (!Array.isArray(j) && (j.summary || j.stats)) || {};
+    const sTotal = summary.total ?? summary.calls ?? summary.count ?? rows.length;
+    const sAns = summary.answered ?? summary.answer ?? 0;
+    const sMiss = summary.missed ?? summary.miss ?? 0;
+    const sCb = summary.called_back ?? summary.calledBack ?? summary.callback ?? summary.recalled ?? 0;
+    const chips = '<div class="flex flex-wrap gap-2 mb-2">'
+      + '<span class="text-xs border border-slate-200 dark:border-slate-700 rounded-full px-2.5 py-1">Total: <b>' + esc(sTotal) + '</b></span>'
+      + '<span class="text-xs border border-slate-200 dark:border-slate-700 rounded-full px-2.5 py-1">Answered: <b>' + esc(sAns) + '</b></span>'
+      + '<span class="text-xs border border-slate-200 dark:border-slate-700 rounded-full px-2.5 py-1">Missed: <b>' + esc(sMiss) + '</b></span>'
+      + '<span class="text-xs border border-slate-200 dark:border-slate-700 rounded-full px-2.5 py-1">Called back: <b>' + esc(sCb) + '</b></span></div>';
+    document.getElementById('cfile_hist').innerHTML = rows.length ? '<div class="text-sm font-bold mb-2 text-slate-900 dark:text-slate-100">Call history</div>' + chips + '<div class="space-y-2 max-h-[320px] overflow-auto">'
+      + rows.map(x => {
+        const rawRec = (typeof x.rec === 'string' && x.rec.trim() !== '') ? x.rec.trim() : null;
+        const fbRec = (!rawRec && typeof x.has_rec === 'string' && x.has_rec.trim() !== '') ? x.has_rec.trim() : null;
+        const recName = rawRec || fbRec;
+        const recUrl = recName ? ('/api/recordings/' + encodeURIComponent(recName)) : null;
+        return '<div class="border border-slate-200 dark:border-slate-700 rounded-xl p-2 flex flex-wrap items-center gap-2 justify-between transition duration-200 hover:-translate-y-0.5 hover:shadow-md"><div><b class="text-sm">' + esc(x.time || '') + '</b>'
+          + '<div class="text-xs text-slate-500 dark:text-slate-400">' + esc(x.status || '') + ' · ' + fmtDur(x.duration ?? 0) + (x.answered_by ? ' · via ' + esc(agentLabel(x.answered_by)) : '') + ((x.status === 'missed' && Array.isArray(x.online) && x.online.length) ? ' · online: ' + esc(x.online.map(agentLabel).join(', ')) : '') + '</div></div>'
+          + (recUrl ? '<audio controls preload="none" src="' + recUrl + '" class="w-44 h-8"></audio>' : '<span class="text-xs text-slate-400">No recording</span>') + '</div>';
+      }).join('') + '</div>'
+      : '<div class="text-sm text-slate-500 dark:text-slate-400 text-center py-6">No calls for this caller yet.</div>';
+  } catch (e) { document.getElementById('cfile_hist').innerHTML = '<div class="text-sm text-red-600 dark:text-red-400">' + esc(e.message) + '</div>'; }
+}
+async function doCallerSave() {
+  const err = document.getElementById('caller_err'), ok = document.getElementById('caller_ok');
+  try {
+    await api('/api/callers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: callerPhone, name: document.getElementById('caller_name').value.trim(), file_no: document.getElementById('caller_file_no').value.trim(), phone2: document.getElementById('caller_phone2').value.trim(), relation: document.getElementById('caller_relation').value, notes: document.getElementById('caller_notes').value.trim() }) });
+    err.classList.add('hidden');
+    ok.textContent = 'Caller saved.';
+    ok.classList.remove('hidden');
+    loadCallers();
+    setTimeout(() => closeModal('m_caller'), 1000);
+  } catch (e) { err.textContent = e.message; err.classList.remove('hidden'); }
+}
+
+/* ---------- reports ---------- */
+async function loadReports() {
+  lastRetry = loadReports;
+  setStatus('reports_status', 'Loading…');
+  try {
+    const j = await api('/api/reports?days=7');
+    setStatus('reports_status', '');
+    const days = j.days || [];
+    document.getElementById('reports_days').innerHTML = days.length ? days.map(d =>
+      '<tr class="transition duration-150 hover:bg-slate-50 dark:hover:bg-slate-800/50"><td class="p-3 text-slate-500 dark:text-slate-400 whitespace-nowrap">' + esc(d.d || '') + '</td>'
+      + '<td class="p-3 font-bold">' + esc(d.inbound ?? 0) + '</td>'
+      + '<td class="p-3 text-emerald-700 dark:text-emerald-400">' + esc(d.answered ?? 0) + '</td>'
+      + '<td class="p-3 ' + ((d.missed || 0) ? 'text-red-600 dark:text-red-400 font-bold' : '') + '">' + esc(d.missed ?? 0) + '</td>'
+      + '<td class="p-3">' + esc(d.sl ?? 0) + '%</td>'
+      + '<td class="p-3">' + esc(d.asa ?? 0) + 's</td>'
+      + '<td class="p-3">' + fmtDur(d.aht ?? 0) + '</td></tr>'
+    ).join('') : '<tr><td colspan="7" class="p-8 text-center text-slate-500 dark:text-slate-400">No data.</td></tr>';
+    const hours = j.hours || [];
+    const mx = Math.max(1, ...hours.map(h => (h.answered || 0) + (h.missed || 0)));
+    document.getElementById('reports_hours').innerHTML = hours.map(h => {
+      const a = h.answered || 0, m = h.missed || 0, t = a + m;
+      const ha = t ? Math.round(a / mx * 100) : 0, hm = t ? Math.round(m / mx * 100) : 0;
+      return '<div class="flex-1 flex flex-col items-center justify-end gap-0.5 h-full" data-tip="' + h.h + ':00 — ' + a + ' answered, ' + m + ' missed">'
+        + '<div class="w-full max-w-[18px] bg-red-400/70 rounded-t" style="height:' + hm + '%"></div>'
+        + '<div class="w-full max-w-[18px] bg-brand rounded-t" style="height:' + ha + '%"></div>'
+        + '<div class="text-[10px] text-slate-500 dark:text-slate-400">' + (h.h % 3 === 0 ? h.h : '') + '</div></div>';
+    }).join('');
+    const agents = j.agents || [];
+    document.getElementById('reports_agents').innerHTML = agents.length ? agents.map(a =>
+      '<div class="border border-slate-200 dark:border-slate-700 rounded-xl p-3 flex items-center justify-between"><div><b>' + esc(a.name ? a.name + ' · ' + a.ext : a.ext) + '</b>'
+      + '<div class="text-xs text-slate-500 dark:text-slate-400">avg talk ' + fmtDur(a.aht ?? 0) + '</div></div>'
+      + '<div class="text-xl font-extrabold">' + esc(a.answered ?? 0) + '</div></div>'
+    ).join('') : '<div class="text-sm text-slate-500 dark:text-slate-400 text-center py-6">No agent activity.</div>';
+  } catch (e) { setStatus('reports_status', e.message, true); }
+}
+
+function enhancePress(root) {
+  (root || document).querySelectorAll('button, a').forEach(el => el.classList.add('transition', 'duration-150', 'active:scale-95'));
+}
+/* ---------- init ---------- */
+document.addEventListener('DOMContentLoaded', () => {
+  syncThemeIcon();
+  enhancePress(document);
+  if (window.MutationObserver) new MutationObserver(muts => muts.forEach(m => m.addedNodes.forEach(n => { if (n.nodeType === 1) enhancePress(n); }))).observe(document.body, { childList: true, subtree: true });
+  loadExtNames();
+  show('overview');
+  ['q', 'f_ext'].forEach(id => document.getElementById(id).addEventListener('keydown', e => { if (e.key === 'Enter') { page = 1; loadCalls(); } }));
+  document.getElementById('f_disp').addEventListener('change', () => { page = 1; loadCalls(); });
+  document.getElementById('callers_q').addEventListener('keydown', e => { if (e.key === 'Enter') loadCallers(); });
+  document.querySelectorAll('.modal-bg').forEach(m => m.addEventListener('click', e => { if (e.target === m) closeModal(m.id); }));
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') document.querySelectorAll('.modal-bg').forEach(m => { if (!m.classList.contains('hidden')) closeModal(m.id); }); });
+  /* Instant filters (no Search/Refresh buttons): opening a tab loads it fresh. */
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+# VirtualBox
+*.vbox
+*.vbox-prev
+*.vmdk
+*.vdi
+
+# Build artifacts
+maxcall/Debug/
+maxcall/Release/
+maxcall/x64/
+maxcall/*.ncb
+maxcall/*.suo
+maxcall/*.user
+maxcall/*.aps
+maxcall/*.pch
+maxcall/*.idb
+maxcall/*.ilk
+maxcall/*.pdb
+maxcall/ipch/
+
+# Logs
+Logs/
+*.log
+
+# Python
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,125 @@
+name: Build MaxCall
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+env:
+  SOLUTION_FILE: maxcall-microsip-full/microsip.sln
+  CONFIGURATION: Release
+  PLATFORM: Win32
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        fetch-depth: 0
+
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Setup Visual Studio
+      uses: ilearnio/setup-vsbuildtools@v1
+      with:
+        version: '17'
+        workloads: 'Microsoft.VisualStudio.Workload.NativeDesktop'
+
+    - name: Install PJSIP dependencies
+      run: |
+        # PJSIP libraries should be pre-built or built as part of the solution
+        # This step ensures the required libraries are available
+        Write-Host "Checking PJSIP libraries..."
+        $pjsipLibs = @(
+          "maxcall-microsip-full/../lib/libpjproject-i386-Win32-vc14-Release-Static.lib",
+          "maxcall-microsip-full/../lib/libpjproject-x86_64-x64-vc14-Release-Static.lib"
+        )
+        foreach ($lib in $pjsipLibs) {
+          if (Test-Path $lib) {
+            Write-Host "Found: $lib"
+          } else {
+            Write-Host "WARNING: Missing $lib"
+          }
+        }
+
+    - name: Build Solution
+      run: |
+        msbuild ${{ env.SOLUTION_FILE }} `
+          /p:Configuration=${{ env.CONFIGURATION }} `
+          /p:Platform=${{ env.PLATFORM }} `
+          /p:OutDir=bin\${{ env.CONFIGURATION }}\ `
+          /verbosity:minimal `
+          /nologo
+
+    - name: Prepare Release Artifacts
+      if: startsWith(github.ref, 'refs/tags/')
+      run: |
+        $version = "${{ github.ref_name }}"
+        $outputDir = "release_${version}"
+        New-Item -ItemType Directory -Force -Path $outputDir
+        
+        # Copy the built executable
+        $exePath = "maxcall-microsip-full/bin/${{ env.CONFIGURATION }}/MaxCall.exe"
+        if (Test-Path $exePath) {
+          Copy-Item $exePath -Destination "$outputDir\MaxCall.exe"
+          Write-Host "Copied MaxCall.exe"
+        }
+        
+        # Copy required DLLs and resources
+        $resPath = "maxcall-microsip-full/res"
+        if (Test-Path $resPath) {
+          Copy-Item $resPath -Destination "$outputDir\res" -Recurse
+          Write-Host "Copied resources"
+        }
+        
+        # Create ZIP archive
+        Compress-Archive -Path "$outputDir\*" -DestinationPath "MaxCall-${version}-win32.zip"
+        Write-Host "Created MaxCall-${version}-win32.zip"
+
+    - name: Upload Build Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: MaxCall-${{ env.CONFIGURATION }}-${{ env.PLATFORM }}
+        path: |
+          maxcall-microsip-full/bin/${{ env.CONFIGURATION }}/*.exe
+          maxcall-microsip-full/bin/${{ env.CONFIGURATION }}/*.dll
+          maxcall-microsip-full/res/**
+
+    - name: Create Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v2
+      with:
+        name: MaxCall ${{ github.ref_name }}
+        tag_name: ${{ github.ref_name }}
+        body: |
+          ## MaxCall ${{ github.ref_name }}
+          
+          ### Changes
+          - Updated audio system: ringtone.wav as default ringtone, ringing.wav for outgoing calls
+          - Fixed MiniCRM popup: async save/load to prevent UI freezing
+          - Modernized UI: redesigned tabs and buttons, moved controls to right side
+          - Various bug fixes and improvements
+          
+          ### Download
+          - **MaxCall-${{ github.ref_name }}-win32.zip** - 32-bit Windows executable
+        draft: false
+        prerelease: false
+        files: |
+          MaxCall-${{ github.ref_name }}-win32.zip
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
