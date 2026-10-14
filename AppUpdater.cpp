@@ -270,6 +270,7 @@ bool IsNewer(const CString& candidate, const CString& current)
 // host allow list is relaxed for it: the signature check is what actually
 // guarantees integrity, and the mirror operator is the same operator who signs.
 static CString g_mirrorBase;
+static bool g_usingMirror = false;
 
 void SetMirrorBase(const CString& base)
 {
@@ -820,12 +821,36 @@ bool FetchManifest(EUpdateChannel channel, SManifest& manifest, CString& error)
 	manifest.Reset();
 	error.Empty();
 
+	CString base = ManifestUrl(channel);
 	CByteArray body, rawSignature, signature;
 	DWORD status = 0;
 
-	if (!HttpGet(ManifestUrl(channel), body, status, error, kManifestTimeoutMs)) {
-		return false;
+	if (!HttpGet(base, body, status, error, kManifestTimeoutMs)) {
+		// github.com is unreachable on this network. Fall back to the mirror that
+		// ships inside the build rather than leaving the user with nothing to do.
+		CString mirror = _T(_GLOBAL_UPDATE_MIRROR_URL);
+		if (!mirror.IsEmpty() && !g_usingMirror) {
+			HttpDiag(_T("github.com unreachable, falling back to the internal mirror"));
+			g_usingMirror = true;
+			SetMirrorBase(mirror);
+
+			CString mirrorError;
+			if (HttpGet(ManifestUrl(channel), body, status, mirrorError, kManifestTimeoutMs)) {
+				error.Empty();
+				HttpDiag(_T("the internal mirror answered; updates now come from there"));
+			}
+			else {
+				g_usingMirror = false;
+				SetMirrorBase(CString());
+				HttpDiag(_T("the internal mirror did not answer either"));
+				return false;
+			}
+		}
+		else {
+			return false;
+		}
 	}
+
 	if (!HttpGet(SignatureUrl(channel), rawSignature, status, error, kManifestTimeoutMs)) {
 		return false;
 	}

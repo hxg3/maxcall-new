@@ -63,3 +63,10 @@
 #define _GLOBAL_UPDATE_STABLE_SIG_URL _GLOBAL_UPDATE_BASE_URL "/download/" _GLOBAL_UPDATE_STABLE_CHANNEL_TAG "/" _GLOBAL_UPDATE_SIGNATURE
 #define _GLOBAL_UPDATE_BETA_SIG_URL _GLOBAL_UPDATE_BASE_URL "/download/" _GLOBAL_UPDATE_BETA_CHANNEL_TAG "/" _GLOBAL_UPDATE_SIGNATURE
 #define _GLOBAL_UPDATE_CHECK_INTERVAL_HOURS 6
+
+// A mirror served from the company's own network, tried automatically when
+// github.com cannot be reached. Set it to "" to disable. Keeping this in the
+// build is deliberate: users must never have to edit a file to receive
+// updates. Integrity is unaffected because the manifest is still verified
+// against the key embedded below, not against whoever served the file.
+#define _GLOBAL_UPDATE_MIRROR_URL "http://maxcall.local:3001/updates" 
