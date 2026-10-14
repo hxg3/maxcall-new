@@ -941,7 +941,13 @@ bool FetchManifest(EUpdateChannel channel, SManifest& manifest, CString& error)
 	if (g_usingMirror && !g_mirrorBase.IsEmpty()) {
 		CString githubPrefix = CString(_T(_GLOBAL_UPDATE_BASE_URL)) + _T("/download/");
 		if (m.url.Find(githubPrefix) == 0) {
-			CString swapped = g_mirrorBase + _T("/MaxCall.exe");
+			// One payload file cannot serve both channels: the beta and stable
+			// manifests point at different builds with different hashes, so each
+			// channel gets its own file on the mirror.
+			CString payload = (channel == ChannelBeta)
+				? _T("/MaxCall-beta.exe")
+				: _T("/MaxCall.exe");
+			CString swapped = g_mirrorBase + payload;
 			HttpDiag(_T("mirror mode: payload from ") + swapped);
 			m.url = swapped;
 		}
