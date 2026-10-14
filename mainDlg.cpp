@@ -2882,7 +2882,8 @@ void CmainDlg::OnTimer(UINT_PTR TimerVal)
 		ExitProcess(0);
 	}
 	else if (TimerVal == IDT_TIMER_UPDATE) {
-		ScheduleUpdateCheck();
+		KillTimer(IDT_TIMER_UPDATE);
+		CheckForUpdates(false);
 	}
 	else if (TimerVal == IDT_TIMER_FORWARDING) {
 		KillTimer(IDT_TIMER_FORWARDING);
@@ -5695,7 +5696,16 @@ static DWORD WINAPI UpdateCheckThread(LPVOID lpData)
 
 void CmainDlg::ScheduleUpdateCheck()
 {
-	// Periodic auto-check removed — user checks manually via tray/menu.
+	// One check shortly after launch: the client compares its own version with
+	// the one the internal mirror reports and shows the update banner when a
+	// newer build exists. There is deliberately no repeating timer — a periodic
+	// background check only produced noise and no extra value.
+	static bool scheduled = false;
+	if (scheduled) {
+		return;
+	}
+	scheduled = true;
+	SetTimer(IDT_TIMER_UPDATE, 15000, NULL);
 }
 
 void CmainDlg::CheckForUpdates(bool manual)

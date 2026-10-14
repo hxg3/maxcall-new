@@ -863,32 +863,36 @@ bool FetchManifest(EUpdateChannel channel, SManifest& manifest, CString& error)
 	manifest.Reset();
 	error.Empty();
 
-	CString base = ManifestUrl(channel);
 	CByteArray body, rawSignature, signature;
 	DWORD status = 0;
 
-	if (!HttpGet(base, body, status, error, kManifestTimeoutMs)) {
-		// github.com is unreachable on this network. Fall back to the mirror that
-		// ships inside the build rather than leaving the user with nothing to do.
-		CString mirror = _T(_GLOBAL_UPDATE_MIRROR_URL);
-		if (!mirror.IsEmpty() && !g_usingMirror) {
-			HttpDiag(_T("github.com unreachable, falling back to the internal mirror"));
-			g_usingMirror = true;
-			SetMirrorBase(mirror);
+	// Ask the internal mirror first. On the office network it is the only host
+	// that answers at all, and going to it directly avoids a slow TLS failure
+	// against github.com on every single check. github stays as the fallback so
+	// the client still works from outside the office.
+	CString mirror = g_mirrorBase;
+	if (mirror.IsEmpty()) {
+		mirror = _T(_GLOBAL_UPDATE_MIRROR_URL);
+	}
 
-			CString mirrorError;
-			if (HttpGet(ManifestUrl(channel), body, status, mirrorError, kManifestTimeoutMs)) {
-				error.Empty();
-				HttpDiag(_T("the internal mirror answered; updates now come from there"));
-			}
-			else {
-				g_usingMirror = false;
-				SetMirrorBase(CString());
-				HttpDiag(_T("the internal mirror did not answer either"));
-				return false;
-			}
+	bool fetched = false;
+	if (!mirror.IsEmpty()) {
+		g_usingMirror = true;
+		SetMirrorBase(mirror);
+		CString mirrorError;
+		if (HttpGet(ManifestUrl(channel), body, status, mirrorError, kManifestTimeoutMs)) {
+			fetched = true;
+			HttpDiag(_T("the manifest came from the internal mirror"));
 		}
 		else {
+			HttpDiag(_T("the internal mirror did not answer; trying github"));
+			g_usingMirror = false;
+			SetMirrorBase(CString());
+		}
+	}
+
+	if (!fetched) {
+		if (!HttpGet(ManifestUrl(channel), body, status, error, kManifestTimeoutMs)) {
 			return false;
 		}
 	}
