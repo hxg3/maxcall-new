@@ -475,7 +475,7 @@ static bool HttpOpenOnce(const CString& url, SHttpSession& http, CString& error,
 	CString scheme, host, object;
 	INTERNET_PORT port = INTERNET_DEFAULT_HTTPS_PORT;
 	if (!SplitUrl(url, scheme, host, port, object)) {
-		error = _T("The update URL is malformed or is not HTTPS.");
+		error = _T("The update URL is malformed.");
 		return false;
 	}
 	// The manifest is signed, so this is defence in depth rather than the primary
@@ -486,8 +486,11 @@ static bool HttpOpenOnce(const CString& url, SHttpSession& http, CString& error,
 		return false;
 	}
 
+	// The internal mirror is plain HTTP; GitHub is HTTPS. Use the right flag.
+	DWORD connectFlags = (scheme.CompareNoCase(_T("https")) == 0) ? INTERNET_FLAG_SECURE : 0;
+
 	try {
-		http.connection = http.session.GetHttpConnection(host, INTERNET_FLAG_SECURE, port);
+		http.connection = http.session.GetHttpConnection(host, connectFlags, port);
 		if (!http.connection) {
 			error = _T("Cannot open a connection to the update server.");
 			HttpDiag(_T("GetHttpConnection returned null for ") + host);
