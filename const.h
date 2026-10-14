@@ -62,7 +62,8 @@
 #define _GLOBAL_UPDATE_BETA_URL _GLOBAL_UPDATE_BASE_URL "/download/" _GLOBAL_UPDATE_BETA_CHANNEL_TAG "/" _GLOBAL_UPDATE_MANIFEST
 #define _GLOBAL_UPDATE_STABLE_SIG_URL _GLOBAL_UPDATE_BASE_URL "/download/" _GLOBAL_UPDATE_STABLE_CHANNEL_TAG "/" _GLOBAL_UPDATE_SIGNATURE
 #define _GLOBAL_UPDATE_BETA_SIG_URL _GLOBAL_UPDATE_BASE_URL "/download/" _GLOBAL_UPDATE_BETA_CHANNEL_TAG "/" _GLOBAL_UPDATE_SIGNATURE
-#define _GLOBAL_UPDATE_CHECK_INTERVAL_HOURS 6
+// Periodic auto-check removed: it only produced noise on networks that cannot reach the update host. The user now checks manually via the tray/menu.
+// #define _GLOBAL_UPDATE_CHECK_INTERVAL_HOURS 6
 
 // Where "Check for Updates" sends the user when this machine cannot reach the
 // update channel. The browser is not subject to the same TLS restrictions as

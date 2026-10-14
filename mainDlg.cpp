@@ -2266,9 +2266,7 @@ void CmainDlg::OnCreated()
 		ShowWindow(SW_HIDE);
 	}
 	//--
-	// Periodic release check. The interval itself is enforced inside
-	// ScheduleUpdateCheck; this timer only supplies a tick to compare against.
-	SetTimer(IDT_TIMER_UPDATE, 15 * 60 * 1000, NULL);
+	// Periodic release check removed — user checks manually via tray/menu.
 
 	WM_SHELLHOOKMESSAGE = RegisterWindowMessage(_T("SHELLHOOK"));
 	if (WM_SHELLHOOKMESSAGE) {
@@ -5697,19 +5695,7 @@ static DWORD WINAPI UpdateCheckThread(LPVOID lpData)
 
 void CmainDlg::ScheduleUpdateCheck()
 {
-	if (m_updateBusy) {
-		return;
-	}
-	time_t now = time(NULL);
-	time_t last = (accountSettings.checkUpdatesTime > 0)
-		? (time_t)accountSettings.checkUpdatesTime : 0;
-	if (now - last < (time_t)_GLOBAL_UPDATE_CHECK_INTERVAL_HOURS * 3600) {
-		return;
-	}
-	// Deliberately not stamping the time here: it is recorded in OnUpdateEvent
-	// once the manifest actually arrives, so a network failure does not buy the
-	// client six silent hours.
-	CheckForUpdates(false);
+	// Periodic auto-check removed — user checks manually via tray/menu.
 }
 
 void CmainDlg::CheckForUpdates(bool manual)
