@@ -436,6 +436,10 @@ static void HttpDiag(const CString& text)
 	}
 }
 
+#ifndef SECURITY_FLAG_IGNORE_REVOCATION
+#define SECURITY_FLAG_IGNORE_REVOCATION 0x00000080
+#endif
+
 // The WinInet codes worth naming in plain language. FORMAT_MESSAGE cannot help:
 // these live in wininet.dll, not in the system table, which is why the previous
 // log showed a blank reason next to the number.
@@ -548,9 +552,40 @@ static bool HttpOpenOnce(const CString& url, SHttpSession& http, CString& error,
 	return true;
 }
 
-static bool HttpOpen(const CString& url, SHttpSession& http, CString& error, DWORD timeoutMs)
+// Second attempt for machines where revocation checking cannot succeed: the CRL
+// distribution point sits on a different host that the network blocks, which is
+// what makes WinInet fail with 12152 while a browser on the same machine works.
+// The chain and the host name are still validated; only the revocation lookup is
+// skipped, and the manifest is signed anyway so a substituted file is refused.
+static bool HttpOpenNoRevocation(const CString& url, SHttpSession& http, CString& error,
+	DWORD timeoutMs)
 {
+	DWORD flags = SECURITY_FLAG_IGNORE_REVOCATION;
+	http.session.SetOption(INTERNET_OPTION_SECURITY_FLAGS, (LONG)flags);
 	return HttpOpenOnce(url, http, error, timeoutMs);
+}
+
+// Returns the session that answered, or null. Both sessions stay owned by the
+// caller, so nothing has to be moved or swapped.
+static SHttpSession* HttpOpen(const CString& url, SHttpSession& strict, SHttpSession& relaxed,
+	CString& error, DWORD timeoutMs)
+{
+	if (HttpOpenOnce(url, strict, error, timeoutMs)) {
+		return &strict;
+	}
+	// Only a secure failure is worth a second attempt with relaxed revocation.
+	if (error.Find(_T("12152")) < 0) {
+		return NULL;
+	}
+	CString firstReason = error;
+	HttpDiag(_T("secure failure; retrying without revocation checking"));
+	if (HttpOpenNoRevocation(url, relaxed, error, timeoutMs)) {
+		HttpDiag(_T("revocation checking was the blocker; the certificate chain and "
+			_T("the host name were still verified")));
+		return &relaxed;
+	}
+	error = firstReason;
+	return NULL;
 }
 
 // Reads the response body. CHttpFile reports end of stream as a zero-length read
@@ -588,11 +623,13 @@ bool HttpGet(const CString& url, CByteArray& body, DWORD& statusCode, CString& e
 	body.SetSize(0);
 	statusCode = 0;
 
-	SHttpSession http;
-	if (!HttpOpen(url, http, error, timeoutMs)) {
+	SHttpSession strict;
+	SHttpSession relaxed;
+	SHttpSession* http = HttpOpen(url, strict, relaxed, error, timeoutMs);
+	if (!http) {
 		return false;
 	}
-	statusCode = http.statusCode;
+	statusCode = http->statusCode;
 	if (statusCode != HTTP_STATUS_OK) {
 		CString msg;
 		msg.Format(_T("The update server returned HTTP %u."), statusCode);
@@ -600,7 +637,7 @@ bool HttpGet(const CString& url, CByteArray& body, DWORD& statusCode, CString& e
 		return false;
 	}
 	try {
-		return ReadBody(http.file, http.contentLength, 512 * 1024, body, error);
+		return ReadBody(http->file, http->contentLength, 512 * 1024, body, error);
 	}
 	catch (CInternetException* e) {
 		error = _T("The update metadata could not be read.");
@@ -615,19 +652,21 @@ bool HttpDownloadToFile(const CString& url, const CString& path, DWORD& totalByt
 	totalBytes = 0;
 	downloadedBytes = 0;
 
-	SHttpSession http;
-	if (!HttpOpen(url, http, error, timeoutMs)) {
+	SHttpSession strict;
+	SHttpSession relaxed;
+	SHttpSession* http = HttpOpen(url, strict, relaxed, error, timeoutMs);
+	if (!http) {
 		return false;
 	}
-	if (http.statusCode != HTTP_STATUS_OK) {
+	if (http->statusCode != HTTP_STATUS_OK) {
 		CString msg;
-		msg.Format(_T("The update server returned HTTP %u."), http.statusCode);
+		msg.Format(_T("The update server returned HTTP %u."), http->statusCode);
 		error = msg;
 		return false;
 	}
 	// When the server answers with chunked encoding the length stays unknown and
 	// the UI shows an indeterminate bar rather than inventing a percentage.
-	totalBytes = http.contentLength;
+	totalBytes = http->contentLength;
 
 	HANDLE hOut = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
 		FILE_ATTRIBUTE_NORMAL, NULL);
@@ -646,7 +685,7 @@ bool HttpDownloadToFile(const CString& url, const CString& path, DWORD& totalByt
 				ok = false;
 				break;
 			}
-			UINT read = http.file->Read(chunk.GetData(), (UINT)chunk.GetSize());
+			UINT read = http->file->Read(chunk.GetData(), (UINT)chunk.GetSize());
 			if (read == 0) {
 				break;
 			}
