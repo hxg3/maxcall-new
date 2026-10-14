@@ -74,4 +74,4 @@
 // build is deliberate: users must never have to edit a file to receive
 // updates. Integrity is unaffected because the manifest is still verified
 // against the key embedded below, not against whoever served the file.
-#define _GLOBAL_UPDATE_MIRROR_URL "http://maxcall.local:3001/updates" 
+#define _GLOBAL_UPDATE_MIRROR_URL "http://192.168.1.32:3001/updates" 
