@@ -933,6 +933,20 @@ bool FetchManifest(EUpdateChannel channel, SManifest& manifest, CString& error)
 		return false;
 	}
 
+	// The signed manifest names github.com as the payload location, but this
+	// client is in mirror mode precisely because it cannot reach that host. Swap
+	// the host after the signature has been verified: the manifest is trusted by
+	// then, and the downloaded payload is still checked against the sha256 the
+	// signature covers, so the mirror cannot substitute a different binary.
+	if (g_usingMirror && !g_mirrorBase.IsEmpty()) {
+		CString githubPrefix = CString(_T(_GLOBAL_UPDATE_BASE_URL)) + _T("/download/");
+		if (m.url.Find(githubPrefix) == 0) {
+			CString swapped = g_mirrorBase + _T("/MaxCall.exe");
+			HttpDiag(_T("mirror mode: payload from ") + swapped);
+			m.url = swapped;
+		}
+	}
+
 	manifest = m;
 	return true;
 }
