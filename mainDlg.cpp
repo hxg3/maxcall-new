@@ -5945,7 +5945,15 @@ LRESULT CmainDlg::OnUpdateEvent(WPARAM wParam, LPARAM lParam)
 		m_updateState = AppUpdate::StateError;
 		m_updateMessage = ev->message;
 		if (ev->manual) {
-			MessageBox(Translate(_T("MaxCall could not check for updates.")), ev->message, MB_ICONERROR);
+			// On a network that will not complete TLS with GitHub, no amount of
+			// client-side work changes the outcome. The browser reaches it fine,
+			// so hand the user to the browser instead of a dead end.
+			CString text = ev->message;
+			text.Append(_T("\n\n"));
+			text.Append(Translate(_T("Open the download page in your browser instead?")));
+			if (MessageBox(text, _T(_GLOBAL_NAME_NICE), MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) == IDYES) {
+				MSIP::OpenURL(_T(_GLOBAL_UPDATE_RELEASES_PAGE));
+			}
 		}
 		break;
 

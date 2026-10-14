@@ -64,6 +64,11 @@
 #define _GLOBAL_UPDATE_BETA_SIG_URL _GLOBAL_UPDATE_BASE_URL "/download/" _GLOBAL_UPDATE_BETA_CHANNEL_TAG "/" _GLOBAL_UPDATE_SIGNATURE
 #define _GLOBAL_UPDATE_CHECK_INTERVAL_HOURS 6
 
+// Where "Check for Updates" sends the user when this machine cannot reach the
+// update channel. The browser is not subject to the same TLS restrictions as
+// the application, so this always works.
+#define _GLOBAL_UPDATE_RELEASES_PAGE "https://github.com/" _GLOBAL_UPDATE_REPO "/releases/latest"
+
 // A mirror served from the company's own network, tried automatically when
 // github.com cannot be reached. Set it to "" to disable. Keeping this in the
 // build is deliberate: users must never have to edit a file to receive
