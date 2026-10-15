@@ -1,31 +1,17 @@
-name: Probe apis
+name: Probe exports
 on: workflow_dispatch
 jobs:
   p:
     runs-on: [self-hosted, Windows, X64]
     steps:
-      - uses: actions/checkout@v4
       - shell: powershell
         run: |
-          $h = Get-Content "UpdatePublicKey.h" -Raw
-          $b = $h.Substring($h.IndexOf('g_maxcallUpdatePublicKey[] = {'))
-          $bytes = [byte[]]([regex]::Matches($b.Substring(0,$b.IndexOf('};')),'0x([0-9A-Fa-f]{2})') | ForEach-Object { [Convert]::ToByte($_.Groups[1].Value,16) })
-          $cbExp=[BitConverter]::ToUInt32($bytes,8); $cbMod=[BitConverter]::ToUInt32($bytes,12)
-          $expLE=$bytes[24..($cbExp+23)]; $modLE=$bytes[($cbExp+24)..($cbExp+23+$cbMod)]
-          [Array]::Reverse($expLE); [Array]::Reverse($modLE)
-          $lead=[System.Collections.Generic.List[byte]]::new(); $on=$false
-          foreach($x in $modLE){ if(-not $on){ if($x -ne 0){$on=$true;$lead.Add($x)} } else {$lead.Add($x)} }
-          $wc=New-Object System.Net.WebClient
-          $msg=$wc.DownloadData("http://192.168.1.32:3001/updates/update.json.beta")
-          $sig=[Convert]::FromBase64String([System.Text.Encoding]::ASCII.GetString($wc.DownloadData("http://192.168.1.32:3001/updates/update.json.beta.sig")).Trim())
-          $p=New-Object System.Security.Cryptography.RSAParameters
-          $p.Modulus=$lead.ToArray(); $p.Exponent=$expLE
-          "RSA.Create() type : $(([System.Security.Cryptography.RSA]::Create()).GetType().FullName)"
-          $a=New-Object System.Security.Cryptography.RSACryptoServiceProvider
-          $a.ImportParameters($p)
-          "CAPI  (RSACryptoServiceProvider): $($a.VerifyData($msg,$sig,[System.Security.Cryptography.HashAlgorithmName]::SHA256,[System.Security.Cryptography.RSASignaturePadding]::Pkcs1))"
-          try {
-            $n=New-Object System.Security.Cryptography.RSACng
-            $n.ImportParameters($p)
-            "CNG   (RSACng)                : $($n.VerifyData($msg,$sig,[System.Security.Cryptography.HashAlgorithmName]::SHA256,[System.Security.Cryptography.RSASignaturePadding]::Pkcs1))"
-          } catch { "CNG   (RSACng) error: $($_.Exception.Message)" }
+          $ErrorActionPreference='Continue'
+          "=== search both modules ==="
+          foreach ($dll in @("advapi32.dll","crypt32.dll")) {
+            $p = Join-Path $env:SystemRoot "System32\$dll"
+            $bytes = [System.IO.File]::ReadAllBytes($p)
+            $ascii = [System.Text.Encoding]::ASCII.GetString($bytes)
+            $hits = [regex]::Matches($ascii,'Crypt(ImportKey|VerifySignature|AcquireContext|DestroyKey|ReleaseContext)[AW]?') | ForEach-Object { $_.Value } | Sort-Object -Unique
+            "$dll -> $($hits -join ', ')"
+          }
