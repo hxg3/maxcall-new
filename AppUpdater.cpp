@@ -864,8 +864,11 @@ done:
 // ---------------------------------------------------------------------------
 namespace {
 
-CCriticalSection g_preflightLock;
+// Lock-free by design: the worker fills the record and publishes it with a
+// single interlocked store, and the reader only looks once that store is
+// visible. A mutex here would be the only use of one in this file.
 SPreflight g_preflight = { false, false, false, SManifest(), CString() };
+volatile LONG g_preflightReady = 0;
 
 DWORD WINAPI PreflightThread(LPVOID lpData)
 {
@@ -876,16 +879,14 @@ DWORD WINAPI PreflightThread(LPVOID lpData)
 	const bool ok = FetchManifest(channel, manifest, error);
 	const bool newer = ok && IsNewer(manifest.version, CString(_T(_GLOBAL_VERSION)));
 
-	CCriticalSection lock;
-	lock.Lock();
-	g_preflight.finished = true;
 	g_preflight.reached = ok;
 	g_preflight.newer = newer;
 	if (ok) {
 		g_preflight.manifest = manifest;
 	}
 	g_preflight.error = ok ? CString() : error;
-	lock.Unlock();
+	g_preflight.finished = true;
+	InterlockedExchange(&g_preflightReady, 1);
 	return 0;
 }
 
@@ -901,11 +902,12 @@ void StartPreflight(EUpdateChannel channel)
 
 bool Preflight(SPreflight& out)
 {
-	CCriticalSection lock;
-	lock.Lock();
+	if (InterlockedCompareExchange(&g_preflightReady, 0, 0) == 0) {
+		out = SPreflight();
+		return false;
+	}
 	out = g_preflight;
-	lock.Unlock();
-	return out.finished;
+	return true;
 }
 
 // ---------------------------------------------------------------------------
