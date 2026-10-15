@@ -894,6 +894,23 @@ bool VerifySignature(const CByteArray& data, const CByteArray& signature)
 	}
 
 	{
+		// Are the handles actually usable? A property that a healthy handle must
+		// answer tells us whether the failure is in the key or in the call.
+		{
+			ULONG value = 0, size = 0;
+			NTSTATUS a = BCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH, (PUCHAR)&value, sizeof(value), &size, 0);
+			ULONG keyBits = 0, keySize = 0;
+			NTSTATUS b = BCryptGetProperty(hKey, BCRYPT_KEY_LENGTH, (PUCHAR)&keyBits, sizeof(keyBits), &keySize, 0);
+			wchar_t name[64] = { 0 };
+			ULONG nameSize = 0;
+			NTSTATUS c = BCryptGetProperty(hKey, BCRYPT_ALGORITHM_NAME, (PUCHAR)name,
+				sizeof(name), &nameSize, 0);
+			CString probe;
+			probe.Format(_T("probe: algLen=0x%08x(%u) keyLen=0x%08x(%u) algName=0x%08x(%s)"),
+				(DWORD)a, value, (DWORD)b, keyBits, (DWORD)c, name);
+			HttpDiag(probe);
+		}
+
 		BCRYPT_PKCS1_PADDING_INFO padding;
 		padding.pszAlgId = BCRYPT_SHA256_ALGORITHM;
 
