@@ -1,0 +1,39 @@
+name: Probe verify
+on: workflow_dispatch
+jobs:
+  p:
+    runs-on: [self-hosted, Windows, X64]
+    steps:
+      - uses: actions/checkout@v4
+      - shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $h = Get-Content "MaxCall\UpdatePublicKey.h" -Raw
+          $body = $h.Substring($h.IndexOf('g_maxcallUpdatePublicKey[] = {'))
+          $body = $body.Substring(0, $body.IndexOf('};'))
+          $bytes = [byte[]]([regex]::Matches($body,'0x([0-9A-Fa-f]{2})') | ForEach-Object { [Convert]::ToByte($_.Groups[1].Value,16) })
+          "blob bytes: $($bytes.Length)"
+          $cbExp = [BitConverter]::ToUInt32($bytes,12); $cbMod = [BitConverter]::ToUInt32($bytes,16)
+          "cbExp=$cbExp cbMod=$cbMod"
+          $expOff = 24
+          $expLE = $bytes[$expOff..($expOff+$cbExp-1)]
+          $modLE = $bytes[($expOff+$cbExp)..($expOff+$cbExp+$cbMod-1)]
+          [Array]::Reverse($expLE); [Array]::Reverse($modLE)
+          $expTrim = [byte[]]($expLE | Where-Object { $_ -ne 0 })
+          $modTrim = [byte[]]($modLE | Where-Object { $true })
+          $modNoLead = [System.Collections.Generic.List[byte]]::new()
+          $started = $false
+          foreach ($b in $modLE) { if (-not $started) { if ($b -ne 0) { $started = $true; $modNoLead.Add($b) } } else { $modNoLead.Add($b) } }
+          $modTrim = $modNoLead.ToArray()
+
+          $m = (Invoke-WebRequest "http://192.168.1.32:3001/updates/update.json.beta" -UseBasicParsing).Content
+          $sigTxt = (Invoke-WebRequest "http://192.168.1.32:3001/updates/update.json.beta.sig" -UseBasicParsing).Content
+          $msgs = [System.Text.Encoding]::UTF8.GetBytes($m)
+          "manifest bytes from server: $($msgs.Length)"
+          $sig = [Convert]::FromBase64String($sigTxt.Trim())
+          $rsa = [System.Security.Cryptography.RSA]::Create()
+          $rsa.ImportParameters((New-Object System.Security.Cryptography.RSAParameters(
+              ([byte[]]($expTrim[($expTrim.Length-1)..0])), ([byte[]]($modTrim)))))
+          "key loaded by .NET: $($rsa.KeySize) bits"
+          $ok = $rsa.VerifyData($msgs, $sig, [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+          ".NET VerifyData: $ok"
