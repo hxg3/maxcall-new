@@ -98,7 +98,7 @@ jobs:
               $sha = Get-FileHash -Algorithm SHA256 -Path $localExe
               $match = $sha.Hash -eq $manifest.sha256
               $result.steps.sha256 = @{ computed = $sha.Hash; expected = $manifest.sha256; match = $match }
-              Write-Log "SHA256 $($match ? 'MATCH' : 'MISMATCH')"
+              if ($match) { Write-Log "SHA256 MATCH" } else { Write-Log "SHA256 MISMATCH" }
 
               if (-not $match) { throw "SHA256 mismatch" }
             }
@@ -154,7 +154,7 @@ jobs:
           }
 
           Write-Result $result
-          exit ($result.success ? 0 : 1)
+          if ($result.success) { exit 0 } else { exit 1 }
           '@
 
           $scriptPath = "$env:GITHUB_WORKSPACE/test-maxcall.ps1"
