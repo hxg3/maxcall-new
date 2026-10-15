@@ -272,6 +272,13 @@ bool IsNewer(const CString& candidate, const CString& current)
 static CString g_mirrorBase;
 static bool g_usingMirror = false;
 
+// Host of the configured mirror, cached so a request can be recognised as local
+// without re-parsing the base on every call.
+static CString g_mirrorHost;
+
+static bool SplitUrl(const CString& url, CString& scheme, CString& host,
+	INTERNET_PORT& port, CString& object);
+
 void SetMirrorBase(const CString& base)
 {
 	CString trimmed = base;
@@ -369,13 +376,6 @@ struct SHttpSession
 // Splits an absolute URL into the parts the transport needs. Deliberately hand
 // rolled: MFC ships AfxParseURL and AfxParseURLEx with different parameter
 // lists, and this module needs neither userinfo nor a service-type enum.
-// Host of the configured mirror, cached so the request can be recognised as
-// local without re-parsing the base on every call.
-static CString g_mirrorHost;
-
-static bool SplitUrl(const CString& url, CString& scheme, CString& host,
-	INTERNET_PORT& port, CString& object);
-
 static bool SplitUrl(const CString& url, CString& scheme, CString& host,
 	INTERNET_PORT& port, CString& object)
 {
@@ -513,19 +513,12 @@ static bool HttpOpenOnce(const CString& url, SHttpSession& http, CString& error,
 	// access must not be consulted for it: the request is sent to the proxy,
 	// which cannot route to the LAN host, and the call times out. github keeps
 	// the machine's normal path.
-	if (!g_mirrorBase.IsEmpty() && host.Find(g_mirrorHost) == 0) {
-		INTERNET_PER_CONN_OPTION option;
-		ZeroMemory(&option, sizeof(option));
-		option.dwOption = INTERNET_PER_CONN_FLAGS;
-		option.dwValue = INTERNET_PER_CONN_FLAGS_DIRECT;
-		option.pszValue = NULL;
-
-		INTERNET_PER_CONN_OPTION_LIST list;
-		ZeroMemory(&list, sizeof(list));
-		list.dwSize = sizeof(list);
-		list.dwOptionCount = 1;
-		list.pOptions = &option;
-		http.session.SetOption(INTERNET_OPTION_PER_CONNECTION_OPTION, &list);
+	if (!g_mirrorBase.IsEmpty() && !g_mirrorHost.IsEmpty()
+		&& host.CompareNoCase(g_mirrorHost) == 0) {
+		INTERNET_PROXY_INFO proxy;
+		ZeroMemory(&proxy, sizeof(proxy));
+		proxy.dwAccessType = INTERNET_OPEN_TYPE_DIRECT;
+		http.session.SetOption(INTERNET_OPTION_PROXY, (LPVOID)&proxy);
 	}
 
 	try {
