@@ -114,6 +114,11 @@ try {
       tlsError     = [bool]($txt -match "12152")
       mirrorSwap   = [bool]($txt -match "mirror mode: payload from")
       oldCodeAbsent = -not ($txt -match "github.com unreachable, falling back")
+      # The manifest and its signature being served is not the same as the
+      # signature being accepted. Checking only for HTTP 200 let a key mismatch
+      # pass unnoticed while the client showed "signature is not valid".
+      sigRejected   = [bool]($txt -match "signature is not valid")
+      sigAccepted   = [bool]($txt -match "from the internal mirror") -and -not ($txt -match "signature is not valid")
       lines        = @($upd)
       logSize      = (Get-Item $realLog).Length
       logHead      = @((Get-Content $realLog -TotalCount 25) | ForEach-Object { "$_" })
@@ -122,6 +127,10 @@ try {
          $r.steps.updateCheck.fromMirror, $r.steps.updateCheck.fellBack, $r.steps.updateCheck.tlsError)
   } else {
     $r.steps.updateCheck = @{ error = "no debug log at $realLog" }
+  }
+
+  if ($r.steps.updateCheck.sigRejected) {
+    throw "the client rejected the manifest signature"
   }
 
   $r.success = $true
