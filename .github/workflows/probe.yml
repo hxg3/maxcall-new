@@ -8,7 +8,7 @@ jobs:
       - shell: powershell
         run: |
           $ErrorActionPreference='Stop'
-          $h = Get-Content "MaxCall\UpdatePublicKey.h" -Raw
+          $h = Get-Content "UpdatePublicKey.h" -Raw
           $body = $h.Substring($h.IndexOf('g_maxcallUpdatePublicKey[] = {'))
           $body = $body.Substring(0, $body.IndexOf('};'))
           $bytes = [byte[]]([regex]::Matches($body,'0x([0-9A-Fa-f]{2})') | ForEach-Object { [Convert]::ToByte($_.Groups[1].Value,16) })
