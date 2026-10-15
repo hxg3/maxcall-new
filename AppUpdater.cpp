@@ -844,6 +844,49 @@ done:
 	return ok;
 }
 
+namespace {
+
+// The project pins _WIN32_WINNT to the XP level, and the crypto headers arrive
+// through cryptuiapi.h before that floor is raised for bcrypt.h. Rather than
+// depend on which declaration wins, the three CryptoAPI calls used here are
+// resolved by name. The signatures are fixed and known, so this pins the calling
+// convention rather than guessing at it.
+typedef BOOL (WINAPI *PFN_AcquireContext)(ULONG*, LPCSTR, LPCSTR, DWORD, DWORD);
+typedef BOOL (WINAPI *PFN_ImportKey)(ULONG, const BYTE*, DWORD, ULONG, DWORD, DWORD, ULONG*);
+typedef BOOL (WINAPI *PFN_VerifySignature)(ULONG, const BYTE*, DWORD, const BYTE*, DWORD);
+typedef BOOL (WINAPI *PFN_DestroyKey)(ULONG);
+typedef BOOL (WINAPI *PFN_ReleaseContext)(ULONG, DWORD);
+
+struct SCryptoApi
+{
+	PFN_AcquireContext acquireContext;
+	PFN_ImportKey importKey;
+	PFN_VerifySignature verifySignature;
+	PFN_DestroyKey destroyKey;
+	PFN_ReleaseContext releaseContext;
+
+	SCryptoApi()
+	{
+		memset(this, 0, sizeof(*this));
+		HMODULE advapi = GetModuleHandle(_T("advapi32.dll"));
+		if (!advapi) advapi = LoadLibrary(_T("advapi32.dll"));
+		if (!advapi) return;
+		acquireContext = (PFN_AcquireContext)GetProcAddress(advapi, "CryptAcquireContextA");
+		importKey = (PFN_ImportKey)GetProcAddress(advapi, "CryptImportKeyA");
+		verifySignature = (PFN_VerifySignature)GetProcAddress(advapi, "CryptVerifySignatureA");
+		destroyKey = (PFN_DestroyKey)GetProcAddress(advapi, "CryptDestroyKey");
+		releaseContext = (PFN_ReleaseContext)GetProcAddress(advapi, "CryptReleaseContext");
+	}
+
+	bool Ready() const
+	{
+		return acquireContext && importKey && verifySignature
+			&& destroyKey && releaseContext;
+	}
+};
+
+} // namespace
+
 bool VerifySignature(const CByteArray& data, const CByteArray& signature)
 {
 	if (data.GetSize() <= 0
@@ -858,97 +901,65 @@ bool VerifySignature(const CByteArray& data, const CByteArray& signature)
 		return false;
 	}
 
-	BCRYPT_ALG_HANDLE hAlg = NULL;
-	BCRYPT_KEY_HANDLE hKey = NULL;
-	bool ok = false;
-
-	// The key blob carries its own exponent and modulus lengths, so they are read
-	// from the blob rather than assumed. Taking cbPublicExp from a constant made
-	// three bogus bytes turn the exponent into 257, the import quietly produced
-	// an unusable key, and every manifest was refused.
+	// The lengths live in the key blob and are read from it, then the exponent is
+	// assembled from its little-endian bytes into the DWORD CryptoAPI expects.
 	const unsigned char* blob = g_maxcallUpdatePublicKey;
-	ULONG cbExp = 0, cbMod = 0;
+	ULONG cbExp = 0, cbMod = 0, bitLength = 0;
 	CopyMemory(&cbExp, blob + 8, sizeof(cbExp));
 	CopyMemory(&cbMod, blob + 12, sizeof(cbMod));
-
-	if (cbExp == 0 || cbExp > 8
-		|| cbMod != (ULONG)(MAXCALL_UPDATE_KEY_BITS / 8)
+	CopyMemory(&bitLength, blob + 4, sizeof(bitLength));
+	if (cbExp == 0 || cbExp > 8 || cbMod == 0 || bitLength == 0
 		|| (ULONG)sizeof(g_maxcallUpdatePublicKey) < 24 + cbExp + cbMod) {
 		HttpDiag(_T("signature rejected: the embedded public key is malformed"));
 		return false;
 	}
+	ULONG publicExponent = 0;
+	for (ULONG i = 0; i < cbExp; i++) {
+		publicExponent |= (ULONG)blob[24 + i] << (8 * i);
+	}
 
-	NTSTATUS st = BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_RSA_ALGORITHM, NULL, 0);
-	if (st != 0) {
-		CString m; m.Format(_T("signature rejected: cannot open the rsa provider (0x%08x)"), (DWORD)st);
+	static SCryptoApi api;
+	if (!api.Ready()) {
+		HttpDiag(_T("signature rejected: the crypto api is unavailable"));
+		return false;
+	}
+
+	// PUBLICKEYBLOB: bType, bVersion, reserved, aiKeyAlg, magic, bitlen, pubexp,
+	// then the modulus little-endian - the same order the key file already uses.
+	const DWORD keyAlg = CALG_RSA_SIGN;
+	std::vector<unsigned char> pubKey(20 + cbMod);
+	pubKey[0] = PUBLICKEYBLOB;
+	pubKey[1] = CUR_BLOB_VERSION;
+	CopyMemory(&pubKey[4], &keyAlg, sizeof(keyAlg));
+	CopyMemory(&pubKey[8], blob, 4);
+	CopyMemory(&pubKey[12], &bitLength, sizeof(bitLength));
+	CopyMemory(&pubKey[16], &publicExponent, sizeof(publicExponent));
+	CopyMemory(&pubKey[20], blob + 24 + cbExp, cbMod);
+
+	ULONG hProv = 0, hKey = 0;
+	bool ok = false;
+
+	if (!api.acquireContext(&hProv, NULL, NULL, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT)) {
+		HttpDiag(_T("signature rejected: no crypto provider is available"));
+		goto done;
+	}
+	if (!api.importKey(hProv, &pubKey[0], (DWORD)pubKey.size(), 0, 0, 0, &hKey)) {
+		CString m; m.Format(_T("signature rejected: the public key was refused (%lu)"), GetLastError());
 		HttpDiag(m);
 		goto done;
 	}
-
-	st = BCryptImportKeyPair(hAlg, NULL, BCRYPT_RSAPUBLIC_BLOB, &hKey,
-		(PUCHAR)g_maxcallUpdatePublicKey, (ULONG)sizeof(g_maxcallUpdatePublicKey), 0);
-	if (st != 0) {
-		CString m; m.Format(_T("signature rejected: the public key was refused (0x%08x)"), (DWORD)st);
+	if (!api.verifySignature(hKey, digest, sizeof(digest),
+		(const BYTE*)signature.GetData(), (DWORD)signature.GetSize())) {
+		CString m; m.Format(_T("signature rejected: verify failed (%lu)"), GetLastError());
 		HttpDiag(m);
 		goto done;
-	}
-
-	{
-		// Are the handles actually usable? A property that a healthy handle must
-		// answer tells us whether the failure is in the key or in the call.
-		{
-			ULONG value = 0, size = 0;
-			NTSTATUS a = BCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH, (PUCHAR)&value, sizeof(value), &size, 0);
-			ULONG keyBits = 0, keySize = 0;
-			NTSTATUS b = BCryptGetProperty(hKey, BCRYPT_KEY_LENGTH, (PUCHAR)&keyBits, sizeof(keyBits), &keySize, 0);
-			wchar_t name[64] = { 0 };
-			ULONG nameSize = 0;
-			NTSTATUS c = BCryptGetProperty(hKey, BCRYPT_ALGORITHM_NAME, (PUCHAR)name,
-				sizeof(name), &nameSize, 0);
-			CString probe;
-			probe.Format(_T("probe: algLen=0x%08x(%u) keyLen=0x%08x(%u) algName=0x%08x(%s)"),
-				(DWORD)a, value, (DWORD)b, keyBits, (DWORD)c, name);
-			HttpDiag(probe);
-		}
-
-		BCRYPT_PKCS1_PADDING_INFO padding;
-		padding.pszAlgId = BCRYPT_SHA256_ALGORITHM;
-
-		// BCryptVerifySignature returns STATUS_SUCCESS (0) when the signature is
-		// good. Anything non-zero means the payload was tampered with.
-		st = BCryptVerifySignature(hKey, &padding, digest, sizeof(digest),
-			(PUCHAR)signature.GetData(), (ULONG)signature.GetSize(), 0);
-		if (st != 0) {
-			CString m; m.Format(_T("signature rejected: verify failed (0x%08x)"), (DWORD)st);
-			HttpDiag(m);
-			{
-				CString h;
-				h.Format(_T("sig head %02x%02x%02x%02x%02x%02x%02x%02x, digest %02x%02x%02x%02x"),
-					((const unsigned char*)signature.GetData())[0], ((const unsigned char*)signature.GetData())[1],
-					((const unsigned char*)signature.GetData())[2], ((const unsigned char*)signature.GetData())[3],
-					((const unsigned char*)signature.GetData())[4], ((const unsigned char*)signature.GetData())[5],
-					((const unsigned char*)signature.GetData())[6], ((const unsigned char*)signature.GetData())[7],
-					digest[0], digest[1], digest[2], digest[3]);
-				HttpDiag(h);
-			}
-			goto done;
-		}
-	}
-	{
-		CString sig;
-		sig.Format(_T("signature head %02x%02x%02x%02x%02x%02x%02x%02x"),
-			((const unsigned char*)signature.GetData())[0], ((const unsigned char*)signature.GetData())[1],
-			((const unsigned char*)signature.GetData())[2], ((const unsigned char*)signature.GetData())[3],
-			((const unsigned char*)signature.GetData())[4], ((const unsigned char*)signature.GetData())[5],
-			((const unsigned char*)signature.GetData())[6], ((const unsigned char*)signature.GetData())[7]);
-		HttpDiag(sig);
 	}
 	HttpDiag(_T("manifest signature verified"));
 	ok = true;
 
 done:
-	if (hKey) BCryptDestroyKey(hKey);
-	if (hAlg) BCryptCloseAlgorithmProvider(hAlg, 0);
+	if (hKey) api.destroyKey(hKey);
+	if (hProv) api.releaseContext(hProv, 0);
 	return ok;
 }
 
