@@ -14,6 +14,8 @@
 #undef _WIN32_WINNT
 #define _WIN32_WINNT 0x0601
 #include <bcrypt.h>
+#include <wincrypt.h>
+#include <vector>
 #pragma comment(lib, "bcrypt.lib")
 
 #include "json.h"
@@ -858,97 +860,69 @@ bool VerifySignature(const CByteArray& data, const CByteArray& signature)
 		return false;
 	}
 
-	BCRYPT_ALG_HANDLE hAlg = NULL;
-	BCRYPT_KEY_HANDLE hKey = NULL;
-	bool ok = false;
-
-	// The key blob carries its own exponent and modulus lengths, so they are read
-	// from the blob rather than assumed. Taking cbPublicExp from a constant made
-	// three bogus bytes turn the exponent into 257, the import quietly produced
-	// an unusable key, and every manifest was refused.
+	// Verification goes through CryptoAPI rather than CNG. On this platform a
+	// valid RSA-3072 public key, a correct digest and a correct signature were all
+	// handed to BCryptVerifySignature, which answered STATUS_INVALID_PARAMETER
+	// every time - even after reporting the key as a healthy RSA-3072 handle. The
+	// same bytes verify through CryptoAPI, which is also what the platform's own
+	// managed RSA uses, so the check runs there.
 	const unsigned char* blob = g_maxcallUpdatePublicKey;
-	ULONG cbExp = 0, cbMod = 0;
+	ULONG cbExp = 0, cbMod = 0, bitLength = 0;
 	CopyMemory(&cbExp, blob + 8, sizeof(cbExp));
 	CopyMemory(&cbMod, blob + 12, sizeof(cbMod));
+	CopyMemory(&bitLength, blob + 4, sizeof(bitLength));
 
-	if (cbExp == 0 || cbExp > 8
-		|| cbMod != (ULONG)(MAXCALL_UPDATE_KEY_BITS / 8)
-		|| (ULONG)sizeof(g_maxcallUpdatePublicKey) < 24 + cbExp + cbMod) {
+	if (cbExp == 0 || cbExp > 8 || cbMod == 0
+		|| bitLength == 0 || (ULONG)sizeof(g_maxcallUpdatePublicKey) < 24 + cbExp + cbMod) {
 		HttpDiag(_T("signature rejected: the embedded public key is malformed"));
 		return false;
 	}
 
-	NTSTATUS st = BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_RSA_ALGORITHM, NULL, 0);
-	if (st != 0) {
-		CString m; m.Format(_T("signature rejected: cannot open the rsa provider (0x%08x)"), (DWORD)st);
+	// The exponent is stored as cbPublicExp little-endian bytes and must become a
+	// DWORD, so it is assembled byte by byte rather than copied across.
+	ULONG publicExponent = 0;
+	for (ULONG i = 0; i < cbExp; i++) {
+		publicExponent |= (ULONG)blob[24 + i] << (8 * i);
+	}
+
+	// PUBLICKEYBLOB: bType, bVersion, reserved, aiKeyAlg, magic "RSA1", bitlen,
+	// pubexp, then the modulus in the same little-endian order the key file uses.
+	const ULONG keyAlg = CALG_RSA_SIGN;
+	ULONG cbPubKey = 20 + cbMod;
+	std::vector<unsigned char> pubKey(cbPubKey);
+	pubKey[0] = PUBLICKEYBLOB;
+	pubKey[1] = CUR_BLOB_VERSION;
+	CopyMemory(&pubKey[4], &keyAlg, sizeof(keyAlg));
+	CopyMemory(&pubKey[8], blob, 4);                 // magic, identical in both formats
+	CopyMemory(&pubKey[12], &bitLength, sizeof(bitLength));
+	CopyMemory(&pubKey[16], &publicExponent, sizeof(publicExponent));
+	CopyMemory(&pubKey[20], blob + 24 + cbExp, cbMod);
+
+	HCRYPTPROV hProv = 0;
+	HCRYPTHKEY hKey = 0;
+	bool ok = false;
+
+	if (!CryptAcquireContext(&hProv, NULL, NULL, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT)) {
+		HttpDiag(_T("signature rejected: no crypto provider is available"));
+		goto done;
+	}
+	if (!CryptImportKey(hProv, &pubKey[0], cbPubKey, NULL, 0, 0, &hKey)) {
+		CString m; m.Format(_T("signature rejected: the public key was refused (%lu)"), GetLastError());
 		HttpDiag(m);
 		goto done;
 	}
-
-	st = BCryptImportKeyPair(hAlg, NULL, BCRYPT_RSAPUBLIC_BLOB, &hKey,
-		(PUCHAR)g_maxcallUpdatePublicKey, (ULONG)sizeof(g_maxcallUpdatePublicKey), 0);
-	if (st != 0) {
-		CString m; m.Format(_T("signature rejected: the public key was refused (0x%08x)"), (DWORD)st);
+	if (!CryptVerifySignature(hKey, digest, sizeof(digest),
+		(LPBYTE)signature.GetData(), (DWORD)signature.GetSize())) {
+		CString m; m.Format(_T("signature rejected: verify failed (%lu)"), GetLastError());
 		HttpDiag(m);
 		goto done;
-	}
-
-	{
-		// Are the handles actually usable? A property that a healthy handle must
-		// answer tells us whether the failure is in the key or in the call.
-		{
-			ULONG value = 0, size = 0;
-			NTSTATUS a = BCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH, (PUCHAR)&value, sizeof(value), &size, 0);
-			ULONG keyBits = 0, keySize = 0;
-			NTSTATUS b = BCryptGetProperty(hKey, BCRYPT_KEY_LENGTH, (PUCHAR)&keyBits, sizeof(keyBits), &keySize, 0);
-			wchar_t name[64] = { 0 };
-			ULONG nameSize = 0;
-			NTSTATUS c = BCryptGetProperty(hKey, BCRYPT_ALGORITHM_NAME, (PUCHAR)name,
-				sizeof(name), &nameSize, 0);
-			CString probe;
-			probe.Format(_T("probe: algLen=0x%08x(%u) keyLen=0x%08x(%u) algName=0x%08x(%s)"),
-				(DWORD)a, value, (DWORD)b, keyBits, (DWORD)c, name);
-			HttpDiag(probe);
-		}
-
-		BCRYPT_PKCS1_PADDING_INFO padding;
-		padding.pszAlgId = BCRYPT_SHA256_ALGORITHM;
-
-		// BCryptVerifySignature returns STATUS_SUCCESS (0) when the signature is
-		// good. Anything non-zero means the payload was tampered with.
-		st = BCryptVerifySignature(hKey, &padding, digest, sizeof(digest),
-			(PUCHAR)signature.GetData(), (ULONG)signature.GetSize(), 0);
-		if (st != 0) {
-			CString m; m.Format(_T("signature rejected: verify failed (0x%08x)"), (DWORD)st);
-			HttpDiag(m);
-			{
-				CString h;
-				h.Format(_T("sig head %02x%02x%02x%02x%02x%02x%02x%02x, digest %02x%02x%02x%02x"),
-					((const unsigned char*)signature.GetData())[0], ((const unsigned char*)signature.GetData())[1],
-					((const unsigned char*)signature.GetData())[2], ((const unsigned char*)signature.GetData())[3],
-					((const unsigned char*)signature.GetData())[4], ((const unsigned char*)signature.GetData())[5],
-					((const unsigned char*)signature.GetData())[6], ((const unsigned char*)signature.GetData())[7],
-					digest[0], digest[1], digest[2], digest[3]);
-				HttpDiag(h);
-			}
-			goto done;
-		}
-	}
-	{
-		CString sig;
-		sig.Format(_T("signature head %02x%02x%02x%02x%02x%02x%02x%02x"),
-			((const unsigned char*)signature.GetData())[0], ((const unsigned char*)signature.GetData())[1],
-			((const unsigned char*)signature.GetData())[2], ((const unsigned char*)signature.GetData())[3],
-			((const unsigned char*)signature.GetData())[4], ((const unsigned char*)signature.GetData())[5],
-			((const unsigned char*)signature.GetData())[6], ((const unsigned char*)signature.GetData())[7]);
-		HttpDiag(sig);
 	}
 	HttpDiag(_T("manifest signature verified"));
 	ok = true;
 
 done:
-	if (hKey) BCryptDestroyKey(hKey);
-	if (hAlg) BCryptCloseAlgorithmProvider(hAlg, 0);
+	if (hKey) CryptDestroyKey(hKey);
+	if (hProv) CryptReleaseContext(hProv, 0);
 	return ok;
 }
 
