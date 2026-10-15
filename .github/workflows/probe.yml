@@ -14,7 +14,7 @@ jobs:
           $bytes = [byte[]]([regex]::Matches($body,'0x([0-9A-Fa-f]{2})') | ForEach-Object { [Convert]::ToByte($_.Groups[1].Value,16) })
           "blob bytes: $($bytes.Length)"
           $cbExp = [BitConverter]::ToUInt32($bytes,8); $cbMod = [BitConverter]::ToUInt32($bytes,12)
-          "cbExp=$cbExp cbMod=$cbMod exponent=$(($expBE | ForEach-Object { $_.ToString('x2') }) -join '')"
+          "cbExp=$cbExp cbMod=$cbMod"
           $expOff = 24
           $expLE = $bytes[$expOff..($expOff+$cbExp-1)]
           $modLE = $bytes[($expOff+$cbExp)..($expOff+$cbExp+$cbMod-1)]
