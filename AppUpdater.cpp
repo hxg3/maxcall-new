@@ -279,6 +279,13 @@ void SetMirrorBase(const CString& base)
 		trimmed = trimmed.Left(trimmed.GetLength() - 1);
 	}
 	g_mirrorBase = trimmed;
+
+	CString scheme, host, object;
+	INTERNET_PORT port = INTERNET_DEFAULT_HTTP_PORT;
+	g_mirrorHost.Empty();
+	if (SplitUrl(trimmed, scheme, host, port, object)) {
+		g_mirrorHost = host;
+	}
 }
 
 CString MirrorBase()
@@ -362,6 +369,13 @@ struct SHttpSession
 // Splits an absolute URL into the parts the transport needs. Deliberately hand
 // rolled: MFC ships AfxParseURL and AfxParseURLEx with different parameter
 // lists, and this module needs neither userinfo nor a service-type enum.
+// Host of the configured mirror, cached so the request can be recognised as
+// local without re-parsing the base on every call.
+static CString g_mirrorHost;
+
+static bool SplitUrl(const CString& url, CString& scheme, CString& host,
+	INTERNET_PORT& port, CString& object);
+
 static bool SplitUrl(const CString& url, CString& scheme, CString& host,
 	INTERNET_PORT& port, CString& object)
 {
@@ -494,6 +508,25 @@ static bool HttpOpenOnce(const CString& url, SHttpSession& http, CString& error,
 
 	// The internal mirror is plain HTTP; GitHub is HTTPS. Use the right flag.
 	DWORD connectFlags = (scheme.CompareNoCase(_T("https")) == 0) ? INTERNET_FLAG_SECURE : 0;
+
+	// The mirror sits on the local network, so any proxy configured for internet
+	// access must not be consulted for it: the request is sent to the proxy,
+	// which cannot route to the LAN host, and the call times out. github keeps
+	// the machine's normal path.
+	if (!g_mirrorBase.IsEmpty() && host.Find(g_mirrorHost) == 0) {
+		INTERNET_PER_CONN_OPTION option;
+		ZeroMemory(&option, sizeof(option));
+		option.dwOption = INTERNET_PER_CONN_FLAGS;
+		option.dwValue = INTERNET_PER_CONN_FLAGS_DIRECT;
+		option.pszValue = NULL;
+
+		INTERNET_PER_CONN_OPTION_LIST list;
+		ZeroMemory(&list, sizeof(list));
+		list.dwSize = sizeof(list);
+		list.dwOptionCount = 1;
+		list.pOptions = &option;
+		http.session.SetOption(INTERNET_OPTION_PER_CONNECTION_OPTION, &list);
+	}
 
 	try {
 		http.connection = http.session.GetHttpConnection(host, connectFlags, port);
