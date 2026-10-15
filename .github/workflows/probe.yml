@@ -26,11 +26,11 @@ jobs:
           foreach ($b in $modLE) { if (-not $started) { if ($b -ne 0) { $started = $true; $modNoLead.Add($b) } } else { $modNoLead.Add($b) } }
           $modTrim = $modNoLead.ToArray()
 
-          # -UseBasicParsing hands back a byte array for these, not a string.
-          $mBytes = (Invoke-WebRequest "http://192.168.1.32:3001/updates/update.json.beta" -UseBasicParsing).Content
-          $sigBytes = (Invoke-WebRequest "http://192.168.1.32:3001/updates/update.json.beta.sig" -UseBasicParsing).Content
-          $m = [System.Text.Encoding]::UTF8.GetString($mBytes)
-          $sigTxt = [System.Text.Encoding]::ASCII.GetString($sigBytes)
+          # -UseBasicParsing returns a string for some content types and a byte
+          # array for others, so normalise before using it.
+          function AsText($c) { if ($c -is [byte[]]) { [System.Text.Encoding]::UTF8.GetString($c) } else { [string]$c } }
+          $m = AsText (Invoke-WebRequest "http://192.168.1.32:3001/updates/update.json.beta" -UseBasicParsing).Content
+          $sigTxt = AsText (Invoke-WebRequest "http://192.168.1.32:3001/updates/update.json.beta.sig" -UseBasicParsing).Content
           $msgs = [System.Text.Encoding]::UTF8.GetBytes($m)
           "manifest bytes from server: $($msgs.Length)"
           $sig = [Convert]::FromBase64String($sigTxt.Trim())
