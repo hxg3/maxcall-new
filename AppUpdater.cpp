@@ -902,17 +902,17 @@ bool VerifySignature(const CByteArray& data, const CByteArray& signature)
 	HCRYPTKEY hKey = 0;
 	bool ok = false;
 
-	if (!CryptAcquireContext(&hProv, NULL, NULL, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT)) {
+	if (!CryptAcquireContextA(&hProv, NULL, NULL, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT)) {
 		HttpDiag(_T("signature rejected: no crypto provider is available"));
 		goto done;
 	}
-	if (!CryptImportKey(hProv, &pubKey[0], cbPubKey, NULL, 0, 0, &hKey)) {
+	if (!CryptImportKeyA(hProv, &pubKey[0], cbPubKey, NULL, 0, 0, &hKey)) {
 		CString m; m.Format(_T("signature rejected: the public key was refused (%lu)"), GetLastError());
 		HttpDiag(m);
 		goto done;
 	}
-	if (!CryptVerifySignature(hKey, digest, sizeof(digest),
-		(LPBYTE)signature.GetData(), (DWORD)signature.GetSize())) {
+	if (!CryptVerifySignatureA(hKey, (const BYTE*)digest, sizeof(digest),
+		(const BYTE*)signature.GetData(), (DWORD)signature.GetSize())) {
 		CString m; m.Format(_T("signature rejected: verify failed (%lu)"), GetLastError());
 		HttpDiag(m);
 		goto done;
