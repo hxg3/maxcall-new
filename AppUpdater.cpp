@@ -518,7 +518,7 @@ static bool HttpOpenOnce(const CString& url, SHttpSession& http, CString& error,
 		INTERNET_PROXY_INFO proxy;
 		ZeroMemory(&proxy, sizeof(proxy));
 		proxy.dwAccessType = INTERNET_OPEN_TYPE_DIRECT;
-		http.session.SetOption(INTERNET_OPTION_PROXY, (LPVOID)&proxy);
+		http.session.SetOption(INTERNET_OPTION_PROXY, &proxy, sizeof(proxy));
 	}
 
 	try {
