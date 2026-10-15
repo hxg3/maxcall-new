@@ -22,7 +22,10 @@ $r = @{ channel = $Channel; action = $Action; when = (Get-Date -Format "yyyy-MM-
 if ($Channel -eq "beta") { $manifestName = "update.json.beta"; $sigName = "update.json.beta.sig"; $exeName = "MaxCall-beta.exe" }
 else                     { $manifestName = "update.json";     $sigName = "update.json.sig";     $exeName = "MaxCall.exe" }
 
-$targetExe = Join-Path $MaxCallDir "MaxCall.exe"
+# The updater replaces the executable it was launched from, and reads its INI
+# from the same folder. The beta build ships as MaxCall-beta.exe, so the test
+# has to drive that file rather than assume MaxCall.exe.
+$targetExe = Join-Path $MaxCallDir $exeName
 $payload   = Join-Path $MaxCallDir $exeName
 
 try {
@@ -37,6 +40,7 @@ try {
 
   # --- 2. payload + sha256 ---
   Log "payload: $MirrorBase/$exeName"
+  $payload = Join-Path $MaxCallDir ("payload-" + $exeName)
   Invoke-WebRequest "$MirrorBase/$exeName" -OutFile $payload -UseBasicParsing -TimeoutSec 180
   $got = Sha256Of $payload
   $ok = ($got -eq $m.sha256.ToLower())
@@ -47,7 +51,7 @@ try {
   # --- 3. real updater: fetch, verify the RSA signature, download, install ---
   # The updater is exercised for real: it re-fetches and re-verifies everything
   # itself, then replaces this very executable. That is the path a user takes.
-  Log "running the real updater with --apply"
+  Log "running the real updater: $targetExe --apply <target> <source> 0"
   $proc = Start-Process -FilePath $targetExe -ArgumentList "--apply","$targetExe","$payload","0" -PassThru
   $done = $proc.WaitForExit(300000)
   if (-not $done) { $proc.Kill(); throw "the updater did not finish within 5 minutes" }
