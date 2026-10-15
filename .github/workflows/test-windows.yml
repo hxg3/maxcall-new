@@ -1,191 +1,47 @@
-name: Windows Self-Hosted Test
+name: Windows Update Test
 on:
   workflow_dispatch:
     inputs:
       channel:
-        description: "Update channel to test"
+        description: "Channel to test"
         type: choice
         required: true
         default: "beta"
         options:
           - beta
           - stable
-      action:
-        description: "What to test"
-        type: choice
-        required: true
-        default: "full"
-        options:
-          - download
-          - install
-          - check
-          - full
 
 jobs:
-  test-on-windows:
+  test:
     runs-on: [self-hosted, Windows, X64]
-    timeout-minutes: 30
+    timeout-minutes: 20
     env:
       MAXCALL_DIR: "C:\\maxcall"
       MIRROR_BASE: "http://maxcall.local:3001/updates"
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Write test script
+      - name: Test the real update path
         shell: powershell
         run: |
-          $script = @'
-          param(
-            [string]$Channel = "beta",
-            [string]$Action = "full",
-            [string]$MaxCallDir = "C:\maxcall",
-            [string]$MirrorBase = "http://maxcall.local:3001/updates"
-          )
-
-          $ErrorActionPreference = "Stop"
-          $ProgressPreference = "SilentlyContinue"
-
-          function Write-Log { param($msg) Write-Host "[$(Get-Date -Format 'HH:mm:ss')] $msg" }
-          function Write-Result { param($obj) $obj | ConvertTo-Json -Depth 5 | Out-File -Encoding utf8 "$env:GITHUB_WORKSPACE/test-result.json" }
-
-          $exeName = if ($Channel -eq "beta") { "MaxCall-beta.exe" } else { "MaxCall.exe" }
-          $manifestName = if ($Channel -eq "beta") { "update.json.beta" } else { "update.json" }
-          $sigName = if ($Channel -eq "beta") { "update.json.beta.sig" } else { "update.json.sig" }
-
-          $manifestUrl = "$MirrorBase/$manifestName"
-          $sigUrl = "$MirrorBase/$sigName"
-          $exeUrl = "$MirrorBase/$exeName"
-          $localExe = "$MaxCallDir\$exeName"
-          $targetExe = "$MaxCallDir\MaxCall.exe"
-
-          $result = @{
-            channel = $Channel
-            action = $Action
-            timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ"
-            steps = @{}
-            success = $false
-            error = $null
-          }
-
-          try {
-            # ---- STEP 1: Download manifest ----
-            Write-Log "Downloading manifest: $manifestUrl"
-            $manifestResp = Invoke-WebRequest -Uri $manifestUrl -UseBasicParsing -TimeoutSec 30
-            $manifest = $manifestResp.Content | ConvertFrom-Json
-            $result.steps.manifest = @{
-              version = $manifest.version
-              sha256 = $manifest.sha256
-              size = $manifest.size
-              url = $manifest.url
-              httpStatus = $manifestResp.StatusCode
-            }
-            Write-Log "Manifest version: $($manifest.version)"
-
-            # ---- STEP 2: Download signature ----
-            Write-Log "Downloading signature: $sigUrl"
-            $sigResp = Invoke-WebRequest -Uri $sigUrl -UseBasicParsing -TimeoutSec 15
-            $result.steps.signature = @{ httpStatus = $sigResp.StatusCode; length = $sigResp.Content.Length }
-
-            # ---- STEP 3: Download executable ----
-            if ($Action -in @("download","install","full")) {
-              Write-Log "Downloading executable: $exeUrl"
-              $exeResp = Invoke-WebRequest -Uri $exeUrl -OutFile $localExe -UseBasicParsing -TimeoutSec 120
-              $result.steps.download = @{ httpStatus = $exeResp.StatusCode; path = $localExe; bytes = (Get-Item $localExe).Length }
-
-              # ---- STEP 4: Verify SHA256 ----
-              Write-Log "Verifying SHA256..."
-              $sha = Get-FileHash -Algorithm SHA256 -Path $localExe
-              $match = $sha.Hash -eq $manifest.sha256
-              $result.steps.sha256 = @{ computed = $sha.Hash; expected = $manifest.sha256; match = $match }
-              if ($match) { Write-Log "SHA256 MATCH" } else { Write-Log "SHA256 MISMATCH" }
-
-              if (-not $match) { throw "SHA256 mismatch" }
-            }
-
-            # ---- STEP 5: Install (--apply) ----
-            if ($Action -in @("install","full")) {
-              Write-Log "Installing with --apply..."
-              $proc = Start-Process -FilePath $localExe -ArgumentList "--apply" -Wait -PassThru -NoNewWindow
-              $result.steps.install = @{ exitCode = $proc.ExitCode; success = ($proc.ExitCode -eq 0) }
-              if ($proc.ExitCode -ne 0) { throw "Install failed with exit code $($proc.ExitCode)" }
-              Write-Log "Install completed (exit $($proc.ExitCode))"
-
-              Start-Sleep -Seconds 3
-            }
-
-            # ---- STEP 6: Run app and check update ----
-            if ($Action -in @("check","full")) {
-              Write-Log "Starting MaxCall for update check..."
-              Get-Process -Name "MaxCall" -ErrorAction SilentlyContinue | Stop-Process -Force
-              Start-Sleep -Seconds 2
-
-              $logPath = "$MaxCallDir\maxcall_debug.log"
-              if (Test-Path $logPath) { Remove-Item $logPath -Force }
-
-              $appProc = Start-Process -FilePath $targetExe -ArgumentList "" -PassThru
-              Write-Log "MaxCall started (PID $($appProc.Id))"
-
-              Start-Sleep -Seconds 30
-
-              $appProc | Stop-Process -Force
-              Start-Sleep -Seconds 2
-
-              if (Test-Path $logPath) {
-                $log = Get-Content $logPath -Raw
-                $result.steps.updateCheck = @{
-                  logTail = $log.Split("`n") | Select-Object -Last 50
-                  containsMirrorAttempt = $log -match "the manifest came from the internal mirror"
-                  containsGithubFallback = $log -match "trying github"
-                  containsError12152 = $log -match "12152"
-                }
-                Write-Log "Update check log captured"
-              } else {
-                $result.steps.updateCheck = @{ error = "Debug log not found at $logPath" }
-              }
-            }
-
-            $result.success = $true
-          }
-          catch {
-            $result.success = $false
-            $result.error = $_.ToString()
-            Write-Log "ERROR: $($_.Exception.Message)"
-          }
-
-          Write-Result $result
-          if ($result.success) { exit 0 } else { exit 1 }
-          '@
-
-          $scriptPath = "$env:GITHUB_WORKSPACE/test-maxcall.ps1"
-          Set-Content -Path $scriptPath -Value $script -Encoding utf8
-          Write-Host "Test script written to $scriptPath"
-
-      - name: Run test
-        id: test
-        shell: powershell
-        run: |
-          powershell.exe -ExecutionPolicy Bypass -File "$env:GITHUB_WORKSPACE/test-maxcall.ps1" -Channel "${{ github.event.inputs.channel }}" -Action "${{ github.event.inputs.action }}"
+          powershell.exe -ExecutionPolicy Bypass -File "$env:GITHUB_WORKSPACE\.github\workflows\test-update.ps1" -Channel "${{ github.event.inputs.channel }}" -Action full
         continue-on-error: true
 
-      - name: Upload result
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-result-${{ github.event.inputs.channel }}-${{ github.event.inputs.action }}
-          path: test-result.json
-          retention-days: 7
-
-      - name: Show result summary
+      - name: Result
         shell: powershell
         run: |
-          if (Test-Path "test-result.json") {
-            $r = Get-Content test-result.json -Raw | ConvertFrom-Json
-            Write-Host "## Test Result"
-            Write-Host "**Channel:** $($r.channel)  **Action:** $($r.action)  **Success:** $($r.success)"
-            if ($r.error) { Write-Host "**Error:** $($r.error)" }
-            if ($r.steps) {
-              $r.steps.PSObject.Properties | ForEach-Object {
-                Write-Host "  **$($_.Name):** $($_.Value | ConvertTo-Json -Depth 3)"
-              }
-            }
-          }
+          if (Test-Path "$env:GITHUB_WORKSPACE\test-result.json") {
+            $r = Get-Content "$env:GITHUB_WORKSPACE\test-result.json" -Raw | ConvertFrom-Json
+            "### Result: $($r.success)" | Out-File -Append $env:GITHUB_STEP_SUMMARY
+            "channel: $($r.channel) | mirror-first: $($r.steps.updateCheck.fromMirror) | 12152: $($r.steps.updateCheck.tlsError)" | Out-File -Append $env:GITHUB_STEP_SUMMARY
+            if ($r.error) { "error: $($r.error)" | Out-File -Append $env:GITHUB_STEP_SUMMARY }
+            $r.steps.PSObject.Properties | ForEach-Object { "  $($_.Name): $($_.Value | ConvertTo-Json -Depth 4 -Compress)" }
+          } else { "no result file" }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: update-test-${{ github.event.inputs.channel }}
+          path: test-result.json
+          if-no-files-found: warn
+          retention-days: 14
