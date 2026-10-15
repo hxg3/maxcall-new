@@ -70,8 +70,26 @@ try {
 
   # --- 5. the new build must come up and reach the server without TLS errors ---
   Log "starting the updated build"
-  $logPath = Join-Path $MaxCallDir "maxcall_update_test.log"
+
+  # The real log has to go first. Reading it without deleting it reports whatever
+  # an earlier run left behind, which is how a stale log gets mistaken for a
+  # current result.
+  $logPath = Join-Path $MaxCallDir "maxcall_debug.log"
   if (Test-Path $logPath) { Remove-Item $logPath -Force }
+
+  # Point the installed copy at the channel under test, otherwise it checks the
+  # stable manifest and the beta result is never exercised.
+  $iniPath = [System.IO.Path]::ChangeExtension($targetExe, ".ini")
+  if (Test-Path $iniPath) {
+    $ini = Get-Content $iniPath -Raw
+    $ini = [regex]::Replace($ini, '(?m)^updateChannel=.*$', "updateChannel=$(if ($Channel -eq 'beta') { 1 } else { 0 })")
+    $ini = [regex]::Replace($ini, '(?m)^enableLog=.*$', "enableLog=1")
+    Set-Content -Path $iniPath -Value $ini -Encoding UTF8
+    Log "set updateChannel in $([System.IO.Path]::GetFileName($iniPath))"
+  } else {
+    Log "no INI beside the executable: $iniPath"
+  }
+
   $app = Start-Process -FilePath $targetExe -PassThru
   Start-Sleep -Seconds 40
   if (-not $app.HasExited) { $app.Kill() } else { $app.WaitForExit() }
@@ -86,6 +104,7 @@ try {
       fellBack     = [bool]($txt -match "did not answer; trying github")
       tlsError     = [bool]($txt -match "12152")
       mirrorSwap   = [bool]($txt -match "mirror mode: payload from")
+      oldCodeAbsent = -not ($txt -match "github.com unreachable, falling back")
       lines        = @($upd)
     }
     Log ("mirror-first: {0} | github fallback: {1} | 12152: {2}" -f `
