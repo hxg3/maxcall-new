@@ -848,9 +848,10 @@ bool VerifySignature(const CByteArray& data, const CByteArray& signature)
 {
 	if (data.GetSize() <= 0
 		|| signature.GetSize() != (int)(MAXCALL_UPDATE_KEY_BITS / 8)) {
-		HttpDiag(_T("signature rejected before hashing: manifest ") + CString((int)data.GetSize())
-			+ _T(" bytes, signature ") + CString((int)signature.GetSize())
-			+ _T(" bytes, expected ") + CString((int)(MAXCALL_UPDATE_KEY_BITS / 8)));
+		CString sizes;
+		sizes.Format(_T("signature rejected before hashing: manifest %d bytes, signature %d bytes, expected %d"),
+			data.GetSize(), signature.GetSize(), (int)(MAXCALL_UPDATE_KEY_BITS / 8));
+		HttpDiag(sizes);
 		return false;
 	}
 
@@ -867,8 +868,9 @@ bool VerifySignature(const CByteArray& data, const CByteArray& signature)
 	{
 		CString head;
 		head.Format(_T("%02x%02x%02x%02x"), digest[0], digest[1], digest[2], digest[3]);
-		HttpDiag(_T("signature check on ") + CString((int)data.GetSize())
-			+ _T(" manifest bytes, digest starts ") + head);
+		CString line;
+		line.Format(_T("signature check on %d manifest bytes, digest starts %s"), data.GetSize(), head);
+		HttpDiag(line);
 	}
 
 	NTSTATUS st = BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_RSA_ALGORITHM, NULL, 0);
