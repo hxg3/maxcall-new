@@ -6,10 +6,6 @@ jobs:
     steps:
       - shell: powershell
         run: |
-          "winhttp:"; netsh winhttp show proxy
-          "IE/user proxy:"
-          Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' |
-            Select-Object ProxyEnable,ProxyServer,ProxyOverride,AutoConfigURL | Format-List
-          "resolve maxcall.local:"; try { (Resolve-DnsName maxcall.local -ErrorAction Stop | Select-Object Name,IPAddress | Out-String) } catch { "dns failed: $_" }
-          "direct fetch:"; try { (Invoke-WebRequest http://maxcall.local:3001/updates/update.json -UseBasicParsing -TimeoutSec 10).StatusCode } catch { "failed: $_" }
-          "no-proxy fetch:"; try { (Invoke-WebRequest http://maxcall.local:3001/updates/update.json -UseBasicParsing -Proxy $null -TimeoutSec 10).StatusCode } catch { "failed: $_" }
+          "by IPv4 literal:"; try { (Invoke-WebRequest http://192.168.1.32:3001/updates/update.json -UseBasicParsing -TimeoutSec 10).StatusCode } catch { "failed: $_" }
+          "by hostname:";    try { (Invoke-WebRequest http://maxcall.local:3001/updates/update.json -UseBasicParsing -TimeoutSec 10).StatusCode } catch { "failed: $_" }
+          "hostname v4 only:"; try { [System.Net.Dns]::GetHostAddresses('maxcall.local') | ForEach-Object { $_.ToString() } } catch { "dns failed: $_" }
