@@ -892,8 +892,12 @@ bool VerifySignature(const CByteArray& data, const CByteArray& signature)
 
 		// BCryptVerifySignature returns STATUS_SUCCESS (0) when the signature is
 		// good. Anything non-zero means the payload was tampered with.
+		// The descriptor names the hash and the flag names the padding. Windows
+		// only accepted the call when both were supplied; with dwFlags left at
+		// zero this exact key and signature were refused as invalid parameters,
+		// while the platform's own managed RSA passed the very same triple.
 		st = BCryptVerifySignature(hKey, &padding, digest, sizeof(digest),
-			(PUCHAR)signature.GetData(), (ULONG)signature.GetSize(), 0);
+			(PUCHAR)signature.GetData(), (ULONG)signature.GetSize(), BCRYPT_PAD_PKCS1);
 		if (st != 0) {
 			CString m; m.Format(_T("signature rejected: verify failed (0x%08x)"), (DWORD)st);
 			HttpDiag(m);
