@@ -1,0 +1,15 @@
+name: Probe net
+on: workflow_dispatch
+jobs:
+  p:
+    runs-on: [self-hosted, Windows, X64]
+    steps:
+      - shell: powershell
+        run: |
+          "winhttp:"; netsh winhttp show proxy
+          "IE/user proxy:"
+          Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' |
+            Select-Object ProxyEnable,ProxyServer,ProxyOverride,AutoConfigURL | Format-List
+          "resolve maxcall.local:"; try { (Resolve-DnsName maxcall.local -ErrorAction Stop | Select-Object Name,IPAddress | Out-String) } catch { "dns failed: $_" }
+          "direct fetch:"; try { (Invoke-WebRequest http://maxcall.local:3001/updates/update.json -UseBasicParsing -TimeoutSec 10).StatusCode } catch { "failed: $_" }
+          "no-proxy fetch:"; try { (Invoke-WebRequest http://maxcall.local:3001/updates/update.json -UseBasicParsing -Proxy $null -TimeoutSec 10).StatusCode } catch { "failed: $_" }
