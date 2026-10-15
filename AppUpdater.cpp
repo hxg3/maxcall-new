@@ -891,6 +891,16 @@ bool VerifySignature(const CByteArray& data, const CByteArray& signature)
 	{
 		BCRYPT_PKCS1_PADDING_INFO padding;
 		padding.pszAlgId = BCRYPT_SHA256_ALGORITHM;
+
+		CString probe;
+		ULONG keyBits = 0;
+		NTSTATUS propSt = BCryptGetProperty(hKey, BCRYPT_KEY_LENGTH, (PUCHAR)&keyBits,
+			sizeof(keyBits), NULL, 0);
+		probe.Format(_T("probe: keyBits=%u (0x%08x), padAlg=%s, hashBytes=%u, sigBytes=%u"),
+			keyBits, (DWORD)propSt, CString(padding.pszAlgId).GetBuffer(16),
+			(ULONG)sizeof(digest), (ULONG)signature.GetSize());
+		HttpDiag(probe);
+
 		// BCryptVerifySignature returns STATUS_SUCCESS (0) when the signature is
 		// good. Anything non-zero means the payload was tampered with.
 		// Argument order is (hKey, pPaddingInfo, pbHashValue, cbHashValue,
@@ -901,6 +911,20 @@ bool VerifySignature(const CByteArray& data, const CByteArray& signature)
 		if (st != 0) {
 			CString m; m.Format(_T("signature rejected: verify failed (0x%08x)"), (DWORD)st);
 			HttpDiag(m);
+
+			// Retry with the hash provider held open. Some providers reject the
+			// padding info unless the hash algorithm they name is loaded.
+			BCRYPT_ALG_HANDLE hHashAlg = NULL;
+			if (BCryptOpenAlgorithmProvider(&hHashAlg, BCRYPT_SHA256_ALGORITHM, NULL, 0) == 0) {
+				NTSTATUS retry = BCryptVerifySignature(hKey, &padding, digest, sizeof(digest),
+					(PUCHAR)signature.GetData(), (ULONG)signature.GetSize(), 0);
+				CString r; r.Format(_T("probe: retry with the hash provider open gave 0x%08x"), (DWORD)retry);
+				HttpDiag(r);
+				if (retry == 0) {
+					ok = true;
+				}
+				BCryptCloseAlgorithmProvider(hHashAlg, 0);
+			}
 			goto done;
 		}
 	}
