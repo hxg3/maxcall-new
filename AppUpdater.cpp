@@ -848,11 +848,15 @@ bool VerifySignature(const CByteArray& data, const CByteArray& signature)
 {
 	if (data.GetSize() <= 0
 		|| signature.GetSize() != (int)(MAXCALL_UPDATE_KEY_BITS / 8)) {
+		HttpDiag(_T("signature rejected before hashing: manifest ") + CString((int)data.GetSize())
+			+ _T(" bytes, signature ") + CString((int)signature.GetSize())
+			+ _T(" bytes, expected ") + CString((int)(MAXCALL_UPDATE_KEY_BITS / 8)));
 		return false;
 	}
 
 	unsigned char digest[32];
 	if (!Sha256Digest((const unsigned char*)data.GetData(), (DWORD)data.GetSize(), digest)) {
+		HttpDiag(_T("signature rejected: the digest could not be computed"));
 		return false;
 	}
 
@@ -860,11 +864,28 @@ bool VerifySignature(const CByteArray& data, const CByteArray& signature)
 	BCRYPT_KEY_HANDLE hKey = NULL;
 	bool ok = false;
 
-	if (BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_RSA_ALGORITHM, NULL, 0) != 0) goto done;
-	if (BCryptImportKeyPair(hAlg, NULL, BCRYPT_RSAPUBLIC_BLOB, &hKey,
-		(const PUCHAR)g_maxcallUpdatePublicKey, (ULONG)sizeof(g_maxcallUpdatePublicKey), 0) != 0) {
+	{
+		CString head;
+		head.Format(_T("%02x%02x%02x%02x"), digest[0], digest[1], digest[2], digest[3]);
+		HttpDiag(_T("signature check on ") + CString((int)data.GetSize())
+			+ _T(" manifest bytes, digest starts ") + head);
+	}
+
+	NTSTATUS st = BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_RSA_ALGORITHM, NULL, 0);
+	if (st != 0) {
+		CString m; m.Format(_T("signature rejected: cannot open the rsa provider (0x%08x)"), (DWORD)st);
+		HttpDiag(m);
 		goto done;
 	}
+
+	st = BCryptImportKeyPair(hAlg, NULL, BCRYPT_RSAPUBLIC_BLOB, &hKey,
+		(const PUCHAR)g_maxcallUpdatePublicKey, (ULONG)sizeof(g_maxcallUpdatePublicKey), 0);
+	if (st != 0) {
+		CString m; m.Format(_T("signature rejected: the public key was refused (0x%08x)"), (DWORD)st);
+		HttpDiag(m);
+		goto done;
+	}
+
 	{
 		BCRYPT_PKCS1_PADDING_INFO padding;
 		padding.pszAlgId = BCRYPT_SHA256_ALGORITHM;
@@ -873,11 +894,15 @@ bool VerifySignature(const CByteArray& data, const CByteArray& signature)
 		// Argument order is (hKey, pPaddingInfo, pbHashValue, cbHashValue,
 		// pbSignature, cbSignature, dwFlags) - the padding info is second and
 		// dwFlags comes last.
-		if (BCryptVerifySignature(hKey, &padding, digest, sizeof(digest),
-			(PUCHAR)signature.GetData(), (ULONG)signature.GetSize(), 0) != 0) {
+		st = BCryptVerifySignature(hKey, &padding, digest, sizeof(digest),
+			(PUCHAR)signature.GetData(), (ULONG)signature.GetSize(), 0);
+		if (st != 0) {
+			CString m; m.Format(_T("signature rejected: verify failed (0x%08x)"), (DWORD)st);
+			HttpDiag(m);
 			goto done;
 		}
 	}
+	HttpDiag(_T("manifest signature verified"));
 	ok = true;
 
 done:
