@@ -107,7 +107,7 @@ try {
   }
   if (Test-Path $realLog) {
     $txt = Get-Content $realLog -Raw
-    $upd = ($txt -split "`r?`n") | Where-Object { $_ -match "\[update\]" }
+    $upd = @(($txt -split "`r?`n") | Where-Object { $_ -match "\[update\]" } | ForEach-Object { "$_" })
     $r.steps.updateCheck = @{
       fromMirror   = [bool]($txt -match "the manifest came from the internal mirror")
       fellBack     = [bool]($txt -match "did not answer; trying github")
@@ -116,7 +116,7 @@ try {
       oldCodeAbsent = -not ($txt -match "github.com unreachable, falling back")
       lines        = @($upd)
       logSize      = (Get-Item $realLog).Length
-      logHead      = @((Get-Content $realLog -TotalCount 25))
+      logHead      = @((Get-Content $realLog -TotalCount 25) | ForEach-Object { "$_" })
     }
     Log ("mirror-first: {0} | github fallback: {1} | 12152: {2}" -f `
          $r.steps.updateCheck.fromMirror, $r.steps.updateCheck.fellBack, $r.steps.updateCheck.tlsError)
