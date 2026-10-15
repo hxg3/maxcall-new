@@ -90,12 +90,19 @@ try {
     Log "no INI beside the executable: $iniPath"
   }
 
-  $app = Start-Process -FilePath $targetExe -PassThru
+  # The app opens its log with a relative path, so it lands in whatever the
+  # working directory is. Without this the log is written under the runner's
+  # workspace and the test looks in the wrong place.
+  $app = Start-Process -FilePath $targetExe -WorkingDirectory $MaxCallDir -PassThru
   Start-Sleep -Seconds 40
   if (-not $app.HasExited) { $app.Kill() } else { $app.WaitForExit() }
   Start-Sleep -Seconds 2
 
   $realLog = Join-Path $MaxCallDir "maxcall_debug.log"
+  if (-not (Test-Path $realLog)) {
+    $found = Get-ChildItem $env:GITHUB_WORKSPACE -Filter "maxcall_debug.log" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($found) { Log "log landed in the workspace: $($found.FullName)" }
+  }
   if (Test-Path $realLog) {
     $txt = Get-Content $realLog -Raw
     $upd = ($txt -split "`r?`n") | Where-Object { $_ -match "\[update\]" }
