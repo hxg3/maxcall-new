@@ -35,8 +35,11 @@ jobs:
           "manifest bytes from server: $($msgs.Length)"
           $sig = [Convert]::FromBase64String($sigTxt.Trim())
           $rsa = [System.Security.Cryptography.RSA]::Create()
-          $rsa.ImportParameters((New-Object System.Security.Cryptography.RSAParameters(
-              ([byte[]]($expTrim[($expTrim.Length-1)..0])), ([byte[]]($modTrim)))))
+          $expBE = [byte[]]($expTrim[($expTrim.Length-1)..0])
+          $params = New-Object System.Security.Cryptography.RSAParameters
+          $params.Modulus = $modTrim
+          $params.Exponent = $expBE
+          $rsa.ImportParameters($params)
           "key loaded by .NET: $($rsa.KeySize) bits"
           $ok = $rsa.VerifyData($msgs, $sig, [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
           ".NET VerifyData: $ok"
