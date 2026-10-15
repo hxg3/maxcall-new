@@ -376,8 +376,14 @@ static bool SplitUrl(const CString& url, CString& scheme, CString& host,
 	}
 	scheme = url.Left(schemeEnd);
 	scheme.MakeLower();
-	if (scheme != _T("https")) {
+	// The internal mirror is plain HTTP. Rejecting it here made the request fail
+	// before the try block, so nothing was logged and the mirror simply looked
+	// like a host that never answered.
+	if (scheme != _T("https") && scheme != _T("http")) {
 		return false;
+	}
+	if (scheme == _T("http")) {
+		port = INTERNET_DEFAULT_HTTP_PORT;
 	}
 
 	CString rest = url.Mid(schemeEnd + 3);
