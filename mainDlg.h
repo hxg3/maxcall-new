@@ -289,6 +289,7 @@ public:
 	afx_msg void OnMenuUpdateChannel(UINT nID);
 	afx_msg LRESULT OnUpdateEvent(WPARAM wParam, LPARAM lParam);
 	void ScheduleUpdateCheck();
+	void ApplyPreflight(const AppUpdate::SPreflight& pre);
 
 	AppUpdate::SManifest m_updateManifest;
 	AppUpdate::SProgress m_updateProgress;

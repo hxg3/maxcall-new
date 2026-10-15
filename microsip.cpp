@@ -325,6 +325,12 @@ BOOL CmicrosipApp::InitInstance()
 	// Register this class so that MFC can use it.
 	if (!::AfxRegisterClass(&wc)) return FALSE;
 
+	// Ask for a newer build before the login screen appears. The main dialog is
+	// only created after a successful login, so waiting until then meant a
+	// machine that could not register never saw the update at all.
+	AppUpdate::StartPreflight(accountSettings.updateChannel == 1
+		? AppUpdate::ChannelBeta : AppUpdate::ChannelStable);
+
 	// MaxCall Login Dialog
 	if (lstrcmp(theApp.m_lpCmdLine, _T("/minimized")) != 0
 		&& lstrcmp(theApp.m_lpCmdLine, _T("/hidden")) != 0

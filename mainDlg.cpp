@@ -1914,10 +1914,8 @@ BOOL CmainDlg::OnInitDialog()
 {
 	CBaseDialog::OnInitDialog();
 
-	// Check for a newer build as soon as the app is up. This used to hang off the
-	// SIP stack, which meant a machine that failed to register never checked at
-	// all, and the update stayed invisible exactly where it is most wanted. The
-	// channel still comes from accountSettings.updateChannel.
+	// Collect the check that started with the application. It has had the whole
+	// login screen to finish, so the banner can appear the moment the shell does.
 	ScheduleUpdateCheck();
 
 	// Extract embedded audio resources (ringtone.wav and ringing.wav) independently
@@ -2889,7 +2887,12 @@ void CmainDlg::OnTimer(UINT_PTR TimerVal)
 	}
 	else if (TimerVal == IDT_TIMER_UPDATE) {
 		KillTimer(IDT_TIMER_UPDATE);
-		CheckForUpdates(false);
+		AppUpdate::SPreflight pre;
+		if (AppUpdate::Preflight(pre) && pre.reached) {
+			ApplyPreflight(pre);
+		} else {
+			CheckForUpdates(false);
+		}
 	}
 	else if (TimerVal == IDT_TIMER_FORWARDING) {
 		KillTimer(IDT_TIMER_FORWARDING);
@@ -5697,16 +5700,47 @@ static DWORD WINAPI UpdateCheckThread(LPVOID lpData)
 
 void CmainDlg::ScheduleUpdateCheck()
 {
-	// One check shortly after launch: the client compares its own version with
-	// the one the internal mirror reports and shows the update banner when a
-	// newer build exists. There is deliberately no repeating timer — a periodic
-	// background check only produced noise and no extra value.
+	// Adopt the start-up check if it has finished, otherwise wait for it. Only if
+	// no preflight is running at all does this fall back to running its own, so
+	// the update still surfaces when the application was started in a mode that
+	// skipped the preflight.
 	static bool scheduled = false;
 	if (scheduled) {
 		return;
 	}
 	scheduled = true;
-	SetTimer(IDT_TIMER_UPDATE, 15000, NULL);
+
+	AppUpdate::SPreflight pre;
+	if (AppUpdate::Preflight(pre)) {
+		if (pre.reached) {
+			ApplyPreflight(pre);
+			return;
+		}
+	}
+
+	SetTimer(IDT_TIMER_UPDATE, 1500, NULL);
+}
+
+void CmainDlg::ApplyPreflight(const AppUpdate::SPreflight& pre)
+{
+	m_updateBusy = false;
+	m_updateDismissed = false;
+	m_updatePercent = 0;
+	m_updateMessage.Empty();
+	if (!pre.reached) {
+		// A silent background failure is not worth a dialog on the way in.
+		m_updateState = AppUpdate::StateNone;
+		PushUpdateStateToShell();
+		return;
+	}
+	if (pre.newer) {
+		m_updateManifest = pre.manifest;
+		m_updateState = AppUpdate::StateAvailable;
+		m_updateMessage = pre.manifest.notes;
+	} else {
+		m_updateState = AppUpdate::StateNone;
+	}
+	PushUpdateStateToShell();
 }
 
 void CmainDlg::CheckForUpdates(bool manual)

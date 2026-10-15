@@ -143,6 +143,21 @@ bool VerifySignature(const CByteArray& data, const CByteArray& signature);
 // Fetches, verifies and parses the signed manifest for the given channel.
 bool FetchManifest(EUpdateChannel channel, SManifest& manifest, CString& error);
 
+// Check that runs during start-up, before the login screen exists, so a client
+// learns about a newer build without first having to register. The result is
+// kept here and picked up by the main dialog once it is created.
+struct SPreflight
+{
+	bool finished;
+	bool reached;
+	bool newer;
+	SManifest manifest;
+	CString error;
+};
+
+void StartPreflight(EUpdateChannel channel);
+bool Preflight(SPreflight& out);
+
 // --- apply stage -----------------------------------------------------------
 
 // True when this process was started as the update payload (MaxCall.exe --apply).

@@ -855,6 +855,60 @@ done:
 }
 
 // ---------------------------------------------------------------------------
+// Start-up preflight
+//
+// The main dialog is only created after the login screen is dismissed, so a
+// check started from there could not run until the user had signed in. This one
+// starts with the application instead and the main dialog collects the outcome
+// when it appears. A client that cannot register still learns about the update.
+// ---------------------------------------------------------------------------
+namespace {
+
+CCriticalSection g_preflightLock;
+SPreflight g_preflight = { false, false, false, SManifest(), CString() };
+
+DWORD WINAPI PreflightThread(LPVOID lpData)
+{
+	EUpdateChannel channel = (EUpdateChannel)(ULONG_PTR)lpData;
+
+	SManifest manifest;
+	CString error;
+	const bool ok = FetchManifest(channel, manifest, error);
+	const bool newer = ok && IsNewer(manifest.version, CString(_T(_GLOBAL_VERSION)));
+
+	CCriticalSection lock;
+	lock.Lock();
+	g_preflight.finished = true;
+	g_preflight.reached = ok;
+	g_preflight.newer = newer;
+	if (ok) {
+		g_preflight.manifest = manifest;
+	}
+	g_preflight.error = ok ? CString() : error;
+	lock.Unlock();
+	return 0;
+}
+
+} // namespace
+
+void StartPreflight(EUpdateChannel channel)
+{
+	HANDLE h = CreateThread(NULL, 0, PreflightThread, (LPVOID)(ULONG_PTR)channel, 0, NULL);
+	if (h) {
+		CloseHandle(h);
+	}
+}
+
+bool Preflight(SPreflight& out)
+{
+	CCriticalSection lock;
+	lock.Lock();
+	out = g_preflight;
+	lock.Unlock();
+	return out.finished;
+}
+
+// ---------------------------------------------------------------------------
 // Manifest
 // ---------------------------------------------------------------------------
 
