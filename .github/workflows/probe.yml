@@ -14,7 +14,7 @@ jobs:
           $bytes = [byte[]]([regex]::Matches($body,'0x([0-9A-Fa-f]{2})') | ForEach-Object { [Convert]::ToByte($_.Groups[1].Value,16) })
           "blob bytes: $($bytes.Length)"
           $cbExp = [BitConverter]::ToUInt32($bytes,8); $cbMod = [BitConverter]::ToUInt32($bytes,12)
-          "cbExp=$cbExp cbMod=$cbMod"
+          "cbExp=$cbExp cbMod=$cbMod exponent=$(($expBE | ForEach-Object { $_.ToString('x2') }) -join '')"
           $expOff = 24
           $expLE = $bytes[$expOff..($expOff+$cbExp-1)]
           $modLE = $bytes[($expOff+$cbExp)..($expOff+$cbExp+$cbMod-1)]
@@ -36,7 +36,8 @@ jobs:
           "signature bytes            : $($sig.Length)"
           "manifest bytes from server: $($msgs.Length)"
           $rsa = [System.Security.Cryptography.RSA]::Create()
-          $expBE = [byte[]]($expTrim[($expTrim.Length-1)..0])
+          # 65537 is 0x010001; stripping zeros would turn the palindrome into 257.
+          $expBE = [byte[]]($expLE[($expLE.Length-1)..0])
           $params = New-Object System.Security.Cryptography.RSAParameters
           $params.Modulus = $modTrim
           $params.Exponent = $expBE
