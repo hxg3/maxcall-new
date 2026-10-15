@@ -868,16 +868,24 @@ struct SCryptoApi
 	SCryptoApi()
 	{
 		memset(this, 0, sizeof(*this));
+		// The provider and key lifetime calls are in advapi32, while key import
+		// and signature verification live in crypt32. Looking for them all in one
+		// module is why CryptImportKeyA never resolved.
 		HMODULE advapi = GetModuleHandle(_T("advapi32.dll"));
 		if (!advapi) advapi = LoadLibrary(_T("advapi32.dll"));
-		if (!advapi) return;
-		acquireContext = (PFN_AcquireContext)GetProcAddress(advapi, "CryptAcquireContextA");
-		importKey = (PFN_ImportKey)GetProcAddress(advapi, "CryptImportKeyA");
-		verifySignature = (PFN_VerifySignature)GetProcAddress(advapi, "CryptVerifySignatureA");
-		// These two have no A/W variants; they are the only cryptoapi entry points
-		// exported without a suffix.
-		destroyKey = (PFN_DestroyKey)GetProcAddress(advapi, "CryptDestroyKey");
-		releaseContext = (PFN_ReleaseContext)GetProcAddress(advapi, "CryptReleaseContext");
+		HMODULE crypt32 = GetModuleHandle(_T("crypt32.dll"));
+		if (!crypt32) crypt32 = LoadLibrary(_T("crypt32.dll"));
+
+		if (advapi) {
+			acquireContext = (PFN_AcquireContext)GetProcAddress(advapi, "CryptAcquireContextA");
+			// These two have no A/W variants.
+			destroyKey = (PFN_DestroyKey)GetProcAddress(advapi, "CryptDestroyKey");
+			releaseContext = (PFN_ReleaseContext)GetProcAddress(advapi, "CryptReleaseContext");
+		}
+		if (crypt32) {
+			importKey = (PFN_ImportKey)GetProcAddress(crypt32, "CryptImportKeyA");
+			verifySignature = (PFN_VerifySignature)GetProcAddress(crypt32, "CryptVerifySignatureA");
+		}
 	}
 
 	bool Ready() const
