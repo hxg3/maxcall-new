@@ -848,10 +848,7 @@ bool VerifySignature(const CByteArray& data, const CByteArray& signature)
 {
 	if (data.GetSize() <= 0
 		|| signature.GetSize() != (int)(MAXCALL_UPDATE_KEY_BITS / 8)) {
-		CString sizes;
-		sizes.Format(_T("signature rejected before hashing: manifest %d bytes, signature %d bytes, expected %d"),
-			data.GetSize(), signature.GetSize(), (int)(MAXCALL_UPDATE_KEY_BITS / 8));
-		HttpDiag(sizes);
+		HttpDiag(_T("signature rejected: the manifest or the signature has the wrong length"));
 		return false;
 	}
 
@@ -865,12 +862,20 @@ bool VerifySignature(const CByteArray& data, const CByteArray& signature)
 	BCRYPT_KEY_HANDLE hKey = NULL;
 	bool ok = false;
 
-	{
-		CString head;
-		head.Format(_T("%02x%02x%02x%02x"), digest[0], digest[1], digest[2], digest[3]);
-		CString line;
-		line.Format(_T("signature check on %d manifest bytes, digest starts %s"), data.GetSize(), head);
-		HttpDiag(line);
+	// The key blob carries its own exponent and modulus lengths, so they are read
+	// from the blob rather than assumed. Taking cbPublicExp from a constant made
+	// three bogus bytes turn the exponent into 257, the import quietly produced
+	// an unusable key, and every manifest was refused.
+	const unsigned char* blob = g_maxcallUpdatePublicKey;
+	ULONG cbExp = 0, cbMod = 0;
+	CopyMemory(&cbExp, blob + 8, sizeof(cbExp));
+	CopyMemory(&cbMod, blob + 12, sizeof(cbMod));
+
+	if (cbExp == 0 || cbExp > 8
+		|| cbMod != (ULONG)(MAXCALL_UPDATE_KEY_BITS / 8)
+		|| (ULONG)sizeof(g_maxcallUpdatePublicKey) < 24 + cbExp + cbMod) {
+		HttpDiag(_T("signature rejected: the embedded public key is malformed"));
+		return false;
 	}
 
 	NTSTATUS st = BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_RSA_ALGORITHM, NULL, 0);
@@ -881,7 +886,7 @@ bool VerifySignature(const CByteArray& data, const CByteArray& signature)
 	}
 
 	st = BCryptImportKeyPair(hAlg, NULL, BCRYPT_RSAPUBLIC_BLOB, &hKey,
-		(const PUCHAR)g_maxcallUpdatePublicKey, (ULONG)sizeof(g_maxcallUpdatePublicKey), 0);
+		(PUCHAR)g_maxcallUpdatePublicKey, (ULONG)sizeof(g_maxcallUpdatePublicKey), 0);
 	if (st != 0) {
 		CString m; m.Format(_T("signature rejected: the public key was refused (0x%08x)"), (DWORD)st);
 		HttpDiag(m);
@@ -892,47 +897,13 @@ bool VerifySignature(const CByteArray& data, const CByteArray& signature)
 		BCRYPT_PKCS1_PADDING_INFO padding;
 		padding.pszAlgId = BCRYPT_SHA256_ALGORITHM;
 
-		CString probe;
-		probe.Format(_T("probe: hAlg=%p hKey=%p blob=%u bytes, padAlg=%s, hash=%u, sig=%u"),
-			hAlg, hKey, (UINT)sizeof(g_maxcallUpdatePublicKey), padding.pszAlgId,
-			(ULONG)sizeof(digest), (ULONG)signature.GetSize());
-		HttpDiag(probe);
-
 		// BCryptVerifySignature returns STATUS_SUCCESS (0) when the signature is
 		// good. Anything non-zero means the payload was tampered with.
-		// Argument order is (hKey, pPaddingInfo, pbHashValue, cbHashValue,
-		// pbSignature, cbSignature, dwFlags) - the padding info is second and
-		// dwFlags comes last.
 		st = BCryptVerifySignature(hKey, &padding, digest, sizeof(digest),
 			(PUCHAR)signature.GetData(), (ULONG)signature.GetSize(), 0);
 		if (st != 0) {
 			CString m; m.Format(_T("signature rejected: verify failed (0x%08x)"), (DWORD)st);
 			HttpDiag(m);
-
-			// Retry with the hash provider held open. Some providers reject the
-			// padding info unless the hash algorithm they name is loaded.
-			BCRYPT_ALG_HANDLE hHashAlg = NULL;
-			if (BCryptOpenAlgorithmProvider(&hHashAlg, BCRYPT_SHA256_ALGORITHM, NULL, 0) == 0) {
-				NTSTATUS retry = BCryptVerifySignature(hKey, &padding, digest, sizeof(digest),
-					(PUCHAR)signature.GetData(), (ULONG)signature.GetSize(), 0);
-				CString r; r.Format(_T("probe: retry with the hash provider open gave 0x%08x"), (DWORD)retry);
-				HttpDiag(r);
-				if (retry == 0) {
-					ok = true;
-				}
-				BCryptCloseAlgorithmProvider(hHashAlg, 0);
-			}
-
-			// Some builds of Windows accept the padding as a flag instead of a
-			// descriptor. Try that before giving up on the signature.
-			NTSTATUS flagged = BCryptVerifySignature(hKey, NULL, digest, sizeof(digest),
-				(PUCHAR)signature.GetData(), (ULONG)signature.GetSize(),
-				BCRYPT_PAD_PKCS1);
-			CString f; f.Format(_T("probe: BCRYPT_PAD_PKCS1 form gave 0x%08x"), (DWORD)flagged);
-			HttpDiag(f);
-			if (flagged == 0) {
-				ok = true;
-			}
 			goto done;
 		}
 	}
