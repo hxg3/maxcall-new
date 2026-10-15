@@ -45,6 +45,7 @@ try {
   $got = Sha256Of $payload
   $ok = ($got -eq $m.sha256.ToLower())
   $r.steps.payload = @{ bytes = (Get-Item $payload).Length; sha256Match = $ok }
+  $r.steps.installedVersion = $m.version
   if (-not $ok) { throw "payload sha256 mismatch" }
   Log "sha256 MATCH"
 
@@ -94,6 +95,7 @@ try {
   # working directory is. Without this the log is written under the runner's
   # workspace and the test looks in the wrong place.
   $app = Start-Process -FilePath $targetExe -WorkingDirectory $MaxCallDir -PassThru
+  Log "launched, waiting 40s"
   Start-Sleep -Seconds 40
   if (-not $app.HasExited) { $app.Kill() } else { $app.WaitForExit() }
   Start-Sleep -Seconds 2
@@ -113,6 +115,8 @@ try {
       mirrorSwap   = [bool]($txt -match "mirror mode: payload from")
       oldCodeAbsent = -not ($txt -match "github.com unreachable, falling back")
       lines        = @($upd)
+      logSize      = (Get-Item $realLog).Length
+      logHead      = @((Get-Content $realLog -TotalCount 25))
     }
     Log ("mirror-first: {0} | github fallback: {1} | 12152: {2}" -f `
          $r.steps.updateCheck.fromMirror, $r.steps.updateCheck.fellBack, $r.steps.updateCheck.tlsError)
