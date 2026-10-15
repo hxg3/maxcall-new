@@ -167,7 +167,7 @@ jobs:
         run: |
           $channel = "${{ github.event.inputs.channel }}"
           $action = "${{ github.event.inputs.action }}"
-          & "$env:GITHUB_WORKSPACE/test-maxcall.ps1" -Channel $channel -Action $action
+          powershell.exe -ExecutionPolicy Bypass -File "$env:GITHUB_WORKSPACE/test-maxcall.ps1" -Channel $channel -Action $action
         continue-on-error: true
 
       - name: Upload result
