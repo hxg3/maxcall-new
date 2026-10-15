@@ -904,8 +904,27 @@ bool VerifySignature(const CByteArray& data, const CByteArray& signature)
 		if (st != 0) {
 			CString m; m.Format(_T("signature rejected: verify failed (0x%08x)"), (DWORD)st);
 			HttpDiag(m);
+			{
+				CString h;
+				h.Format(_T("sig head %02x%02x%02x%02x%02x%02x%02x%02x, digest %02x%02x%02x%02x"),
+					((const unsigned char*)signature.GetData())[0], ((const unsigned char*)signature.GetData())[1],
+					((const unsigned char*)signature.GetData())[2], ((const unsigned char*)signature.GetData())[3],
+					((const unsigned char*)signature.GetData())[4], ((const unsigned char*)signature.GetData())[5],
+					((const unsigned char*)signature.GetData())[6], ((const unsigned char*)signature.GetData())[7],
+					digest[0], digest[1], digest[2], digest[3]);
+				HttpDiag(h);
+			}
 			goto done;
 		}
+	}
+	{
+		CString sig;
+		sig.Format(_T("signature head %02x%02x%02x%02x%02x%02x%02x%02x"),
+			((const unsigned char*)signature.GetData())[0], ((const unsigned char*)signature.GetData())[1],
+			((const unsigned char*)signature.GetData())[2], ((const unsigned char*)signature.GetData())[3],
+			((const unsigned char*)signature.GetData())[4], ((const unsigned char*)signature.GetData())[5],
+			((const unsigned char*)signature.GetData())[6], ((const unsigned char*)signature.GetData())[7]);
+		HttpDiag(sig);
 	}
 	HttpDiag(_T("manifest signature verified"));
 	ok = true;
