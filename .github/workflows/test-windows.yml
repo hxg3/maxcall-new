@@ -29,10 +29,10 @@ jobs:
       MAXCALL_DIR: "C:\\maxcall"
       MIRROR_BASE: "http://maxcall.local:3001/updates"
     steps:
-      - name: Checkout (for scripts)
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Prepare test script
+      - name: Write test script
         shell: powershell
         run: |
           $script = @'
@@ -165,9 +165,7 @@ jobs:
         id: test
         shell: powershell
         run: |
-          $channel = "${{ github.event.inputs.channel }}"
-          $action = "${{ github.event.inputs.action }}"
-          powershell.exe -ExecutionPolicy Bypass -File "$env:GITHUB_WORKSPACE/test-maxcall.ps1" -Channel $channel -Action $action
+          powershell.exe -ExecutionPolicy Bypass -File "$env:GITHUB_WORKSPACE/test-maxcall.ps1" -Channel "${{ github.event.inputs.channel }}" -Action "${{ github.event.inputs.action }}"
         continue-on-error: true
 
       - name: Upload result
