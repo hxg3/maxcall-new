@@ -33,7 +33,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Prepare test script
-        shell: pwsh
+        shell: powershell
         run: |
           $script = @'
           param(
@@ -163,7 +163,7 @@ jobs:
 
       - name: Run test
         id: test
-        shell: pwsh
+        shell: powershell
         run: |
           $channel = "${{ github.event.inputs.channel }}"
           $action = "${{ github.event.inputs.action }}"
@@ -178,7 +178,7 @@ jobs:
           retention-days: 7
 
       - name: Show result summary
-        shell: pwsh
+        shell: powershell
         run: |
           if (Test-Path "test-result.json") {
             $r = Get-Content test-result.json -Raw | ConvertFrom-Json
