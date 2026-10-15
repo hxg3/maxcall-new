@@ -16,10 +16,10 @@ on:
         required: true
         default: "full"
         options:
-          - download    # download & verify only
-          - install     # download, verify, --apply
-          - check       # run app, trigger update check
-          - full        # install + check
+          - download
+          - install
+          - check
+          - full
 
 jobs:
   test-on-windows:
@@ -42,23 +42,23 @@ jobs:
             [string]$MaxCallDir = "C:\maxcall",
             [string]$MirrorBase = "http://maxcall.local:3001/updates"
           )
-          
+
           $ErrorActionPreference = "Stop"
           $ProgressPreference = "SilentlyContinue"
-          
+
           function Write-Log { param($msg) Write-Host "[$(Get-Date -Format 'HH:mm:ss')] $msg" }
           function Write-Result { param($obj) $obj | ConvertTo-Json -Depth 5 | Out-File -Encoding utf8 "$env:GITHUB_WORKSPACE/test-result.json" }
-          
+
           $exeName = if ($Channel -eq "beta") { "MaxCall-beta.exe" } else { "MaxCall.exe" }
           $manifestName = if ($Channel -eq "beta") { "update.json.beta" } else { "update.json" }
           $sigName = if ($Channel -eq "beta") { "update.json.beta.sig" } else { "update.json.sig" }
-          
+
           $manifestUrl = "$MirrorBase/$manifestName"
           $sigUrl = "$MirrorBase/$sigName"
           $exeUrl = "$MirrorBase/$exeName"
           $localExe = "$MaxCallDir\$exeName"
           $targetExe = "$MaxCallDir\MaxCall.exe"
-          
+
           $result = @{
             channel = $Channel
             action = $Action
@@ -67,7 +67,7 @@ jobs:
             success = $false
             error = $null
           }
-          
+
           try {
             # ---- STEP 1: Download manifest ----
             Write-Log "Downloading manifest: $manifestUrl"
@@ -81,28 +81,28 @@ jobs:
               httpStatus = $manifestResp.StatusCode
             }
             Write-Log "Manifest version: $($manifest.version)"
-            
+
             # ---- STEP 2: Download signature ----
             Write-Log "Downloading signature: $sigUrl"
             $sigResp = Invoke-WebRequest -Uri $sigUrl -UseBasicParsing -TimeoutSec 15
             $result.steps.signature = @{ httpStatus = $sigResp.StatusCode; length = $sigResp.Content.Length }
-            
+
             # ---- STEP 3: Download executable ----
             if ($Action -in @("download","install","full")) {
               Write-Log "Downloading executable: $exeUrl"
               $exeResp = Invoke-WebRequest -Uri $exeUrl -OutFile $localExe -UseBasicParsing -TimeoutSec 120
               $result.steps.download = @{ httpStatus = $exeResp.StatusCode; path = $localExe; bytes = (Get-Item $localExe).Length }
-              
+
               # ---- STEP 4: Verify SHA256 ----
               Write-Log "Verifying SHA256..."
               $sha = Get-FileHash -Algorithm SHA256 -Path $localExe
               $match = $sha.Hash -eq $manifest.sha256
               $result.steps.sha256 = @{ computed = $sha.Hash; expected = $manifest.sha256; match = $match }
               Write-Log "SHA256 $($match ? 'MATCH' : 'MISMATCH')"
-              
+
               if (-not $match) { throw "SHA256 mismatch" }
             }
-            
+
             # ---- STEP 5: Install (--apply) ----
             if ($Action -in @("install","full")) {
               Write-Log "Installing with --apply..."
@@ -110,37 +110,27 @@ jobs:
               $result.steps.install = @{ exitCode = $proc.ExitCode; success = ($proc.ExitCode -eq 0) }
               if ($proc.ExitCode -ne 0) { throw "Install failed with exit code $($proc.ExitCode)" }
               Write-Log "Install completed (exit $($proc.ExitCode))"
-              
-              # Small delay for app to restart
+
               Start-Sleep -Seconds 3
             }
-            
+
             # ---- STEP 6: Run app and check update ----
             if ($Action -in @("check","full")) {
               Write-Log "Starting MaxCall for update check..."
-              # Kill any existing instance
               Get-Process -Name "MaxCall" -ErrorAction SilentlyContinue | Stop-Process -Force
               Start-Sleep -Seconds 2
-              
-              # Launch with --check-updates flag (if supported) or just launch
-              # Note: MaxCall doesn't have --check-updates, so we launch and simulate tray click via UI automation
-              # For now, we'll use the HTTP API that the app exposes for update check
-              # Actually, the app checks on startup + timer. Let's launch, wait, then read log.
-              
+
               $logPath = "$MaxCallDir\maxcall_debug.log"
               if (Test-Path $logPath) { Remove-Item $logPath -Force }
-              
+
               $appProc = Start-Process -FilePath $targetExe -ArgumentList "" -PassThru
               Write-Log "MaxCall started (PID $($appProc.Id))"
-              
-              # Wait for startup + update check (30s)
+
               Start-Sleep -Seconds 30
-              
-              # Kill it
+
               $appProc | Stop-Process -Force
               Start-Sleep -Seconds 2
-              
-              # Read debug log
+
               if (Test-Path $logPath) {
                 $log = Get-Content $logPath -Raw
                 $result.steps.updateCheck = @{
@@ -154,7 +144,7 @@ jobs:
                 $result.steps.updateCheck = @{ error = "Debug log not found at $logPath" }
               }
             }
-            
+
             $result.success = $true
           }
           catch {
@@ -162,11 +152,11 @@ jobs:
             $result.error = $_.ToString()
             Write-Log "ERROR: $($_.Exception.Message)"
           }
-          
+
           Write-Result $result
           exit ($result.success ? 0 : 1)
           '@
-          
+
           $scriptPath = "$env:GITHUB_WORKSPACE/test-maxcall.ps1"
           Set-Content -Path $scriptPath -Value $script -Encoding utf8
           Write-Host "Test script written to $scriptPath"

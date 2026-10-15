@@ -367,32 +367,43 @@ publish_mirror() {
 }
 
 wait_build() {
-  local repo run_id
+  # Always wait: the signed manifests on github are only rewritten once the
+  # build finishes, so publishing the mirror earlier would ship stale files and
+  # the client would see the previous version. This is not optional.
+  local repo run_id status conclusion tries
   repo="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
-  $WATCH || return 0
 
-  echo ""
-  echo "Waiting for the build to start..."
-  local before
-  before="$(gh run list --repo "$repo" --limit 1 --json databaseId -q '.[0].databaseId' 2>/dev/null || echo "")"
+  printf '\n  waiting for the build: '
   run_id=""
-  for _ in $(seq 1 12); do
-    sleep 3
-    run_id="$(gh run list --repo "$repo" --limit 1 --json databaseId -q '.[0].databaseId' 2>/dev/null || echo "")"
-    [ -n "$run_id" ] && [ "$run_id" != "$before" ] && break
-    run_id=""
+  for tries in $(seq 1 40); do
+    run_id="$(gh run list --repo "$repo" --limit 1 --json databaseId,createdAt \
+      -q '.[0].databaseId' 2>/dev/null || echo "")"
+    [ -n "$run_id" ] && break
+    sleep 5
   done
-  [ -n "$run_id" ] || { warn "the build did not start, check the Actions tab"; return 0; }
-
-  echo "Run $run_id"
-  if gh run watch "$run_id" --repo "$repo" --exit-status --interval 15; then
-    ok "build succeeded"
-    echo ""
-    echo "Release page: https://github.com/$repo/releases"
-  else
-    warn "the build failed"
-    gh run view "$run_id" --repo "$repo" --log-failed 2>/dev/null | tail -n 40 || true
+  if [ -z "$run_id" ]; then
+    printf 'none started\n'
+    warn "no build run appeared, check the Actions tab"
+    return 1
   fi
+
+  for tries in $(seq 1 160); do
+    status="$(gh run view "$run_id" --repo "$repo" --json status -q .status 2>/dev/null || echo "")"
+    [ "$status" = "completed" ] && break
+    printf '.'
+    sleep 15
+  done
+  conclusion="$(gh run view "$run_id" --repo "$repo" --json conclusion -q .conclusion 2>/dev/null || echo "")"
+  printf '\n'
+
+  if [ "$conclusion" != "success" ]; then
+    warn "build $run_id ended: $conclusion"
+    gh run view "$run_id" --repo "$repo" --log-failed 2>/dev/null | tail -n 25 || true
+    return 1
+  fi
+  ok "build succeeded ($run_id)"
+  echo ""
+  echo "  Release page: https://github.com/$repo/releases"
 }
 
 # ---------------------------------------------------------------------------
@@ -530,7 +541,9 @@ else
 EOF
 fi
 
-wait_build
+if ! wait_build; then
+  die "the build did not succeed, so the mirror was left untouched"
+fi
 
 if [ "$CHANNEL" = "beta" ]; then
   publish_mirror beta "$MANIFEST_BETA_TAG"
