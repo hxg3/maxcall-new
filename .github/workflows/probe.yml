@@ -35,7 +35,6 @@ jobs:
           "sha256 of the bytes fetched: $([BitConverter]::ToString([System.Security.Cryptography.SHA256]::Create().ComputeHash($msgs)).Replace('-','').ToLower().Substring(0,8))"
           "signature bytes            : $($sig.Length)"
           "manifest bytes from server: $($msgs.Length)"
-          $sig = [Convert]::FromBase64String($sigTxt.Trim())
           $rsa = [System.Security.Cryptography.RSA]::Create()
           $expBE = [byte[]]($expTrim[($expTrim.Length-1)..0])
           $params = New-Object System.Security.Cryptography.RSAParameters
