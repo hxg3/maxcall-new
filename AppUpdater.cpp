@@ -893,11 +893,8 @@ bool VerifySignature(const CByteArray& data, const CByteArray& signature)
 		padding.pszAlgId = BCRYPT_SHA256_ALGORITHM;
 
 		CString probe;
-		ULONG keyBits = 0;
-		NTSTATUS propSt = BCryptGetProperty(hKey, BCRYPT_KEY_LENGTH, (PUCHAR)&keyBits,
-			sizeof(keyBits), NULL, 0);
-		probe.Format(_T("probe: keyBits=%u (0x%08x), padAlg=%s, hashBytes=%u, sigBytes=%u"),
-			keyBits, (DWORD)propSt, CString(padding.pszAlgId).GetBuffer(16),
+		probe.Format(_T("probe: hAlg=%p hKey=%p blob=%u bytes, padAlg=%s, hash=%u, sig=%u"),
+			hAlg, hKey, (UINT)sizeof(g_maxcallUpdatePublicKey), padding.pszAlgId,
 			(ULONG)sizeof(digest), (ULONG)signature.GetSize());
 		HttpDiag(probe);
 
@@ -924,6 +921,17 @@ bool VerifySignature(const CByteArray& data, const CByteArray& signature)
 					ok = true;
 				}
 				BCryptCloseAlgorithmProvider(hHashAlg, 0);
+			}
+
+			// Some builds of Windows accept the padding as a flag instead of a
+			// descriptor. Try that before giving up on the signature.
+			NTSTATUS flagged = BCryptVerifySignature(hKey, NULL, digest, sizeof(digest),
+				(PUCHAR)signature.GetData(), (ULONG)signature.GetSize(),
+				BCRYPT_PAD_PKCS1);
+			CString f; f.Format(_T("probe: BCRYPT_PAD_PKCS1 form gave 0x%08x"), (DWORD)flagged);
+			HttpDiag(f);
+			if (flagged == 0) {
+				ok = true;
 			}
 			goto done;
 		}
