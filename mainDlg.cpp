@@ -1914,6 +1914,12 @@ BOOL CmainDlg::OnInitDialog()
 {
 	CBaseDialog::OnInitDialog();
 
+	// Check for a newer build as soon as the app is up. This used to hang off the
+	// SIP stack, which meant a machine that failed to register never checked at
+	// all, and the update stayed invisible exactly where it is most wanted. The
+	// channel still comes from accountSettings.updateChannel.
+	ScheduleUpdateCheck();
+
 	// Extract embedded audio resources (ringtone.wav and ringing.wav) independently
 	{
 		CreateDirectory(accountSettings.pathExe + _T("\\res"), NULL);
@@ -2996,11 +3002,6 @@ void CmainDlg::PJCreateRaw()
 	{
 		accountSettings.audioCodecs = _T(_GLOBAL_CODECS_ENABLED);
 	}
-
-	// Self update. The interval now lives in _GLOBAL_UPDATE_CHECK_INTERVAL_HOURS
-	// and the channel in accountSettings.updateChannel, which replaced the old
-	// updatesInterval ladder that used to own accountSettings.checkUpdatesTime.
-	ScheduleUpdateCheck();
 
 	// pj create
 	pj_status_t status;
