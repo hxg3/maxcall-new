@@ -899,7 +899,7 @@ bool VerifySignature(const CByteArray& data, const CByteArray& signature)
 	CopyMemory(&pubKey[20], blob + 24 + cbExp, cbMod);
 
 	HCRYPTPROV hProv = 0;
-	HCRYPTHKEY hKey = 0;
+	HCRYPTKEY hKey = 0;
 	bool ok = false;
 
 	if (!CryptAcquireContext(&hProv, NULL, NULL, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT)) {
