@@ -883,7 +883,9 @@ struct SCryptoApi
 			releaseContext = (PFN_ReleaseContext)GetProcAddress(advapi, "CryptReleaseContext");
 		}
 		if (crypt32) {
-			importKey = (PFN_ImportKey)GetProcAddress(crypt32, "CryptImportKeyA");
+			// CryptImportKey is exported without an A/W suffix; the header still maps
+			// its name, which is what made the suffixed lookup fail.
+			importKey = (PFN_ImportKey)GetProcAddress(crypt32, "CryptImportKey");
 			verifySignature = (PFN_VerifySignature)GetProcAddress(crypt32, "CryptVerifySignatureA");
 		}
 	}
@@ -894,7 +896,7 @@ struct SCryptoApi
 		// resolve differently and only one of them can be null at a time.
 		CString missing;
 		if (!acquireContext) missing += _T("CryptAcquireContextA ");
-		if (!importKey) missing += _T("CryptImportKeyA ");
+		if (!importKey) missing += _T("CryptImportKey ");
 		if (!verifySignature) missing += _T("CryptVerifySignatureA ");
 		if (!destroyKey) missing += _T("CryptDestroyKey ");
 		if (!releaseContext) missing += _T("CryptReleaseContext ");
