@@ -874,14 +874,26 @@ struct SCryptoApi
 		acquireContext = (PFN_AcquireContext)GetProcAddress(advapi, "CryptAcquireContextA");
 		importKey = (PFN_ImportKey)GetProcAddress(advapi, "CryptImportKeyA");
 		verifySignature = (PFN_VerifySignature)GetProcAddress(advapi, "CryptVerifySignatureA");
+		// These two have no A/W variants; they are the only cryptoapi entry points
+		// exported without a suffix.
 		destroyKey = (PFN_DestroyKey)GetProcAddress(advapi, "CryptDestroyKey");
 		releaseContext = (PFN_ReleaseContext)GetProcAddress(advapi, "CryptReleaseContext");
 	}
 
 	bool Ready() const
 	{
-		return acquireContext && importKey && verifySignature
-			&& destroyKey && releaseContext;
+		// Naming what is missing beats a bare "unavailable": the four callers
+		// resolve differently and only one of them can be null at a time.
+		CString missing;
+		if (!acquireContext) missing += _T("CryptAcquireContextA ");
+		if (!importKey) missing += _T("CryptImportKeyA ");
+		if (!verifySignature) missing += _T("CryptVerifySignatureA ");
+		if (!destroyKey) missing += _T("CryptDestroyKey ");
+		if (!releaseContext) missing += _T("CryptReleaseContext ");
+		if (!missing.IsEmpty()) {
+			HttpDiag(_T("crypto api entries not found: ") + missing);
+		}
+		return missing.IsEmpty();
 	}
 };
 
