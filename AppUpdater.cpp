@@ -1245,6 +1245,22 @@ bool IsApplyCommandLine(LPCTSTR cmdLine)
 	return NextToken(p).CompareNoCase(_T("--apply")) == 0;
 }
 
+// Same token walk as IsApplyCommandLine, and for the same reason: comparing the
+// whole string against MFC's lpCmdLine silently failed here, which left the
+// headless install starting the login screen and never exiting.
+bool IsSelfUpdateCommandLine(LPCTSTR cmdLine)
+{
+	if (!cmdLine) {
+		return false;
+	}
+	LPCTSTR p = cmdLine;
+	CString first = FirstToken(p);
+	if (first.CompareNoCase(_T("--self-update")) == 0) {
+		return true;
+	}
+	return NextToken(p).CompareNoCase(_T("--self-update")) == 0;
+}
+
 bool ParseApplyCommandLine(LPCTSTR cmdLine, CString& targetExe, CString& sourceExe, DWORD& previousPid)
 {
 	targetExe.Empty();

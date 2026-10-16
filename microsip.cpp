@@ -206,7 +206,7 @@ BOOL CmicrosipApp::InitInstance()
 
 	// Headless install: drives exactly the path the update banner's button
 	// drives, so the release test can prove it works without a human clicking.
-	if (lstrcmp(theApp.m_lpCmdLine, _T("--self-update")) == 0) {
+	if (AppUpdate::IsSelfUpdateCommandLine(theApp.m_lpCmdLine)) {
 		AppUpdate::RunSelfUpdate(accountSettings.exeFile, accountSettings.pathLocal,
 			accountSettings.updateChannel == 1
 				? AppUpdate::ChannelBeta : AppUpdate::ChannelStable);

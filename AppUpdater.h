@@ -163,6 +163,7 @@ bool Preflight(SPreflight& out);
 // True when this process was started as the update payload (MaxCall.exe --apply).
 // Accepts both the raw command line (with argv[0]) and MFC's lpCmdLine.
 bool IsApplyCommandLine(LPCTSTR cmdLine);
+bool IsSelfUpdateCommandLine(LPCTSTR cmdLine);
 bool ParseApplyCommandLine(LPCTSTR cmdLine, CString& targetExe, CString& sourceExe, DWORD& previousPid);
 
 // Blocks until the running instance exits, swaps the new binary in place and
