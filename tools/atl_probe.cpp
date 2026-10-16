@@ -20,8 +20,9 @@ static bool make_header(const char* username, const char* password, char* out) {
 	if (!buf) return false;
 	int written = Base64Encode((const BYTE*)raw, srcLen, buf, &destLen, ATL_BASE64_FLAG_NOCRLF);
 	if (written <= 0) { free(buf); return false; }
-	// out = "Basic " + encoded
-	sprintf_s(out, 512, "Basic %s", buf);
+	// ATL does not null-terminate: mirror CrmPopupDlg.cpp which relies on the
+	// reported length instead of scanning for a terminator.
+	sprintf_s(out, 512, "Basic %.*s", destLen, buf);
 	free(buf);
 	return true;
 }
