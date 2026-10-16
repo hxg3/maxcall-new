@@ -43,7 +43,8 @@ try {
   Log "manifest: $MirrorBase/$manifestName"
   $m = (Invoke-WebRequest "$MirrorBase/$manifestName" -UseBasicParsing -TimeoutSec 30).Content | ConvertFrom-Json
   $sig = (Invoke-WebRequest "$MirrorBase/$sigName" -UseBasicParsing -TimeoutSec 30)
-  $sigText = ([string]$sig.Content) -replace '\s', ''
+  $sigText = if ($sig.Content -is [byte[]]) { [System.Text.Encoding]::ASCII.GetString($sig.Content) } else { [string]$sig.Content }
+  $sigText = ($sigText -replace '\s', '').Trim([char]0xFEFF)
   $r.steps.manifest = @{ version = $m.version; sha256 = $m.sha256; size = $m.size; sigBytes = ([Convert]::FromBase64String($sigText)).Length }
 
   # --- 2. payload + sha256 ---
