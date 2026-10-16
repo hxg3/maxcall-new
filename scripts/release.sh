@@ -158,7 +158,7 @@ choose_watch() {
   ${B}2)${OFF} No
 
 EOF
-  ask_choice "  Choose [1]: " 1 1 2
+  ask_choice "  Choose [2]: " 2 1 2
   [ "$CHOICE" = "1" ] || WATCH=false
 }
 
@@ -316,19 +316,29 @@ publish_mirror() {
   gh release download "$tag" --repo "$repo" --pattern 'update.json.sig' \
     --dir "$DIST" --clobber >/dev/null 2>&1
 
-  local release_tag
-  if [ "$channel" = "beta" ]; then
-    release_tag="$BETA_CHANNEL_TAG"
-  else
-    release_tag="$(gh release list --repo "$repo" --limit 20 --json tagName,isPrerelease \
-      -q '[.[] | select(.isPrerelease == false and (.tagName | startswith("v")))][0].tagName // ""')"
-  fi
-  [ -n "$release_tag" ] || { warn "no release for the $channel payload - manifests only"; return 0; }
+  # The manifest names the release that carries its payload. Picking the payload
+  # by any other rule (a separate tag, the newest release) let an older build sit
+  # on the mirror beside a newer manifest, so the tag is taken from the manifest
+  # itself and the hash is checked before anything is staged.
+  local payload_tag want_sha got_sha
+  payload_tag="$(python3 -c '
+import json, sys, urllib.parse
+m = json.load(open(sys.argv[1]))
+parts = [p for p in urllib.parse.urlparse(m["url"]).path.split("/") if p]
+print(parts[parts.index("download") + 1] if "download" in parts else "")
+' "$DIST/update.json")"
+  want_sha="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['sha256'])" "$DIST/update.json")"
+  [ -n "$payload_tag" ] || { warn "the $channel manifest names no payload - skipping the mirror"; return 0; }
 
-  if ! gh release download "$release_tag" --repo "$repo" --pattern 'MaxCall.exe' \
+  if ! gh release download "$payload_tag" --repo "$repo" --pattern 'MaxCall.exe' \
        --dir "$DIST" --clobber >/dev/null 2>&1; then
-    warn "no payload at $release_tag - manifests only"
+    warn "no payload at $payload_tag - manifests only"
     return 0
+  fi
+
+  got_sha="$(sha256sum "$DIST/MaxCall.exe" | cut -d' ' -f1)"
+  if [ "$got_sha" != "$want_sha" ]; then
+    die "the $channel manifest lists $want_sha but $payload_tag carries $got_sha - refusing to publish a pair that disagrees"
   fi
 
   if [ "$channel" = "beta" ]; then
@@ -370,29 +380,71 @@ wait_build() {
   # Always wait: the signed manifests on github are only rewritten once the
   # build finishes, so publishing the mirror earlier would ship stale files and
   # the client would see the previous version. This is not optional.
-  local repo run_id status conclusion tries
+  #
+  # $1 is the ref we came for ("v6.1.62" for a stable tag, "main" for beta) and
+  # $2 the commit it must be built from.
+  #
+  # Taking the newest run instead meant a stable release could pick up a beta
+  # build, and a beta publish could pick up a run left over from an older commit
+  # and quietly republish it, which reads as "beta created nothing new".
+  local expect_ref="$1" expect_sha="$2" repo run_id status conclusion tries
   repo="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
+
+  find_run() {
+    gh run list --repo "$repo" --workflow build.yml --limit 50 \
+      --json databaseId,headBranch,headSha 2>/dev/null \
+      | python3 -c 'import json, sys
+ref, sha = sys.argv[1], sys.argv[2]
+for r in json.load(sys.stdin):
+    if ref and r.get("headBranch") != ref: continue
+    if sha and r.get("headSha") != sha: continue
+    print(r["databaseId"]); break' "$expect_ref" "$expect_sha" 2>/dev/null || echo ""
+  }
 
   printf '\n  waiting for the build: '
   run_id=""
-  for tries in $(seq 1 40); do
-    run_id="$(gh run list --repo "$repo" --limit 1 --json databaseId,createdAt \
-      -q '.[0].databaseId' 2>/dev/null || echo "")"
+  # Only the build workflow counts.
+  for tries in $(seq 1 12); do
+    [ -n "$expect_ref" ] && run_id="$(find_run)"
+    [ -z "$expect_ref" ] && run_id="$(gh run list --repo "$repo" --workflow build.yml \
+      --limit 1 --json databaseId -q '.[0].databaseId' 2>/dev/null || echo "")"
     [ -n "$run_id" ] && break
+    printf '.'
     sleep 5
   done
+
+  # A beta publish rides on the push to main. If main already held this commit
+  # the push triggers nothing, so ask the build to run rather than republishing
+  # whatever happened to be newest.
+  if [ -z "$run_id" ] && [ "$CHANNEL" = "beta" ]; then
+    printf '\n  nothing built for this commit yet, asking for a build: '
+    gh workflow run build.yml --repo "$repo" --ref main >/dev/null 2>&1 || true
+    for tries in $(seq 1 24); do
+      run_id="$(find_run)"
+      [ -n "$run_id" ] && break
+      printf '.'
+      sleep 5
+    done
+  fi
   if [ -z "$run_id" ]; then
     printf 'none started\n'
     warn "no build run appeared, check the Actions tab"
     return 1
   fi
 
-  for tries in $(seq 1 160); do
-    status="$(gh run view "$run_id" --repo "$repo" --json status -q .status 2>/dev/null || echo "")"
-    [ "$status" = "completed" ] && break
-    printf '.'
-    sleep 15
-  done
+  if [ "$WATCH" = "true" ]; then
+    # The prompt only ever offered a choice it did not act on. Picking Yes now
+    # streams the build; the wait itself happens either way, because publishing
+    # before the manifests are rewritten would ship stale files to the mirror.
+    gh run watch "$run_id" --repo "$repo" --interval 10 --exit-status || true
+  else
+    for tries in $(seq 1 160); do
+      status="$(gh run view "$run_id" --repo "$repo" --json status -q .status 2>/dev/null || echo "")"
+      [ "$status" = "completed" ] && break
+      printf '.'
+      sleep 15
+    done
+  fi
   conclusion="$(gh run view "$run_id" --repo "$repo" --json conclusion -q .conclusion 2>/dev/null || echo "")"
   printf '\n'
 
@@ -541,7 +593,15 @@ else
 EOF
 fi
 
-if ! wait_build; then
+BUILD_REF=""
+BUILD_SHA="$(git rev-parse HEAD 2>/dev/null || echo "")"
+if [ "$CHANNEL" = "all" ] && [ -n "$RELEASED" ]; then
+  BUILD_REF="v$RELEASED"
+elif [ "$CHANNEL" = "beta" ]; then
+  BUILD_REF="main"
+fi
+
+if ! wait_build "$BUILD_REF" "$BUILD_SHA"; then
   die "the build did not succeed, so the mirror was left untouched"
 fi
 
