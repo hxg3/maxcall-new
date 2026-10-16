@@ -1,1 +1,1 @@
-{"version":"6.1.74-beta.158","channel":"beta","url":"https://github.com/hxg3/maxcall-new/releases/download/beta/MaxCall.exe","size":6004736,"sha256":"5de3b67f24363cf91ff95b3671faf9a790df06440916d4ada6bc2914968ec5bc","notes":"release: MaxCall 6.1.72"}
+{"version":"6.1.77-beta.161","channel":"beta","url":"https://github.com/hxg3/maxcall-new/releases/download/beta/MaxCall.exe","size":6004736,"sha256":"01c736867e2ba613ed90302bc19bf7f7b58c679477b250ee3191c1a465ea0816","notes":"fix(update): a beta build tracks the beta channel by itself, not by the settings file"}
