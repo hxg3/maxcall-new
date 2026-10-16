@@ -188,11 +188,16 @@ try {
   }
 
   $self = Start-Process -FilePath $targetExe -ArgumentList "--self-update" -WorkingDirectory $MaxCallDir -PassThru
-  $selfDone = $self.WaitForExit(300000)
-  if (-not $selfDone) { $self.Kill(); throw "--self-update did not finish within 5 minutes" }
+  # Bounded on purpose: a headless run only fetches a manifest and either finds
+  # nothing newer or downloads once. Two minutes is already generous, and the log
+  # below is read whether it finished or not, so a hang says where it hung.
+  $selfDone = $self.WaitForExit(120000)
+  if (-not $selfDone) { $self.Kill(); Start-Sleep -Seconds 2 }
 
   $selfLog = if (Test-Path $realLog) { Get-Content $realLog -Raw } else { "" }
+  $selfLines = @(($selfLog -split "`r?`n") | Where-Object { $_ -match "\[update\]" } | ForEach-Object { "$_" })
   $r.steps.selfUpdate = @{
+    finished    = $selfDone
     exitCode    = $self.ExitCode
     rejected    = [bool]($selfLog -match "self-update: manifest rejected")
     upToDate    = [bool]($selfLog -match "self-update: nothing newer")
@@ -200,11 +205,17 @@ try {
     manifestErr = [bool]($selfLog -match "self-update: manifest failed")
     downloadErr = [bool]($selfLog -match "self-update: download failed")
     checksumErr = [bool]($selfLog -match "self-update: payload does not match")
+    logSize     = $selfLog.Length
+    lines       = $selfLines
   }
-  Log ("self-update: exit {0} | rejected {1} | up-to-date {2} | applied {3}" -f `
-       $r.steps.selfUpdate.exitCode, $r.steps.selfUpdate.rejected, `
+  Log ("self-update: finished {0} | exit {1} | rejected {2} | up-to-date {3} | applied {4}" -f `
+       $selfDone, $r.steps.selfUpdate.exitCode, $r.steps.selfUpdate.rejected, `
        $r.steps.selfUpdate.upToDate, $r.steps.selfUpdate.applied)
+  $selfLines | ForEach-Object { Log "  $_" }
 
+  if (-not $selfDone) {
+    throw "--self-update never exited; it logged: $($selfLines -join ' ~ ')"
+  }
   if ($r.steps.selfUpdate.rejected) {
     throw "the install path rejected the mirror's payload URL"
   }
