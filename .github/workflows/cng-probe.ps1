@@ -5,14 +5,30 @@ $b = $h.Substring($h.IndexOf('g_maxcallUpdatePublicKey[] = {'))
 $blob = [byte[]]([regex]::Matches($b.Substring(0, $b.IndexOf('};')), '0x([0-9A-Fa-f]{2})') | ForEach-Object { [Convert]::ToByte($_.Groups[1].Value, 16) })
 $cbExp = [BitConverter]::ToUInt32($blob, 8)
 $cbMod = [BitConverter]::ToUInt32($blob, 12)
-$modulus = [byte[]]$blob[($cbExp + 24)..($cbExp + 23 + $cbMod)]
-"blob bytes      : $($blob.Length)  (magic 0x{0:X8}, exp {1} bytes, mod {2} bytes)" -f [BitConverter]::ToUInt32($blob, 0), $cbExp, $cbMod
+$stored = [byte[]]$blob[($cbExp + 24)..($cbExp + 23 + $cbMod)]
+$reversed = [byte[]]$stored.Clone()
+[Array]::Reverse($reversed)
+
+"stored  first8: $(($stored[0..7]   | ForEach-Object { $_.ToString('x2') }) -join ' ')"
+"stored  last8 : $(($stored[-8..-1] | ForEach-Object { $_.ToString('x2') }) -join ' ')"
+"rev     first8: $(($reversed[0..7]   | ForEach-Object { $_.ToString('x2') }) -join ' ')"
+"rev     last8 : $(($reversed[-8..-1] | ForEach-Object { $_.ToString('x2') }) -join ' ')"
 
 $wc = New-Object System.Net.WebClient
 $msg = $wc.DownloadData("http://192.168.1.32:3001/updates/update.json.beta")
 $sigTxt = [System.Text.Encoding]::ASCII.GetString($wc.DownloadData("http://192.168.1.32:3001/updates/update.json.beta.sig")).Trim()
 $sig = [Convert]::FromBase64String($sigTxt)
-"manifest bytes  : $($msg.Length), signature bytes: $($sig.Length)"
+
+function New-PublicKeyBlob([byte[]]$modulus) {
+    $pub = New-Object System.Collections.Generic.List[byte]
+    $pub.AddRange([byte[]]@(0x06, 0x02, 0x00, 0x00))
+    $pub.AddRange([BitConverter]::GetBytes([uint32]0x0000A400))
+    $pub.AddRange([BitConverter]::GetBytes([uint32]0x31415352))
+    $pub.AddRange([BitConverter]::GetBytes([uint32]3072))
+    $pub.AddRange([BitConverter]::GetBytes([uint32]0x00010001))
+    $pub.AddRange($modulus)
+    return $pub.ToArray()
+}
 
 Add-Type -TypeDefinition @"
 using System;
@@ -37,30 +53,32 @@ public static class Capi {
 }
 "@
 
-$pub = New-Object System.Collections.Generic.List[byte]
-$pub.AddRange([byte[]]@(0x06, 0x02, 0x00, 0x00))          # PUBLICKEYBLOB, version 2, reserved
-$pub.AddRange([BitConverter]::GetBytes([uint32]0x0000A400)) # CALG_RSA_KEYX
-$pub.AddRange([BitConverter]::GetBytes([uint32]0x31415352)) # RSA1 magic
-$pub.AddRange([BitConverter]::GetBytes([uint32]3072))       # bit length
-$pub.AddRange([BitConverter]::GetBytes([uint32]0x00010001)) # public exponent
-$pub.AddRange($modulus)
-$pubBlob = $pub.ToArray()
-"publickeyblob   : $($pubBlob.Length) bytes"
+function Try-Capi([string]$label, [byte[]]$modulus) {
+    $hProv = [IntPtr]::Zero
+    [void][Capi]::CryptAcquireContextA([ref]$hProv, $null, $null, [uint32]24, [uint32]0xF0000000L)
+    $hKey = [IntPtr]::Zero
+    $okImport = [Capi]::CryptImportKey($hProv, (New-PublicKeyBlob $modulus), (24 + $modulus.Length), [IntPtr]::Zero, 0, [ref]$hKey)
+    $hHash = [IntPtr]::Zero
+    [void][Capi]::CryptCreateHash($hProv, 0x0000800C, [IntPtr]::Zero, 0, [ref]$hHash)
+    [void][Capi]::CryptHashData($hHash, $msg, $msg.Length, 0)
+    $ok = [Capi]::CryptVerifySignatureA($hHash, $sig, $sig.Length, $hKey, $null, 0)
+    $err = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+    "capi $label : import=$okImport verify=$ok err=$err"
+    [void][Capi]::CryptDestroyHash($hHash)
+    [void][Capi]::CryptDestroyKey($hKey)
+    [void][Capi]::CryptReleaseContext($hProv, 0)
+}
 
-$hProv = [IntPtr]::Zero
-$ok = [Capi]::CryptAcquireContextA([ref]$hProv, $null, $null, [uint32]24, [uint32]0xF0000000L)
-"acquire context : $ok  (err $([Runtime.InteropServices.Marshal]::GetLastWin32Error()))"
-$hKey = [IntPtr]::Zero
-$ok = [Capi]::CryptImportKey($hProv, $pubBlob, $pubBlob.Length, [IntPtr]::Zero, 0, [ref]$hKey)
-"import key      : $ok  (err $([Runtime.InteropServices.Marshal]::GetLastWin32Error()))"
-$hHash = [IntPtr]::Zero
-$ok = [Capi]::CryptCreateHash($hProv, 0x0000800C, [IntPtr]::Zero, 0, [ref]$hHash)
-"create hash     : $ok  (err $([Runtime.InteropServices.Marshal]::GetLastWin32Error()))"
-$ok = [Capi]::CryptHashData($hHash, $msg, $msg.Length, 0)
-"hash data       : $ok  (err $([Runtime.InteropServices.Marshal]::GetLastWin32Error()))"
-$ok = [Capi]::CryptVerifySignatureA($hHash, $sig, $sig.Length, $hKey, $null, 0)
-"verify signature: $ok  (err $([Runtime.InteropServices.Marshal]::GetLastWin32Error()))  <- this is the answer"
+function Try-DotNet([string]$label, [byte[]]$modulusBE) {
+    $rsa = New-Object System.Security.Cryptography.RSACng
+    $p = New-Object System.Security.Cryptography.RSAParameters
+    $p.Modulus = $modulusBE
+    $p.Exponent = [byte[]]@(0x01, 0x00, 0x01)
+    $rsa.ImportParameters($p)
+    "dotnet $label : $($rsa.VerifyData($msg, $sig, [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1))"
+}
 
-[void][Capi]::CryptDestroyHash($hHash)
-[void][Capi]::CryptDestroyKey($hKey)
-[void][Capi]::CryptReleaseContext($hProv, 0)
+Try-Capi "modulus-as-stored" $stored
+Try-Capi "modulus-reversed"  $reversed
+Try-DotNet "modulus-as-stored" $stored
+Try-DotNet "modulus-reversed"  $reversed
