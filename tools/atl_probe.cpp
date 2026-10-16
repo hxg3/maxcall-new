@@ -1,34 +1,57 @@
 // Ephemeral diagnostics for the atl-probe branch: certifies the ATL
-// Base64Encode contract used by CrmPopupDlg::MakeBasicAuthHeader.
+// Base64Encode contract used by CrmPopupDlg::MakeBasicAuthHeader
+// by mirroring the exact fixed code path.
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
 #include <windows.h>
 #include <atlenc.h>
 
-static void probe_flag(DWORD flags, const char* name, const char* src, int srcLen, int upper) {
-	char buf[512];
-	printf("flags=%s (srcLen=%d):\n", name, srcLen);
-	for (int dl = 1; dl <= upper; dl++) {
-		int destLen = dl;
-		memset(buf, 0, sizeof(buf));
-		int written = Base64Encode((const BYTE*)src, srcLen, buf, &destLen, flags);
-		printf("  dl=%2d ret=%d wrote=%d\n", dl, written, destLen);
-		(void)written;
+static int fails = 0;
+
+// mirrors the fixed login in CrmPopupDlg.cpp exactly
+static bool make_header(const char* username, const char* password, char* out) {
+	char raw[512];
+	sprintf_s(raw, sizeof(raw), "%s:%s", username, password);
+	int srcLen = (int)strlen(raw);
+	if (srcLen <= 0) return false;
+	int destLen = ((srcLen + 2) / 3) * 4 + 2;
+	char* buf = (char*)malloc(destLen);
+	if (!buf) return false;
+	int written = Base64Encode((const BYTE*)raw, srcLen, buf, &destLen, ATL_BASE64_FLAG_NOCRLF);
+	if (written <= 0) { free(buf); return false; }
+	// out = "Basic " + encoded
+	sprintf_s(out, 512, "Basic %s", buf);
+	free(buf);
+	return true;
+}
+
+static void check(const char* user, const char* pass, const char* expectedPending) {
+	char out[512];
+	bool ok = make_header(user, pass, out);
+	printf("user=%s pass=%s -> %s\n", user, pass, ok ? out : "FAILED");
+	if (expectedPending) {
+		if (!ok || strncmp(out, expectedPending, strlen(expectedPending) + 1) != 0) {
+			printf("::error::NOT matching reference [%s]\n", expectedPending);
+			fails++;
+		} else {
+			printf("   reference match OK\n");
+		}
+	} else if (!ok) {
+		printf("::error::encoding returned zero\n");
+		fails++;
 	}
 }
 
 int main() {
-	const char* src = "103:Abdullah@x";
-	int srcLen = (int)strlen(src);
-	probe_flag(ATL_BASE64_FLAG_NONE, "NONE", src, srcLen, 26);
-	probe_flag(ATL_BASE64_FLAG_NOCRLF, "NOCRLF", src, srcLen, 26);
-
-	// long input: 200 bytes (over the 64-char break threshold)
-	char big[201];
-	memset(big, 'x', 200);
-	big[200] = 0;
-	probe_flag(ATL_BASE64_FLAG_NONE, "NONE-big", big, 200, 300);
-	probe_flag(ATL_BASE64_FLAG_NOCRLF, "NOCRLF-big", big, 200, 300);
-	return 0;
+	// short credentials - the standard case
+	check("103", "Abdullah@x", "Basic MTAzOkFiZHVsYWlAeA==");
+	// long credentials (100 chars each) - beyond the CRLF break threshold in NONE mode
+	char u[101], p[101];
+	memset(u, 'a', 100); u[100] = 0;
+	memset(p, 'z', 100); p[100] = 0;
+	check(u, p, "Basic YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYTp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6");
+	// credentials with special characters
+	check("ab.c", "p@ss!w:rd/#", "Basic YWIuYzpwQHNzIXc6cmQvIw==");
+	return fails;
 }
