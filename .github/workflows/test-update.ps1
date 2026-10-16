@@ -195,7 +195,8 @@ try {
   if (-not $selfDone) { $self.Kill(); Start-Sleep -Seconds 2 }
 
   $selfLog = if (Test-Path $realLog) { Get-Content $realLog -Raw } else { "" }
-  $selfLines = @(($selfLog -split "`r?`n") | Where-Object { $_ -match "\[update\]" } | ForEach-Object { "$_" })
+  $selfLines = @(($selfLog -split "`r?`n") | Where-Object { $_.Trim() -ne "" } | ForEach-Object { "$_" })
+  $updateLines = @($selfLines | Where-Object { $_ -match "\[update\]" })
   $r.steps.selfUpdate = @{
     finished    = $selfDone
     exitCode    = $self.ExitCode
@@ -206,7 +207,8 @@ try {
     downloadErr = [bool]($selfLog -match "self-update: download failed")
     checksumErr = [bool]($selfLog -match "self-update: payload does not match")
     logSize     = $selfLog.Length
-    lines       = $selfLines
+    allLines    = $selfLines
+    updateLines = $updateLines
   }
   Log ("self-update: finished {0} | exit {1} | rejected {2} | up-to-date {3} | applied {4}" -f `
        $selfDone, $r.steps.selfUpdate.exitCode, $r.steps.selfUpdate.rejected, `
