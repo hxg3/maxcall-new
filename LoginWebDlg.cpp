@@ -227,6 +227,8 @@ static UINT __cdecl LoginThreadProc(LPVOID pParam)
 					accountSettings.account.rememberPassword = false;
 					accountSettings.account.transport = _T("udp");
 					accountSettings.accountId = 1;
+					// نحفظ اسم الدخول كما كتبه الموظف لتوثيق استدعاءات HIS لاحقاً
+					accountSettings.agentLoginName = username;
 
 					ok = true;
 				}

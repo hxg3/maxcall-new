@@ -87,6 +87,10 @@ struct AccountSettings {
 	CString lastCallNumber;
 	bool lastCallHasVideo;
 
+	// اسم الدخول الذي كتبه الموظف (قد يختلف عن داخلة SIP) — يُستخدم لتوثيق
+	// استدعاءات HIS بـ Basic auth فباعتماد نفس بيانات /api/agent/login
+	CString agentLoginName;
+
 	CString updatesInterval;
 
 	int activeTab;

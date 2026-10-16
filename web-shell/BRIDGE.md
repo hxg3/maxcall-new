@@ -82,6 +82,21 @@ js.Format(_T("onCallState(%d, '%s')"), call_id, _T("active"));
 | C++ → JS | `updateCallerInfo(number, name, notes, call_id, extra?: {file_no, phone2, relation})` |
 | C++ → JS | `notifySaveResult(true \| false)` |
 
+## 3.1) عقد قسم Patient File (WebHIS — سجل المريض في النافذة المنبثقة)
+
+المصدر: `GET /api/his/caller/<phone>` عبر `his_broker.py` في السيرفر — قراءة فقط
+من Solver WebHIS، بتوثيق الموظف نفسه (Basic auth من `accountSettings.agentLoginName`
++ `account.account.password`). التوثيق إن فشل أو انقطعت الشبكة يُخفى القسم بهدوء
+(دون toast) ويبقى ما عدا الخصم يعمل.
+
+| الاتجاه | الشكل |
+|---|---|
+| C++ → JS | `updateHisInfo('<json>')` — `EscapeJson` ثم حبر نصي: `{ok, matched, matches:[{pat_id,name,age,sex,phone}...], selected:{...}, visits:[...], bills:[...], source_url}` |
+| C++ → JS | `hisUnavailable()` — إخفاء صامت (انقطاع/توثيق مفقود) |
+| JS → C++ | `{action:'his_search', by:'name'\|'id', q: string}` — بديل البحث عند عدم المطابقة، يمرر إلى `LoadHisInfo('?by=..&q=..')` |
+| JS → C++ | `{action:'his_select', pat_id: string}` — اختيار مريض من عدة مطابقات → `LoadHisInfo('?pat_id=..')` |
+| JS → C++ | `{action:'open_webhis'}` — نسخ الرقم للحافظة وفتح `http://solverserver:81/#/home/hmis/op/PatientSearch` في المتصفح الافتراضي للموظف (جلسته الخاصة) |
+
 ## 4) ملاحظات التنفيذ لـ C++
 
 1. توسيع `ProcessWebViewMessage` بشروط `action == "makeCall" | "hangup" | ...` بنفس أسلوب `save/dismiss`.

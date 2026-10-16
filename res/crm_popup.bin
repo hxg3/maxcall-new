@@ -114,6 +114,19 @@ input:focus,textarea:focus{outline:none;box-shadow:0 0 0 2px rgba(8,123,120,0.15
   </div>
 </div>
 
+<!-- Patient File (WebHIS) — always-visible compact strip, details collapsed by default -->
+<div id="hisSection" class="hidden px-4 pt-2">
+  <button id="hisToggle" type="button" onclick="toggleHis()"
+    class="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-white border border-border transition">
+    <span class="text-[11px] font-semibold text-ink-sec uppercase tracking-wide">Patient file</span>
+    <span id="hisBadge" class="hidden px-2 py-0.5 rounded-full text-[10px] font-semibold bg-teal-soft text-teal"></span>
+    <span id="hisSummary" class="flex-1 min-w-0 text-right text-xs text-ink truncate"></span>
+    <span id="hisChevron" class="text-muted text-xs shrink-0">&#9662;</span>
+  </button>
+  <div id="hisBody"
+    class="hidden mt-1.5 rounded-lg bg-white border border-border px-3 py-2.5 max-h-[200px] overflow-y-auto flex flex-col gap-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"></div>
+</div>
+
 <!-- Name Input -->
 <div class="px-4 pt-3 pb-2">
   <label class="text-[11px] font-semibold text-ink-sec uppercase tracking-wide block mb-1.5">Name</label>
@@ -191,6 +204,7 @@ function updateCallerInfo(number, name, notes, callId, extra) {
   document.getElementById('callerPhone2Input').value = callerData.phone2;
   document.getElementById('callerRelationInput').value = callerData.relation;
   document.getElementById('avatar').textContent = (callerData.name || '?').charAt(0).toUpperCase();
+  resetHis();
 
   const btn = document.getElementById('saveBtn');
   if (btn) { btn.textContent = 'Save'; btn.disabled = false; }
@@ -343,6 +357,239 @@ function updateCallerHistory(jsonText) {
   });
 }
 
+// ---- Patient File (WebHIS, read-only) ----
+// يملؤه C++ عبر ExecuteScript بعد جلب /api/his/caller/<phone>
+// ok:false (401/انقطاع/غير مهيأ) وأي خطء شبكة => إخفاء صامت دون إزعاج الموظف
+
+let hisData = null;
+
+function postNative(object) {
+  try {
+    if (window.chrome && window.chrome.webview) {
+      window.chrome.webview.postMessage(JSON.stringify(object));
+    }
+  } catch (e) {}
+}
+
+function resetHis() {
+  hisData = null;
+  var section = document.getElementById('hisSection');
+  if (section) section.classList.add('hidden');
+  var badge = document.getElementById('hisBadge');
+  if (badge) badge.classList.add('hidden');
+  var summary = document.getElementById('hisSummary');
+  if (summary) summary.textContent = '';
+  var body = document.getElementById('hisBody');
+  if (body) { body.classList.remove('hidden'); body.innerHTML = ''; }
+  var ch = document.getElementById('hisChevron');
+  if (ch) ch.innerHTML = '&#9662;';
+}
+
+function toggleHis() {
+  var body = document.getElementById('hisBody');
+  var ch = document.getElementById('hisChevron');
+  if (!body) return;
+  body.classList.toggle('hidden');
+  if (ch) ch.innerHTML = body.classList.contains('hidden') ? '&#9662;' : '&#9652;';
+}
+
+function hisUnavailable() {
+  resetHis();
+}
+
+function hisChip(text, cls) {
+  var span = document.createElement('span');
+  span.className = 'px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 ' + cls;
+  span.textContent = text;
+  return span;
+}
+
+function hisLabel(cls, text) {
+  var el = document.createElement('div');
+  el.className = cls;
+  el.textContent = text;
+  return el;
+}
+
+function hisFallbackForm() {
+  var wrap = document.createElement('div');
+  wrap.className = 'flex flex-col gap-2';
+  wrap.appendChild(hisLabel('text-xs text-ink-sec', 'No hospital record for this number. Search by:'));
+  var row = document.createElement('div');
+  row.className = 'flex gap-2';
+  var by = document.createElement('select');
+  by.id = 'hisFallbackBy';
+  by.className = 'px-2 py-1.5 border border-border rounded-lg text-sm text-ink bg-white transition';
+  var o1 = document.createElement('option'); o1.value = 'name'; o1.textContent = 'Name';
+  var o2 = document.createElement('option'); o2.value = 'id'; o2.textContent = 'ID card';
+  by.appendChild(o1); by.appendChild(o2);
+  var input = document.createElement('input');
+  input.id = 'hisFallbackQ';
+  input.type = 'text';
+  input.placeholder = 'Search term';
+  input.className = 'flex-1 min-w-0 px-3 py-1.5 border border-border rounded-lg text-sm text-ink bg-white transition';
+  row.appendChild(by); row.appendChild(input);
+  wrap.appendChild(row);
+  var btn = document.createElement('button');
+  btn.type = 'button';
+  btn.textContent = 'Search patient';
+  btn.onclick = hisFallbackSearch;
+  btn.className = 'bg-teal hover:bg-teal-dark text-white font-semibold py-1.5 rounded-lg transition text-sm';
+  wrap.appendChild(btn);
+  return wrap;
+}
+
+function hisFallbackSearch() {
+  var by = document.getElementById('hisFallbackBy');
+  var input = document.getElementById('hisFallbackQ');
+  var q = input ? input.value.trim() : '';
+  if (!q) { input.focus(); return; }
+  var body = document.getElementById('hisBody');
+  if (body) { body.innerHTML = ''; body.appendChild(hisLabel('text-xs text-muted text-center py-2', 'Searching...')); }
+  postNative({action: 'his_search', by: by ? by.value : 'name', q: q});
+}
+
+function hisSelect(patId) {
+  var body = document.getElementById('hisBody');
+  if (body) { body.innerHTML = ''; body.appendChild(hisLabel('text-xs text-muted text-center py-2', 'Loading record...')); }
+  postNative({action: 'his_select', pat_id: patId});
+}
+
+function hisVisitsBlock(visits) {
+  var wrap = document.createElement('div');
+  wrap.className = 'flex flex-col gap-1.5';
+  wrap.appendChild(hisLabel('text-[11px] font-semibold text-ink-sec uppercase tracking-wide', 'Visits'));
+  var shown = (visits || []).slice(0, 3);
+  shown.forEach(function (v) {
+    var row = document.createElement('div');
+    row.className = 'flex items-center gap-2 px-2 py-1.5 rounded-lg bg-surface border border-border';
+    var date = document.createElement('span');
+    date.className = 'text-xs text-ink shrink-0';
+    date.textContent = (v.date || '-') + ' ' + (v.time || '');
+    row.appendChild(date);
+    row.appendChild(hisChip(v.type || '-', v.type === 'REG' ? 'bg-teal-soft text-teal' : 'bg-gold-soft text-warning'));
+    var cons = document.createElement('span');
+    cons.className = 'text-[11px] text-muted truncate flex-1 min-w-0';
+    cons.textContent = v.consultant || '';
+    row.appendChild(cons);
+    var amt = document.createElement('span');
+    amt.className = 'text-[11px] font-mono text-ink-sec shrink-0';
+    amt.textContent = (v.amount || 0) + ' OMR';
+    row.appendChild(amt);
+    wrap.appendChild(row);
+  });
+  if ((visits || []).length > 3) {
+    wrap.appendChild(hisLabel('text-[11px] text-muted', '+' + (visits.length - 3) + ' more visits'));
+  }
+  return wrap;
+}
+
+function hisOpenButton() {
+  var btn = document.createElement('button');
+  btn.type = 'button';
+  btn.textContent = 'Open in WebHIS (number on clipboard)';
+  btn.onclick = function () { postNative({action: 'open_webhis'}); };
+  btn.className = 'bg-white border border-border hover:bg-surface text-ink-sec font-semibold py-1.5 rounded-lg transition text-sm';
+  return btn;
+}
+
+function updateHisInfo(jsonText) {
+  var body = document.getElementById('hisBody');
+  var section = document.getElementById('hisSection');
+  var badge = document.getElementById('hisBadge');
+  var summary = document.getElementById('hisSummary');
+  if (!body || !section) return;
+  var d = null;
+  try {
+    d = (typeof jsonText === 'string') ? JSON.parse(jsonText) : jsonText;
+  } catch (e) { d = null; }
+  if (!d) { resetHis(); return; }
+
+  if (d.ok === false) { resetHis(); return; }   // unauthorized / HIS down — silent
+
+  hisData = d;
+  section.classList.remove('hidden');
+  body.innerHTML = '';
+
+  if (!d.matched || !d.selected) {
+    if (badge) { badge.classList.add('hidden'); badge.textContent = ''; }
+    if (summary) summary.textContent = 'not found';
+    body.appendChild(hisFallbackForm());
+    body.appendChild(hisOpenButton());
+    return;
+  }
+
+  var sel = d.selected;
+  var name = sel.name || sel.name_ar || ('MRN ' + sel.mrn);
+  if (badge) {
+    badge.textContent = 'MRN ' + sel.mrn;
+    badge.classList.remove('hidden');
+  }
+  if (summary) summary.textContent = name;
+
+  // Header: name + age/sex
+  var head = document.createElement('div');
+  head.className = 'flex items-center gap-2';
+  var nm = document.createElement('div');
+  nm.className = 'text-sm font-semibold text-ink truncate flex-1 min-w-0';
+  nm.textContent = name;
+  head.appendChild(nm);
+  head.appendChild(hisChip(((sel.age || '') + ' ').trim() + (sel.sex || ''), 'bg-surface text-ink-sec border border-border'));
+  body.appendChild(head);
+
+  // Badges: category/insurance, Admitted, Outstanding, Appointment
+  var badges = document.createElement('div');
+  badges.className = 'flex flex-wrap gap-1.5';
+  if (sel.nationality) badges.appendChild(hisChip(sel.nationality, 'bg-surface text-ink-sec border border-border'));
+  if (sel.category || sel.insurance_code) badges.appendChild(hisChip((sel.category || sel.insurance_code), 'bg-teal-soft text-teal'));
+  if (sel.is_inpatient) badges.appendChild(hisChip('Admitted', 'bg-gold-soft text-warning'));
+  var out = parseFloat(sel.outstanding) || 0;
+  if (out > 0) badges.appendChild(hisChip('Outstanding: ' + out + ' OMR', 'bg-red-50 text-red-600'));
+  if (sel.appointment_date) badges.appendChild(hisChip('Appointment: ' + sel.appointment_date, 'bg-sky-100 text-sky-700'));
+  if (badges.children.length) body.appendChild(badges);
+
+  // Doctor line
+  var doc = (sel.consultant || '') + (sel.speciality ? (sel.consultant ? ' · ' : '') + sel.speciality : '');
+  if (doc) body.appendChild(hisLabel('text-xs text-ink-sec', 'Doctor: ' + doc));
+  if (sel.blood_group) body.appendChild(hisLabel('text-xs text-ink-sec', 'Blood group: ' + sel.blood_group));
+
+  body.appendChild(hisVisitsBlock(d.visits));
+
+  // Multiple matches -> selector
+  var matches = d.matches || [];
+  if (matches.length > 1) {
+    var pick = document.createElement('div');
+    pick.className = 'flex flex-col gap-1.5';
+    pick.appendChild(hisLabel('text-[11px] font-semibold text-ink-sec uppercase tracking-wide',
+      'This number maps to ' + matches.length + ' records — pick one:'));
+    matches.forEach(function (m) {
+      var isActive = String(m.pat_id) === String(sel.mrn);
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'flex items-center gap-2 px-2 py-1.5 rounded-lg border transition text-xs text-left ' +
+        (isActive ? 'border-teal bg-teal-soft text-ink' : 'border-border bg-white text-ink-sec hover:bg-surface');
+      var id = document.createElement('span');
+      id.className = 'font-mono shrink-0';
+      id.textContent = m.pat_id;
+      btn.appendChild(id);
+      var label = document.createElement('span');
+      label.className = 'truncate flex-1 min-w-0';
+      label.textContent = (m.name || '') + ((m.age || '') ? ' · ' + m.age + ' ' + (m.sex || '') : '');
+      btn.appendChild(label);
+      btn.onclick = function () { if (!isActive) hisSelect(m.pat_id); };
+      pick.appendChild(btn);
+    });
+    body.appendChild(pick);
+  }
+
+  // Populate the MRN into the caller's file no. field ONLY when empty
+  var f = document.getElementById('callerFileNoInput');
+  if (f && !f.value.trim()) f.value = sel.mrn;
+
+  body.appendChild(hisOpenButton());
+}
+
+resetHis();
 updateCallerInfo('', 'New Caller', '', -1);
 </script>
 

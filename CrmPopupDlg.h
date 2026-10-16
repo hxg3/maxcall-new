@@ -14,6 +14,7 @@ struct ICoreWebView2Environment;
 #define WM_CRM_LOAD_RESULT (WM_USER + 102)
 #define WM_CRM_SAVE_RESULT (WM_USER + 103)
 #define WM_CRM_HISTORY (WM_USER + 115)
+#define WM_HIS_RESULT (WM_USER + 120)
 
 class CrmPopupDlg : public CBaseDialog
 {
@@ -33,6 +34,7 @@ public:
 	void LoadCallerInfo();
 	void FetchCallerHistory();
 	void Restore();
+	void LoadHisInfo(CString extraQuery = _T(""));
 
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);
@@ -50,6 +52,7 @@ protected:
 	afx_msg LRESULT OnCrmLoadResult(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnCrmSaveResult(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnCrmHistory(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnHisResult(WPARAM wParam, LPARAM lParam);
 	DECLARE_MESSAGE_MAP()
 
 public:
@@ -62,6 +65,9 @@ private:
 	void UpdateWebView();
 	void ProcessWebViewMessage(CString& message);
 	void SaveCallerInfo();
+	void HisExecuteScript(const CString& js);
+	void OpenWebhisBrowser();
+	static CString MakeBasicAuthHeader(const CString& username, const CString& password);
 
 	static CString JsonStringToCString(const Json::Value& value);
 	static CString EscapeJson(const CString& input);

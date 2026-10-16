@@ -178,6 +178,7 @@ BEGIN_MESSAGE_MAP(CrmPopupDlg, CBaseDialog)
 	ON_MESSAGE(WM_CRM_LOAD_RESULT, &CrmPopupDlg::OnCrmLoadResult)
 	ON_MESSAGE(WM_CRM_SAVE_RESULT, &CrmPopupDlg::OnCrmSaveResult)
 	ON_MESSAGE(WM_CRM_HISTORY, &CrmPopupDlg::OnCrmHistory)
+	ON_MESSAGE(WM_HIS_RESULT, &CrmPopupDlg::OnHisResult)
 END_MESSAGE_MAP()
 
 BOOL CrmPopupDlg::OnInitDialog()
@@ -296,6 +297,7 @@ LRESULT CrmPopupDlg::OnWebViewReady(WPARAM wParam, LPARAM lParam)
 	UpdateWebView();
 	LoadCallerInfo();
 	FetchCallerHistory();
+	LoadHisInfo();
 	return 0;
 }
 
@@ -338,6 +340,35 @@ void CrmPopupDlg::ProcessWebViewMessage(CString& message)
 			ShowWindow(SW_HIDE);
 			return;
 		}
+		// بديل البحث بالاسم/البطاقة من قسم Patient File
+		if (action == _T("his_search")) {
+			CString q = JsonStringToCString(root["q"]);
+			CString by = JsonStringToCString(root["by"]);
+			if (by.Compare(_T("id")) != 0) by = _T("name");
+			CString query;
+			query.Format(_T("?by=%s&q=%s"), (LPCTSTR)by, (LPCTSTR)UrlEncodeCallerNumber(q));
+			LoadHisInfo(query);
+			return;
+		}
+		// اختيار سجل مريض من بين مطابقة عدة أرقام عائلية
+		if (action == _T("his_select")) {
+			CString patId = JsonStringToCString(root["pat_id"]);
+			bool numeric = !patId.IsEmpty();
+			for (int i = 0; i < patId.GetLength() && numeric; i++) {
+				if (patId[i] < _T('0') || patId[i] > _T('9')) numeric = false;
+			}
+			if (numeric) {
+				CString query;
+				query.Format(_T("?pat_id=%s"), (LPCTSTR)patId);
+				LoadHisInfo(query);
+			}
+			return;
+		}
+		// فتح WebHIS في متصفح الموظف نفسه — الطريق الوحيد السائد لأي فعل كتابي
+		if (action == _T("open_webhis")) {
+			OpenWebhisBrowser();
+			return;
+		}
 	}
 }
 
@@ -375,6 +406,109 @@ void CrmPopupDlg::FetchCallerHistory()
 	url.Format(_T("http://maxcall.local:3001/api/callers/%s/history"), UrlEncodeCallerNumber(cleanNumber));
 
 	URLGetAsync(url, m_hWnd, WM_CRM_HISTORY);
+}
+
+// يفتح WebHIS في المتصفح الافتراضي للموظف (جلسته الخاصة) مع نقل الرقم للحافظة
+void CrmPopupDlg::OpenWebhisBrowser()
+{
+	CString cleanNumber = callerNumber;
+	int atPos = cleanNumber.Find(_T('@'));
+	if (atPos != -1) {
+		cleanNumber = cleanNumber.Left(atPos);
+	}
+	cleanNumber.TrimLeft(_T("sipSIP:"));
+	cleanNumber.Trim();
+	if (!cleanNumber.IsEmpty() && mainDlg) {
+		mainDlg->CopyStringToClipboard(cleanNumber);
+	}
+	ShellExecute(NULL, _T("open"), _T("http://solverserver:81/#/home/hmis/op/PatientSearch"), NULL, NULL, SW_SHOWNORMAL);
+}
+
+// استخدام نفس بيانات دخول الموظف عبر Basic auth (ترميز Base64 عبر ATL atlenc.h)
+CString CrmPopupDlg::MakeBasicAuthHeader(const CString& username, const CString& password)
+{
+	CString raw;
+	raw.Format(_T("%s:%s"), (LPCTSTR)username, (LPCTSTR)password);
+
+	char* utf8 = Utf8EncodeUcs2(raw);
+	CStringA data = utf8 ? CStringA(utf8) : CStringA();
+	if (utf8) free(utf8);
+
+	CStringA encoded;
+	int destLen = 0;
+	if (Base64Encode((const BYTE*)(LPCSTR)data, data.GetLength(), NULL, &destLen, ATL_BASE64_FLAG_NONE) > 0) {
+		char* buf = encoded.GetBuffer(destLen);
+		Base64Encode((const BYTE*)(LPCSTR)data, data.GetLength(), buf, &destLen, ATL_BASE64_FLAG_NONE);
+		encoded.ReleaseBuffer(destLen);
+	}
+	CString header(_T("Basic "));
+	header += CString(encoded);
+	return header;
+}
+
+void CrmPopupDlg::HisExecuteScript(const CString& js)
+{
+	if (m_webView && ::IsWindow(m_hWnd)) {
+		ICoreWebView2* wv = static_cast<ICoreWebView2*>(m_webView);
+		if (wv) {
+			CStringW wJs(js);
+			wv->ExecuteScript(wJs.GetString(), nullptr);
+		}
+	}
+}
+
+// إجراء معالجة استجابة WebHIS: يعمل بالتوازي مع الحمولة الأصلية للمكالمة
+// ولا يعرقل ظهور النافذة؛ فشل الشبكة أو فقدان جلسة الدخول يُخفي القسم بهدوء
+void CrmPopupDlg::LoadHisInfo(CString extraQuery)
+{
+	// من دون بيانات دخول الموظف يحدث التحقق بالفشل تلقائياً — نترك القسم مخفياً بهدوء
+	CString username = accountSettings.agentLoginName;
+	if (username.IsEmpty()) username = accountSettings.account.username;
+	CString password = accountSettings.account.password;
+	if (username.IsEmpty() || password.IsEmpty()) {
+		HisExecuteScript(_T("hisUnavailable()"));
+		return;
+	}
+
+	CString cleanNumber = callerNumber;
+	int atPos = cleanNumber.Find(_T('@'));
+	if (atPos != -1) {
+		cleanNumber = cleanNumber.Left(atPos);
+	}
+	cleanNumber.TrimLeft(_T("sipSIP:"));
+	cleanNumber.Trim();
+	if (cleanNumber.IsEmpty()) cleanNumber = callerNumber;
+
+	CString url;
+	url.Format(_T("http://maxcall.local:3001/api/his/caller/%s"), UrlEncodeCallerNumber(cleanNumber));
+	if (!extraQuery.IsEmpty()) url += extraQuery;
+
+	CString headers = _T("Authorization: ") + MakeBasicAuthHeader(username, password);
+	URLGetAsync(url, m_hWnd, WM_HIS_RESULT, false, _T(""), headers);
+}
+
+LRESULT CrmPopupDlg::OnHisResult(WPARAM wParam, LPARAM lParam)
+{
+	URLGetAsyncData* result = (URLGetAsyncData*)wParam;
+	if (result) {
+		if (!result->body.IsEmpty()) {
+			CStringA bodyA = result->body;
+			wchar_t* ucs2 = NULL;
+			Utf8DecodeCP((char*)(LPCSTR)bodyA, CP_UTF8, &ucs2);
+			if (ucs2) {
+				CString js;
+				js.Format(_T("updateHisInfo('%s')"), EscapeJson(CString(ucs2)));
+				free(ucs2);
+				HisExecuteScript(js);
+			}
+		}
+		else {
+			// انقطاع شبكة/إعداد ناقص — نخفي القسم بهدوء دون إزعاج الموظف
+			HisExecuteScript(_T("hisUnavailable()"));
+		}
+		delete result;
+	}
+	return 0;
 }
 
 LRESULT CrmPopupDlg::OnCrmHistory(WPARAM wParam, LPARAM lParam)
