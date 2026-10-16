@@ -221,24 +221,24 @@ try {
   if ($r.steps.selfUpdate.rejected) {
     throw "the install path rejected the mirror's payload URL"
   }
-  if ($r.steps.selfUpdate.exitCode -eq 0) {
+  # The exit code says nothing here: InitInstance returns FALSE on every path, so
+  # a headless run and a real install both end at 0. The log is the evidence.
+  if ($r.steps.selfUpdate.applied) {
     # A newer build really was installed: the swap must leave the signed payload.
-    if (-not $r.steps.selfUpdate.applied) {
-      throw "--self-update downloaded a build but never handed over to the apply stage"
-    }
     Start-Sleep -Seconds 3
     if ((Sha256Of $targetExe) -ne (Sha256Of $payload)) {
       throw "the install path replaced the executable with something other than the signed payload"
     }
     Log "the install path swapped in the signed payload"
-  } elseif ($r.steps.selfUpdate.exitCode -eq 2) {
-    # Nothing newer exists: the guard passed and the comparison ran, which is
-    # exactly the step that used to abort before either happened.
-    if (-not $r.steps.selfUpdate.upToDate) {
-      throw "--self-update reported nothing newer without logging why"
-    }
+  } elseif ($r.steps.selfUpdate.upToDate) {
+    # Nothing newer exists. The guard accepted the mirror's plain-http payload
+    # URL and the version comparison ran, which is exactly what used to be
+    # skipped when the install button did nothing.
+    Log "the install path accepted the mirrored URL and found nothing newer"
+  } elseif ($r.steps.selfUpdate.manifestErr -or $r.steps.selfUpdate.downloadErr -or $r.steps.selfUpdate.checksumErr) {
+    throw "the install path failed: $($selfLines -join ' ~ ')"
   } else {
-    throw "the install path failed: exit $($r.steps.selfUpdate.exitCode)"
+    throw "the headless switch was not recognised - the app came up normally: $($selfLines -join ' ~ ')"
   }
 
   $r.success = $true
