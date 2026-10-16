@@ -844,10 +844,104 @@ done:
 	return ok;
 }
 
+namespace {
+
+// The manifest signature is checked here rather than through a crypto API.
+// Windows refused the signature on this machine through BCryptVerifySignature
+// and CryptVerifySignature alike, both answering "invalid parameter" for a key,
+// digest and signature that the platform's own managed RSA accepts. With a
+// public exponent of 65537 the check is short enough to do directly: raise the
+// signature to that exponent modulo the embedded modulus and compare the result
+// with the exact PKCS#1 block the manifest has to produce. Anything unexpected
+// fails the comparison, so the worst a mistake here can do is refuse a good
+// update, never accept a forged one.
+
+const int kLimbCount = MAXCALL_UPDATE_KEY_BITS / 32;
+const int kModulusBytes = MAXCALL_UPDATE_KEY_BITS / 8;
+
+void ZeroLimbs(DWORD* a)
+{
+	for (int i = 0; i < kLimbCount; i++) a[i] = 0;
+}
+
+void CopyLimbs(DWORD* dst, const DWORD* src)
+{
+	for (int i = 0; i < kLimbCount; i++) dst[i] = src[i];
+}
+
+int CmpLimbs(const DWORD* a, const DWORD* b)
+{
+	for (int i = kLimbCount - 1; i >= 0; i--) {
+		if (a[i] != b[i]) return a[i] > b[i] ? 1 : -1;
+	}
+	return 0;
+}
+
+void SubLimbs(DWORD* a, const DWORD* b)
+{
+	unsigned __int64 borrow = 0;
+	for (int i = 0; i < kLimbCount; i++) {
+		unsigned __int64 t = (unsigned __int64)a[i] - b[i] - borrow;
+		a[i] = (DWORD)t;
+		borrow = (t >> 32) ? 1 : 0;
+	}
+}
+
+// a += b, then fold the result back below n. Both inputs are already below n,
+// so at most one subtraction is ever needed.
+void AddMod(DWORD* a, const DWORD* b, const DWORD* n)
+{
+	unsigned __int64 carry = 0;
+	for (int i = 0; i < kLimbCount; i++) {
+		unsigned __int64 t = (unsigned __int64)a[i] + b[i] + carry;
+		a[i] = (DWORD)t;
+		carry = t >> 32;
+	}
+	if (carry != 0 || CmpLimbs(a, n) >= 0) SubLimbs(a, n);
+}
+
+// out = a * b mod n. The multiply goes one bit of b at a time so the running
+// value never grows past the modulus.
+void MulMod(DWORD* out, const DWORD* a, const DWORD* b, const DWORD* n)
+{
+	DWORD acc[kLimbCount];
+	DWORD cur[kLimbCount];
+	ZeroLimbs(acc);
+	CopyLimbs(cur, a);
+	for (int i = 0; i < kLimbCount * 32; i++) {
+		if ((b[i >> 5] & (1u << (i & 31))) != 0) AddMod(acc, cur, n);
+		AddMod(cur, cur, n);
+	}
+	CopyLimbs(out, acc);
+}
+
+void ModPow(DWORD* out, const DWORD* base, DWORD exponent, const DWORD* n)
+{
+	DWORD result[kLimbCount];
+	DWORD power[kLimbCount];
+	CopyLimbs(power, base);
+	ZeroLimbs(result);
+	result[0] = 1;
+	if (exponent == 0) {
+		CopyLimbs(out, result);
+		return;
+	}
+	int top = 31;
+	while ((exponent & (1u << top)) == 0) top--;
+	CopyLimbs(result, power);
+	for (int i = top - 1; i >= 0; i--) {
+		MulMod(result, result, result, n);
+		if ((exponent & (1u << i)) != 0) MulMod(result, result, power, n);
+	}
+	CopyLimbs(out, result);
+}
+
+} // namespace
+
 bool VerifySignature(const CByteArray& data, const CByteArray& signature)
 {
-	if (data.GetSize() <= 0
-		|| signature.GetSize() != (int)(MAXCALL_UPDATE_KEY_BITS / 8)) {
+	const int sigLen = signature.GetSize();
+	if (data.GetSize() <= 0 || sigLen != kModulusBytes) {
 		HttpDiag(_T("signature rejected: the manifest or the signature has the wrong length"));
 		return false;
 	}
@@ -859,58 +953,68 @@ bool VerifySignature(const CByteArray& data, const CByteArray& signature)
 	}
 
 	const unsigned char* blob = g_maxcallUpdatePublicKey;
-	ULONG cbExp = 0, cbMod = 0;
+	DWORD cbExp = 0, cbMod = 0;
 	CopyMemory(&cbExp, blob + 8, sizeof(cbExp));
 	CopyMemory(&cbMod, blob + 12, sizeof(cbMod));
-	if (cbExp == 0 || cbExp > 8 || cbMod != (ULONG)(MAXCALL_UPDATE_KEY_BITS / 8)
-		|| (ULONG)sizeof(g_maxcallUpdatePublicKey) < 24 + cbExp + cbMod) {
+	if (cbExp == 0 || cbExp > 4 || cbMod != (DWORD)kModulusBytes
+		|| (DWORD)sizeof(g_maxcallUpdatePublicKey) < 24 + cbExp + cbMod) {
 		HttpDiag(_T("signature rejected: the embedded public key is malformed"));
 		return false;
 	}
 
-	BCRYPT_ALG_HANDLE hAlg = NULL;
-	BCRYPT_KEY_HANDLE hKey = NULL;
-	bool ok = false;
+	DWORD exponent = 0;
+	for (DWORD i = 0; i < cbExp; i++) exponent |= (DWORD)blob[24 + i] << (8 * i);
 
-	NTSTATUS st = BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_RSA_ALGORITHM, NULL, 0);
-	if (st != 0) {
-		HttpDiag(_T("signature rejected: the rsa provider would not open"));
-		goto done;
+	// The blob stores both numbers least significant byte first.
+	const unsigned char* modBytes = blob + 24 + cbExp;
+	DWORD modulus[kLimbCount];
+	for (int j = 0; j < kLimbCount; j++) {
+		modulus[j] = (DWORD)modBytes[4 * j]
+			| ((DWORD)modBytes[4 * j + 1] << 8)
+			| ((DWORD)modBytes[4 * j + 2] << 16)
+			| ((DWORD)modBytes[4 * j + 3] << 24);
 	}
 
-	st = BCryptImportKeyPair(hAlg, NULL, BCRYPT_RSAPUBLIC_BLOB, &hKey,
-		(PUCHAR)g_maxcallUpdatePublicKey, (ULONG)sizeof(g_maxcallUpdatePublicKey), 0);
-	if (st != 0) {
-		CString m; m.Format(_T("signature rejected: the public key was refused (0x%08x)"), (DWORD)st);
-		HttpDiag(m);
-		goto done;
+	const unsigned char* sig = (const unsigned char*)signature.GetData();
+	DWORD value[kLimbCount];
+	for (int j = 0; j < kLimbCount; j++) {
+		DWORD limb = 0;
+		for (int t = 0; t < 4; t++) {
+			int fromLsb = 4 * j + t;
+			limb |= (DWORD)sig[sigLen - 1 - fromLsb] << (8 * t);
+		}
+		value[j] = limb;
 	}
 
-	{
-		BCRYPT_PKCS1_PADDING_INFO padding;
-		padding.pszAlgId = BCRYPT_SHA256_ALGORITHM;
+	DWORD recovered[kLimbCount];
+	ModPow(recovered, value, exponent, modulus);
 
-		// BCryptVerifySignature returns STATUS_SUCCESS (0) when the signature is
-		// good. Anything non-zero means the payload was tampered with.
-		// The descriptor names the hash and the flag names the padding. Windows
-		// only accepted the call when both were supplied; with dwFlags left at
-		// zero this exact key and signature were refused as invalid parameters,
-		// while the platform's own managed RSA passed the very same triple.
-		st = BCryptVerifySignature(hKey, &padding, digest, sizeof(digest),
-			(PUCHAR)signature.GetData(), (ULONG)signature.GetSize(), BCRYPT_PAD_PKCS1);
-		if (st != 0) {
-			CString m; m.Format(_T("signature rejected: verify failed (0x%08x)"), (DWORD)st);
-			HttpDiag(m);
-			goto done;
+	// A valid signature decodes to 00 01 FF..FF 00 followed by the SHA-256
+	// DigestInfo header and the digest of the manifest.
+	unsigned char expected[kModulusBytes];
+	expected[0] = 0x00;
+	expected[1] = 0x01;
+	int at = 2;
+	while (at < kModulusBytes - 1 - 19 - 32) expected[at++] = 0xFF;
+	expected[at++] = 0x00;
+	static const unsigned char kDigestInfo[19] = {
+		0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01,
+		0x65, 0x03, 0x04, 0x02, 0x01, 0x05, 0x00, 0x04, 0x20 };
+	CopyMemory(expected + at, kDigestInfo, 19);
+	at += 19;
+	CopyMemory(expected + at, digest, 32);
+
+	for (int i = 0; i < kModulusBytes; i++) {
+		int fromLsb = kModulusBytes - 1 - i;
+		unsigned char got = (unsigned char)((recovered[fromLsb >> 2] >> (8 * (fromLsb & 3))) & 0xFF);
+		if (got != expected[i]) {
+			HttpDiag(_T("signature rejected: the manifest does not match its signature"));
+			return false;
 		}
 	}
-	HttpDiag(_T("manifest signature verified"));
-	ok = true;
 
-done:
-	if (hKey) BCryptDestroyKey(hKey);
-	if (hAlg) BCryptCloseAlgorithmProvider(hAlg, 0);
-	return ok;
+	HttpDiag(_T("manifest signature verified"));
+	return true;
 }
 
 // ---------------------------------------------------------------------------

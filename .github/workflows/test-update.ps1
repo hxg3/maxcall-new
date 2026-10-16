@@ -115,10 +115,10 @@ try {
       mirrorSwap   = [bool]($txt -match "mirror mode: payload from")
       oldCodeAbsent = -not ($txt -match "github.com unreachable, falling back")
       # The manifest and its signature being served is not the same as the
-      # signature being accepted. Checking only for HTTP 200 let a key mismatch
-      # pass unnoticed while the client showed "signature is not valid".
-      sigRejected   = [bool]($txt -match "signature is not valid")
-      sigAccepted   = [bool]($txt -match "from the internal mirror") -and -not ($txt -match "signature is not valid")
+      # signature being accepted. The acceptance is asserted on its own line so a
+      # rejection cannot be read as a pass while the payload still installs.
+      sigRejected   = [bool]($txt -match "signature rejected")
+      sigAccepted   = [bool]($txt -match "manifest signature verified")
       lines        = @($upd)
       logSize      = (Get-Item $realLog).Length
       logHead      = @((Get-Content $realLog -TotalCount 25) | ForEach-Object { "$_" })
@@ -131,6 +131,9 @@ try {
 
   if ($r.steps.updateCheck.sigRejected) {
     throw "the client rejected the manifest signature"
+  }
+  if (-not $r.steps.updateCheck.sigAccepted) {
+    throw "the client never reported the manifest signature as verified"
   }
 
   $r.success = $true
