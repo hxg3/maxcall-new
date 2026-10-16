@@ -16,10 +16,11 @@
 #include <bcrypt.h>
 #pragma comment(lib, "bcrypt.lib")
 
-// Same floor for the socket API: the mirror's host name is resolved to its IPv4
-// address before anything is requested (see ResolveHostToIpv4), and GetAddrInfoW
-// is only declared at the Vista level set above. It comes after the MFC headers,
-// which VC_EXTRALEAN already keeps free of the old winsock.h.
+// Same for the socket API: the mirror's host name is resolved to its IPv4
+// address before anything is requested (see ResolveHostToIpv4). The ANSI
+// getaddrinfo is used on purpose - the project targets XP (targetver.h), so the
+// wide GetAddrInfoW is not declared here, and a host name is ASCII by
+// construction.
 #include <ws2tcpip.h>
 #pragma comment(lib, "ws2_32.lib")
 
@@ -1143,15 +1144,16 @@ CString ResolveHostToIpv4(const CString& url)
 		return url;
 	}
 
-	ADDRINFOW hints;
+	CStringA hostAnsi(host);
+	ADDRINFOA hints;
 	ZeroMemory(&hints, sizeof(hints));
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_STREAM;
 
-	ADDRINFOW* results = NULL;
+	ADDRINFOA* results = NULL;
 	CString address;
-	if (GetAddrInfoW(host.GetString(), NULL, &hints, &results) == 0) {
-		for (ADDRINFOW* it = results; it; it = it->ai_next) {
+	if (getaddrinfo(hostAnsi, NULL, &hints, &results) == 0) {
+		for (ADDRINFOA* it = results; it; it = it->ai_next) {
 			if (!it->ai_addr || it->ai_addrlen < (int)sizeof(sockaddr_in)) {
 				continue;
 			}
@@ -1165,7 +1167,7 @@ CString ResolveHostToIpv4(const CString& url)
 			address.Format(_T("%u.%u.%u.%u"), octets[0], octets[1], octets[2], octets[3]);
 			break;
 		}
-		FreeAddrInfoW(results);
+		freeaddrinfo(results);
 	}
 	WSACleanup();
 
