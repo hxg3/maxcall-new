@@ -110,24 +110,31 @@ try {
 
   # Point the installed copy at the channel under test, otherwise it checks the
   # stable manifest and the beta result is never exercised.
-  $iniPath = [System.IO.Path]::ChangeExtension($targetExe, ".ini")
-  if (Test-Path $iniPath) {
-    $ini = Get-Content $iniPath -Raw
-    $channelValue = if ($Channel -eq 'beta') { 1 } else { 0 }
-    if ($ini -match '(?m)^updateChannel=') {
-      $ini = [regex]::Replace($ini, '(?m)^updateChannel=.*$', "updateChannel=$channelValue")
-    } else {
-      $ini = $ini.TrimEnd() + "`r`nupdateChannel=$channelValue`r`n"
+  #
+  # Two traps here, both hit for real. The app keeps its INI beside the exe only
+  # for a copy that just sits in a folder; an MSI install keeps it under
+  # %APPDATA%\MaxCall\, so both places are written. And the app's INIs are UTF-16
+  # with a BOM - writing this file as UTF-8 left the app reading every key as
+  # garbage and quietly falling back to the stable channel.
+  $channelValue = if ($Channel -eq 'beta') { 1 } else { 0 }
+  $iniName = [System.IO.Path]::GetFileName([System.IO.Path]::ChangeExtension($targetExe, ".ini"))
+  $iniPaths = @(
+    [System.IO.Path]::ChangeExtension($targetExe, ".ini"),
+    (Join-Path (Join-Path $env:APPDATA "MaxCall") $iniName)
+  )
+  foreach ($iniPath in $iniPaths) {
+    $dir = Split-Path $iniPath -Parent
+    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+    if (Test-Path $iniPath) { $ini = Get-Content $iniPath -Raw } else { $ini = "[Settings]`r`n" }
+    foreach ($kv in @(@("updateChannel", "$channelValue"), @("enableLog", "1"))) {
+      if ($ini -match "(?m)^$($kv[0])=") {
+        $ini = [regex]::Replace($ini, "(?m)^$($kv[0])=.*$", "$($kv[0])=$($kv[1])")
+      } else {
+        $ini = $ini.TrimEnd() + "`r`n$($kv[0])=$($kv[1])`r`n"
+      }
     }
-    if ($ini -match '(?m)^enableLog=') {
-      $ini = [regex]::Replace($ini, '(?m)^enableLog=.*$', "enableLog=1")
-    } else {
-      $ini = $ini.TrimEnd() + "`r`nenableLog=1`r`n"
-    }
-    Set-Content -Path $iniPath -Value $ini -Encoding UTF8
-    Log "set updateChannel in $([System.IO.Path]::GetFileName($iniPath))"
-  } else {
-    Log "no INI beside the executable: $iniPath"
+    Set-Content -Path $iniPath -Value $ini -Encoding Unicode -NoNewline
+    Log "set updateChannel=$channelValue in $iniPath"
   }
 
   # The app opens its log with a relative path, so it lands in whatever the
@@ -206,6 +213,7 @@ try {
     manifestErr = [bool]($selfLog -match "self-update: manifest failed")
     downloadErr = [bool]($selfLog -match "self-update: download failed")
     checksumErr = [bool]($selfLog -match "self-update: payload does not match")
+    betaChannel = [bool]($selfLog -match "update\.json\.beta")
     logSize     = $selfLog.Length
     allLines    = $selfLines
     updateLines = $updateLines
@@ -220,6 +228,11 @@ try {
   }
   if ($r.steps.selfUpdate.rejected) {
     throw "the install path rejected the mirror's payload URL"
+  }
+  # A beta run that silently reads the stable manifest would pass while testing
+  # nothing about beta, so the channel it actually used is asserted, not assumed.
+  if (($Channel -eq 'beta') -ne $r.steps.selfUpdate.betaChannel) {
+    throw "the headless run used the wrong channel (wanted $Channel): $($selfLines -join ' ~ ')"
   }
   # The exit code says nothing here: InitInstance returns FALSE on every path, so
   # a headless run and a real install both end at 0. The log is the evidence.
