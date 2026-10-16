@@ -390,37 +390,57 @@ wait_build() {
   local expect_ref="$1" expect_sha="$2" repo run_id status conclusion tries
   repo="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
 
+  # $1 is "active" to demand a build that is still queued or running, "any" to
+  # take one whatever its state. $2 optionally ignores runs at or below an id,
+  # which is how the build we asked for is told apart from the ones before it.
   find_run() {
     gh run list --repo "$repo" --workflow build.yml --limit 50 \
-      --json databaseId,headBranch,headSha 2>/dev/null \
+      --json databaseId,headBranch,headSha,status 2>/dev/null \
       | python3 -c 'import json, sys
-ref, sha = sys.argv[1], sys.argv[2]
+ref, sha, mode, after = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4] or 0)
+live = ("queued", "in_progress", "requested", "waiting", "pending")
 for r in json.load(sys.stdin):
     if ref and r.get("headBranch") != ref: continue
     if sha and r.get("headSha") != sha: continue
-    print(r["databaseId"]); break' "$expect_ref" "$expect_sha" 2>/dev/null || echo ""
+    if mode == "active" and r.get("status") not in live: continue
+    if after and int(r["databaseId"]) <= after: continue
+    print(r["databaseId"]); break' "$expect_ref" "$expect_sha" "$1" "${2:-0}" 2>/dev/null || echo ""
   }
 
   printf '\n  waiting for the build: '
   run_id=""
-  # Only the build workflow counts.
-  for tries in $(seq 1 12); do
-    [ -n "$expect_ref" ] && run_id="$(find_run)"
-    [ -z "$expect_ref" ] && run_id="$(gh run list --repo "$repo" --workflow build.yml \
-      --limit 1 --json databaseId -q '.[0].databaseId' 2>/dev/null || echo "")"
-    [ -n "$run_id" ] && break
-    printf '.'
-    sleep 5
-  done
+  if [ "$CHANNEL" = "beta" ]; then
+    # Only the build workflow counts, and only a build that is still queued or
+    # running counts as fresh: that is the one the push just started.
+    for tries in $(seq 1 12); do
+      run_id="$(find_run active)"
+      [ -n "$run_id" ] && break
+      printf '.'
+      sleep 5
+    done
 
-  # A beta publish rides on the push to main. If main already held this commit
-  # the push triggers nothing, so ask the build to run rather than republishing
-  # whatever happened to be newest.
-  if [ -z "$run_id" ] && [ "$CHANNEL" = "beta" ]; then
-    printf '\n  nothing built for this commit yet, asking for a build: '
-    gh workflow run build.yml --repo "$repo" --ref main >/dev/null 2>&1 || true
-    for tries in $(seq 1 24); do
-      run_id="$(find_run)"
+    # Beta exists to put a fresh developer build on the beta channel. A push that
+    # carries nothing new starts no build, and republishing the last one left
+    # testers on the same beta number while the release still reported success,
+    # so a build is requested explicitly instead.
+    if [ -z "$run_id" ]; then
+      local before
+      before="$(gh run list --repo "$repo" --workflow build.yml --limit 1 \
+        --json databaseId -q '.[0].databaseId' 2>/dev/null || echo 0)"
+      printf '\n  no build running for this commit, asking for one: '
+      gh workflow run build.yml --repo "$repo" --ref main >/dev/null 2>&1 || true
+      for tries in $(seq 1 24); do
+        run_id="$(find_run any "$before")"
+        [ -n "$run_id" ] && break
+        printf '.'
+        sleep 5
+      done
+    fi
+  else
+    # A stable tag push always starts a build, so whatever matches the tag will
+    # do; it only has to be the build that rewrote the manifests.
+    for tries in $(seq 1 12); do
+      run_id="$(find_run any)"
       [ -n "$run_id" ] && break
       printf '.'
       sleep 5
