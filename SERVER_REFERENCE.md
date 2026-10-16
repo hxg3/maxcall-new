@@ -15,8 +15,8 @@
 | الدور | سيرفر الاتصالات المركزي (SIP + لوحة المشرف + API) |
 | الـ VM | `VitalPBX-MaxCare` (ملفاتها في جذر هذا المشروع: `.vbox` + `.vmdk`) |
 | المضيف | `maxcall` — Debian 12 (bookworm)، `2 CPU / 2GB RAM / 19GB disk (20% used)` |
-| عناوين IP | `192.168.1.165` (LAN) + `192.168.56.10` (host-only) |
-| الوصول الإداري | SSH root + VitalPBX Admin على `https://192.168.1.165` (بيانات الدخول عند الإدارة — لا تُكتب هنا أبداً) |
+| عناوين IP | **لا يُعتمد أي عنوان رقمي:** الوصول دائماً بالاسم `maxcall.local`. العنوان يُوزّع بـ DHCP على `enp1s0` وقابل للتغيّر، والعنوان الحالي `192.168.1.32` للعلم فقط — أي إعداد يستخدم رقماً يتوقف عند أول تغيير. (عناوين `192.168.1.165` و`192.168.56.10` تخصّ الـ VM القديمة المتقاعدة) |
+| الوصول الإداري | SSH root + VitalPBX Admin على `https://maxcall.local` (بيانات الدخول عند الإدارة — لا تُكتب هنا أبداً) |
 | اسم mDNS | `maxcall.local` (avahi من اسم المضيف) |
 | الحالة | يعمل مستقر (uptime طبيعي، API بلا أخطاء آخر 24h) |
 
@@ -25,7 +25,7 @@
 | البند | القيمة |
 |---|---|
 | الإصدار | `vitalpbx 4.5.3-6` + `vitalpbx-api 4.5.1-1` |
-| لوحة الإدارة | `https://192.168.1.165` (ports `80/443`) |
+| لوحة الإدارة | `https://maxcall.local` (ports `80/443`) |
 | Asterisk | `20.19.0` — خدمة `asterisk.service` (running) |
 | ملفات الإعداد | `/etc/asterisk/vitalpbx/` (تُدار من اللوحة — لا تعديل يدوي إلا للطوارئ) |
 | الامتدادات | `101/Agent1`، `102/Agent2`، `103/Agent3` (جدول `ombutel.ombu_extensions`) |
@@ -97,15 +97,15 @@
 | التسجيلات | `/var/spool/asterisk/monitor` (تسجيلات المكالمات `MixMonitor` بصيغة `YYYY/MM/DD/...wav`) + `/var/spool/asterisk/voicemail` — تُعرض عبر `/api/recordings` (محصورة داخل المجلد، لا مسارات مطلقة) |
 | المقاطع الصوتية المخصصة | `/var/lib/asterisk/sounds/custom/`: `WelcomeMaxcall3cx.wav` (الترحيب) + `moh/MaxcallAD_8k_mono3cx.wav` (أثناء الانتظار) |
 | المنافذ المفتوحة | `5060/udp` (+`5060/tcp` للاحتياط) SIP، `3001` API، `80/443` VitalPBX، `3306` محلية فقط — منفذ `5038` (AMI) **مغلق خارجياً منذ 2026-09-06** |
-| روابط الوصول | VitalPBX Admin: `https://192.168.1.165` (أو `https://maxcall.local`) — اللوحة: `http://192.168.1.165:3001` — الـ API: `http://192.168.1.165:3001/api/...` — التسجيل SIP: `192.168.1.165:5060` (أو `maxcall.local`) |
-| DNS | الاسم `maxcall.local` يُعلن عبر avahi من السيرفر — إن لم يتحلل على أجهزة الموظفين أضف سطر `192.168.1.165 maxcall.local` في ملف hosts لكل جهاز |
+| روابط الوصول | الكل بالاسم `maxcall.local`: VitalPBX Admin `https://maxcall.local` — اللوحة `http://maxcall.local:3001` — الـ API `http://maxcall.local:3001/api/...` — التسجيل SIP `maxcall.local:5060` — مرآة التحديث `http://maxcall.local:3001/updates` |
+| DNS | الاسم `maxcall.local` يُعلن عبر avahi من السيرفر — إن لم يتحلل على جهاز، أضف سطر hosts بالعنوان **الحالي** لذلك الجهاز (يُقرأ من السيرفر بـ`hostname -I`) ولا تُثبّت رقماً في أي إعداد برمجي |
 | النسخ الاحتياطي | محلي: كرون يومي `03:30` (`/usr/local/bin/maxcall-backup` → `/var/backups/maxcall/`، احتفاظ 7 أيام) — خارجي: ريبو `hxg3/maxcall-backup` (قواعد+إعدادات+تطبيق، مشفر age، 30 يوماً، دفع 03:45) + ريبو `hxg3/maxcall-recordings` (تسجيلات، نافذة 30 يوماً + حارس 4GB + squash شهري، دفع 04:15) — مفاتيح الدفع deploy-keys للسيرفر + مفتاح الفك خارج السيرفر — تجارب استعادة ناجحة (محلية ومن GitHub) |
 
 ## 5. علاقة هذا الريبو بالسيرفر
 
 | المكوّن المحلي | المقابل على السيرفر |
 |---|---|
-| `maxcall/` (تطبيق الموظف) | يسجّل SIP على `192.168.1.165:5060` (أو `maxcall.local`) + دخول/متصلون عبر `:3001/api/agent/login` و `/api/callers` — بطاقة المتصل تدعم `file_no/phone2/relation` منذ 2026-09-06 (تتطلب exe جديد من CI؛ النسخة الحالية تعمل دون مسح الحقول الجديدة بفضل التحديث الجزئي) |
+| `maxcall/` (تطبيق الموظف) | يسجّل SIP على `maxcall.local:5060` + دخول/متصلون عبر `:3001/api/agent/login` و `/api/callers` — بطاقة المتصل تدعم `file_no/phone2/relation` منذ 2026-09-06 (تتطلب exe جديد من CI؛ النسخة الحالية تعمل دون مسح الحقول الجديدة بفضل التحديث الجزئي) |
 | `Dashboard/dashboard.html` (لوحة المشرف — المصدر المعتمد) | تُنشر إلى `/opt/maxcall-dashboard/templates/dashboard.html` (بدون restart — ملف ثابت) — إنجليزية + دارك مود + هوية MaxCall — الأقسام: Overview / Calls (توفر الموظفين تحت حالة الفائتة) / Missed (تقرير كامل بفترات + فلتر موظف) / Agents (ملف كامل + تسجيلاته + **فائتة أثناء توفره** + rename + export + كلمة مرور عند الإنشاء + **إيقاف مؤقت Pause/Resume**) / Recordings / Callers (ملف المتصل يعرض التوفر للفائتة + رقم الملف/رقم بديل/صلة المتصل + بحث برقم الملف + export) / **Reports (SLA يومي + اليوم بالساعة + أداء الموظفين)** — **بلا تحديث تلقائي** (أزرار Refresh يدوية فقط منذ 2026-09-06) |
 | `server/` (مصدر السيرفر المعتمد — جديد 2026-09-06) | `app.py` + `presence_cron.py` + `extensions__99-maxcall.conf` + `queues__99-maxcall.conf` + `maxcall-asterisk.sh` + `maxcall-backup.sh` — النشر في `server/README.md` |
 | `scripts/` | أوامر التشغيل/إعادة التحميل (asterisk reload, restart dashboard) |
@@ -163,4 +163,5 @@
 | 2026-09-06 | الفائتة تقرير كامل: `/api/missed` بفترات حتى 93 يوماً + خيارات جاهزة (Today/7/30/90/Custom) + فلتر موظف (فائتة أثناء توفره) + حقل `date` + التوفر في Calls (`online_names`) وملف المتصل (`online`) وبروفايل الموظف (`missed_online` 30 يوماً) — المصدر: لقطة الرنين ثم `presence_log` ثم heuristic |
 | 2026-09-06 | تبسيط الداشبورد: حذف كل أزرار Search/Refresh — بحث وفلاتر فورية (debounce) والتبويب يجلب بياناته عند فتحه — الرسم البياني بأسماء الأيام + tooltip (اليوم الكامل + العدد) + نسبة الرد تحت إجمالي اليوم + عناوين Reports بتوضيحات hover |
 | 2026-09-21 | تعبئة أسبوع البيانات (2026-09-15→21): نسخ الأسبوع الأكثر نشاطاً (2026-08-28→09-03، 309 مكالمة) مع إزاحة الأيام الكاملة وفق أسبوعية اليوم (Tue→Tue +14d لـ 09-01…03، Fri/Mon→ +21d لـ 08-28…31) — تضمن: `cdr` (309 صف بجديد `uniqueid/linkedid` + `recfile` معاد توليده)، نسخ 28 ملف wav إلى مجلدات التواريخ الجديدة، `ring_presence` (مجموعة واحدة)، `presence_log` (3 سجلات)، تحديث `callers.total_calls/last_call` لـ `77181992`/`93744242` — تحقق شامل عبر الـ API (`/api/stats` أسبوع 30/14/90/36/67/61/13، `/api/recordings` 18 تسجيلاً قابلاً للتشغيل، `/api/missed`، `/api/reports`) + اختبار تراجع كامل (undo → إرجاع القيم الأصلية → إعادة التعبئة). الأدوات: `/root/maxcall-datafill/fill_week.py` + `undo_fill.py` + `manifest.json` (نشر 2026-09-21) — التراجع: `python3 undo_fill.py --force` |
+| 2026-10-16 | **اعتماد الاسم بدل العنوان:** كل روابط الوصول في هذا المرجع أصبحت `maxcall.local` (الإدارة/اللوحة/API/SIP/مرآة التحديث) — العنوان الرقمي DHCP متغيّر ولا يُثبَّت في أي إعداد. مرآة التحديث في `const.h` صارت `http://maxcall.local:3001/updates`، والعميل يحوّل الاسم إلى IPv4 لحظة الطلب (تجنّباً لتعلّق WinInet على IPv6 link-local)، و`MIRROR_HOST` في `release.sh` صار `maxcall.local`. إن لم يتحلل الاسم على جهاز: `ssh-keyscan` للـSSH وسطر hosts بالعنوان الحالي |
 | 2026-10-16 | توثيق مسار مرآة التحديث `GET /updates/<name>` (عام بلا مصادقة، ٦ أسماء مسموحة من `/opt/maxcall-updates`) في جدول هذا القسم + إنشاء `UPDATE_REFERENCE.md` كمرجع كامل لميزة التحديث الذاتي |

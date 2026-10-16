@@ -43,7 +43,10 @@ MIRROR_DIR="${MAXCALL_MIRROR_DIR:-$(cd "$(dirname "$0")" && pwd)/mirror}"
 # signatures and the payload from this host over plain HTTP, because the office
 # network will not complete TLS with github.com. Publishing is over SSH with a
 # key, so no password is stored anywhere and no step is left to do by hand.
-MIRROR_HOST="${MAXCALL_MIRROR_HOST:-192.168.1.32}"
+#
+# Addressed by name on purpose: the server's address may change, and neither
+# clients already in the field nor this script should have to be rebuilt for it.
+MIRROR_HOST="${MAXCALL_MIRROR_HOST:-maxcall.local}"
 MIRROR_USER="${MAXCALL_MIRROR_USER:-root}"
 MIRROR_REMOTE="${MAXCALL_MIRROR_REMOTE:-/opt/maxcall-updates}"
 
