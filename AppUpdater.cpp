@@ -16,6 +16,13 @@
 #include <bcrypt.h>
 #pragma comment(lib, "bcrypt.lib")
 
+// Same floor for the socket API: the mirror's host name is resolved to its IPv4
+// address before anything is requested (see ResolveHostToIpv4), and GetAddrInfoW
+// is only declared at the Vista level set above. It comes after the MFC headers,
+// which VC_EXTRALEAN already keeps free of the old winsock.h.
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
+
 #include "json.h"
 
 namespace AppUpdate
@@ -1093,6 +1100,83 @@ bool Preflight(SPreflight& out)
 // Manifest
 // ---------------------------------------------------------------------------
 
+// Replaces the host in a mirror URL with the IPv4 address it resolves to.
+//
+// The mirror is addressed by name so that a server whose address changes keeps
+// receiving clients that were built before the change. WinInet, handed that
+// name, also sees the link-local IPv6 address the host advertises, tries it
+// first, and hangs until the timeout - the request never reaches the server
+// even though it answers instantly over IPv4. Resolving here, to IPv4 only,
+// removes that failure while keeping the name as the single source of truth.
+//
+// Failure is not fatal: the original URL is returned so WinInet can still try.
+CString ResolveHostToIpv4(const CString& url)
+{
+	int schemeAt = url.Find(_T("://"));
+	if (schemeAt < 0) {
+		return url;
+	}
+	int hostAt = schemeAt + 3;
+	int hostEnd = hostAt;
+	while (hostEnd < url.GetLength() && url[hostEnd] != _T('/') && url[hostEnd] != _T(':')) {
+		hostEnd++;
+	}
+	if (hostEnd == hostAt) {
+		return url;
+	}
+	CString host = url.Mid(hostAt, hostEnd - hostAt);
+
+	// A literal address needs no lookup, and looking one up would be pointless.
+	bool numeric = true;
+	for (int i = 0; i < host.GetLength(); i++) {
+		if (!((host[i] >= _T('0') && host[i] <= _T('9')) || host[i] == _T('.'))) {
+			numeric = false;
+			break;
+		}
+	}
+	if (numeric) {
+		return url;
+	}
+
+	WSADATA wsa;
+	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+		return url;
+	}
+
+	ADDRINFOW hints;
+	ZeroMemory(&hints, sizeof(hints));
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_STREAM;
+
+	ADDRINFOW* results = NULL;
+	CString address;
+	if (GetAddrInfoW(host.GetString(), NULL, &hints, &results) == 0) {
+		for (ADDRINFOW* it = results; it; it = it->ai_next) {
+			if (!it->ai_addr || it->ai_addrlen < (int)sizeof(sockaddr_in)) {
+				continue;
+			}
+			const unsigned char* octets =
+				(const unsigned char*)&((const sockaddr_in*)it->ai_addr)->sin_addr;
+			// 169.254.x.x means the interface has no address yet. It is reachable
+			// only on the local segment, and the server is not on it.
+			if (octets[0] == 169 && octets[1] == 254) {
+				continue;
+			}
+			address.Format(_T("%u.%u.%u.%u"), octets[0], octets[1], octets[2], octets[3]);
+			break;
+		}
+		FreeAddrInfoW(results);
+	}
+	WSACleanup();
+
+	if (address.IsEmpty()) {
+		HttpDiag(_T("mirror host ") + host + _T(" did not resolve to IPv4, trying the name as it is"));
+		return url;
+	}
+	HttpDiag(_T("mirror host ") + host + _T(" resolved to ") + address);
+	return url.Left(hostAt) + address + url.Mid(hostEnd);
+}
+
 bool FetchManifest(EUpdateChannel channel, SManifest& manifest, CString& error)
 {
 	manifest.Reset();
@@ -1109,6 +1193,9 @@ bool FetchManifest(EUpdateChannel channel, SManifest& manifest, CString& error)
 	if (mirror.IsEmpty()) {
 		mirror = _T(_GLOBAL_UPDATE_MIRROR_URL);
 	}
+	// The name is resolved once, before anything is requested, so the manifest and
+	// the payload both go to the address that answers.
+	mirror = ResolveHostToIpv4(mirror);
 
 	bool fetched = false;
 	if (!mirror.IsEmpty()) {

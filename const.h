@@ -70,8 +70,10 @@
 // build is deliberate: users must never have to edit a file to receive
 // updates. Integrity is unaffected because the manifest is still verified
 // against the key embedded below, not against whoever served the file.
-// The mirror is addressed by its IPv4 address on purpose. The hostname also
-// resolves to a link-local IPv6 address, and WinInet tries that one first; it
-// cannot be routed, so the request hangs until the timeout even though the
-// server answers instantly on IPv4.
-#define _GLOBAL_UPDATE_MIRROR_URL "http://192.168.1.32:3001/updates"
+//
+// It is addressed by name, never by address: the server's address may change
+// and a client built today has to keep working afterwards. The name also
+// resolves to a link-local IPv6 address that WinInet tries first, where it
+// cannot be routed and hangs until the timeout, so AppUpdater resolves the name
+// itself and requests the IPv4 address that answers (see ResolveHostToIpv4).
+#define _GLOBAL_UPDATE_MIRROR_URL "http://maxcall.local:3001/updates"
