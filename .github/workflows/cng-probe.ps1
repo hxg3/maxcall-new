@@ -19,24 +19,40 @@ $digest = [System.Security.Cryptography.SHA256]::Create().ComputeHash($msg)
 Add-Type -ReferencedAssemblies System.Numerics -TypeDefinition @"
 using System;
 using System.Numerics;
-using System.Runtime.InteropServices;
 
 public static class Check {
+    static BigInteger FromBE(byte[] be) {
+        byte[] le = new byte[be.Length + 1];
+        for (int i = 0; i < be.Length; i++) le[i] = be[be.Length - 1 - i];
+        le[be.Length] = 0;
+        return new BigInteger(le);
+    }
+    static byte[] ToBE(BigInteger v, int len) {
+        byte[] le = v.ToByteArray();
+        byte[] be = new byte[len];
+        for (int i = 0; i < len; i++) {
+            int j = len - 1 - i;
+            be[i] = (j < le.Length) ? le[j] : (byte)0;
+        }
+        return be;
+    }
     public static string Manual(byte[] modBE, byte[] sig, byte[] expect) {
-        BigInteger n = new BigInteger(modBE, isUnsigned: true, isBigEndian: true);
-        BigInteger s = new BigInteger(sig, isUnsigned: true, isBigEndian: true);
+        BigInteger n = FromBE(modBE);
+        BigInteger s = FromBE(sig);
         BigInteger m = BigInteger.ModPow(s, new BigInteger(65537), n);
-        byte[] em = m.ToByteArray(isUnsigned: true, isBigEndian: true);
-        int len = (n.GetBitLength() + 7) / 8;
-        string hex = BitConverter.ToString(em).Replace("-", "").ToLowerInvariant();
-        bool padOk = em.Length >= 3 + 32 && em[0] == 0x00 && em[1] == 0x01;
+        byte[] em = ToBE(m, 384);
+        bool padOk = (em[0] == 0x00 && em[1] == 0x01);
+        int sep = -1;
+        for (int i = 2; i < em.Length; i++) { if (em[i] == 0x00) { sep = i; break; } }
         bool tailOk = false;
-        if (em.Length >= 32) {
+        if (sep > 0 && em.Length - sep - 1 == 32 + 19) {
             tailOk = true;
             for (int i = 0; i < 32; i++) if (em[em.Length - 32 + i] != expect[i]) { tailOk = false; break; }
         }
-        return "modulus " + len + " bytes, recovered " + em.Length + " bytes, pkcs1prefix=" + padOk + ", digestTail=" + tailOk
-             + ", emhead=" + hex.Substring(0, Math.Min(40, hex.Length));
+        string hex = "";
+        for (int i = 0; i < 24; i++) hex += em[i].ToString("x2");
+        return "em[0..1]=" + em[0].ToString("x2") + em[1].ToString("x2") + " separatorAt=" + sep
+             + " tailMatchesDigest=" + tailOk + " head=" + hex;
     }
 }
 "@
@@ -49,10 +65,3 @@ $p.Modulus = $modBE
 $p.Exponent = [byte[]]@(0x01, 0x00, 0x01)
 $rsa.ImportParameters($p)
 "dotnet RSACng: $($rsa.VerifyData($msg, $sig, [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1))"
-
-$rsa2 = New-Object System.Security.Cryptography.RSACryptoServiceProvider
-$p2 = New-Object System.Security.Cryptography.RSAParameters
-$p2.Modulus = $modBE
-$p2.Exponent = [byte[]]@(0x01, 0x00, 0x01)
-$rsa2.ImportParameters($p2)
-"dotnet RSACSP : $($rsa2.VerifyHash($digest, '2.16.840.1.101.3.4.2.1', $sig))"
