@@ -1,5 +1,6 @@
 name: Probe cng
-on: workflow_dispatch
+on:
+  workflow_dispatch:
 jobs:
   p:
     runs-on: [self-hosted, Windows, X64]
