@@ -13,7 +13,7 @@ static void probe_flag(DWORD flags, const char* name, const char* src, int srcLe
 		int destLen = dl;
 		memset(buf, 0, sizeof(buf));
 		int written = Base64Encode((const BYTE*)src, srcLen, buf, &destLen, flags);
-		printf("  dl=%2d ret=%d wrote=%d\n", dl, ret, destLen);
+		printf("  dl=%2d ret=%d wrote=%d\n", dl, written, destLen);
 		(void)written;
 	}
 }
