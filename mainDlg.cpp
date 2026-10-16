@@ -2560,9 +2560,12 @@ void CmainDlg::MainPopupMenu(bool isMenuButton)
 
 	CMenu channelMenu;
 	channelMenu.CreatePopupMenu();
-	channelMenu.AppendMenu(MF_STRING | (accountSettings.updateChannel == AppUpdate::ChannelStable ? MF_CHECKED : 0),
+	// A beta build is locked to beta: its channel is a property of the binary,
+	// not a preference, so the entries show where it stands and cannot be moved.
+	UINT channelFlags = AppUpdate::IsBetaBuild() ? MF_GRAYED : 0;
+	channelMenu.AppendMenu(MF_STRING | channelFlags | (accountSettings.updateChannel == AppUpdate::ChannelStable ? MF_CHECKED : 0),
 		ID_UPDATE_CHANNEL_STABLE, Translate(_T("Stable releases")));
-	channelMenu.AppendMenu(MF_STRING | (accountSettings.updateChannel == AppUpdate::ChannelBeta ? MF_CHECKED : 0),
+	channelMenu.AppendMenu(MF_STRING | channelFlags | (accountSettings.updateChannel == AppUpdate::ChannelBeta ? MF_CHECKED : 0),
 		ID_UPDATE_CHANNEL_BETA, Translate(_T("Beta builds")));
 	menu.AppendMenu(MF_POPUP, (UINT_PTR)channelMenu.Detach(), Translate(_T("Update Channel")));
 	menu.AppendMenu(MF_SEPARATOR);
@@ -6020,7 +6023,9 @@ void CmainDlg::OnMenuInstallUpdate()
 void CmainDlg::OnMenuUpdateChannel(UINT nID)
 {
 	int channel = (nID == ID_UPDATE_CHANNEL_BETA) ? AppUpdate::ChannelBeta : AppUpdate::ChannelStable;
-	if (accountSettings.updateChannel == channel) {
+	// A beta build is pinned to its own channel; the menu entries are shown for
+	// information only, so a stray click cannot park it on stable.
+	if (AppUpdate::IsBetaBuild() || accountSettings.updateChannel == channel) {
 		return;
 	}
 	accountSettings.updateChannel = channel;

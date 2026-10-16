@@ -111,12 +111,18 @@ try {
   # Point the installed copy at the channel under test, otherwise it checks the
   # stable manifest and the beta result is never exercised.
   #
+  # Both channels are pinned to the settings value 0 on purpose. A stable build
+  # reads the stable manifest, and a beta build has to reach beta anyway because
+  # that is a property of the binary rather than of this file - which is the
+  # shipped situation, and the one where a beta build used to sit permanenty
+  # "up to date" while the beta channel moved on without it.
+  #
   # Two traps here, both hit for real. The app keeps its INI beside the exe only
   # for a copy that just sits in a folder; an MSI install keeps it under
   # %APPDATA%\MaxCall\, so both places are written. And the app's INIs are UTF-16
   # with a BOM - writing this file as UTF-8 left the app reading every key as
   # garbage and quietly falling back to the stable channel.
-  $channelValue = if ($Channel -eq 'beta') { 1 } else { 0 }
+  $channelValue = 0
   $iniName = [System.IO.Path]::GetFileName([System.IO.Path]::ChangeExtension($targetExe, ".ini"))
   $iniPaths = @(
     [System.IO.Path]::ChangeExtension($targetExe, ".ini"),

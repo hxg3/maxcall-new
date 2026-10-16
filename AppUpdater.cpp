@@ -331,6 +331,13 @@ CString SignatureUrl(EUpdateChannel channel)
 		: CString(_T(_GLOBAL_UPDATE_STABLE_SIG_URL));
 }
 
+bool IsBetaBuild()
+{
+	// "6.1.76-beta.160" is a beta build, "6.1.72" is a stable one. The '-beta'
+	// check does not assume the separator that follows it.
+	return CString(_T(_GLOBAL_VERSION)).Find(_T("-beta")) >= 0;
+}
+
 // ---------------------------------------------------------------------------
 // HTTP
 //

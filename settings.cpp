@@ -19,6 +19,7 @@
 #include "stdafx.h"
 #include "settings.h"
 #include "Crypto.h"
+#include "AppUpdater.h"
 
 #include <algorithm>
 #include <vector>
@@ -538,6 +539,13 @@ void AccountSettings::Init()
 	GetPrivateProfileString(section, _T("updateChannel"), _T("0"), ptr, 256, iniFile);
 	str.ReleaseBuffer();
 	updateChannel = (str == _T("1")) ? 1 : 0;
+	// A beta build exists to track beta, so it is not allowed to fall back to the
+	// stable channel. This is what made a shipped beta build report "up to date"
+	// forever: it read the stable manifest, where its own version is newer than
+	// anything published, and the beta it was meant to follow was invisible.
+	if (AppUpdate::IsBetaBuild()) {
+		updateChannel = 1;
+	}
 
 	ptr = updateBaseUrl.GetBuffer(1023);
 	GetPrivateProfileString(section, _T("updateBaseUrl"), NULL, ptr, 1024, iniFile);

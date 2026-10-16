@@ -118,6 +118,14 @@ CString VersionCore(const CString& version);
 CString ManifestUrl(EUpdateChannel channel);
 CString SignatureUrl(EUpdateChannel channel);
 
+// A beta build follows the beta channel whatever the settings file says. Both
+// builds come out of the same sources and only the stamped version separates
+// them, so its prerelease tag is the build's own statement of which channel it
+// belongs to. Without this a beta build started on the default channel, read the
+// stable manifest and could never see a beta update - which is precisely how one
+// reached users and then sat there reporting that it was up to date.
+bool IsBetaBuild();
+
 // Mirrors. Sites that cannot reach github.com from their network can serve the
 // same signed manifests themselves; the manifest stays verifiable either way
 // because the signature is checked against the embedded key, not the host.
