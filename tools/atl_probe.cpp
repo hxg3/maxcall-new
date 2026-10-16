@@ -6,29 +6,30 @@
 #include <windows.h>
 #include <atlenc.h>
 
+static void probe_flag(DWORD flags, const char* name, const char* src, int srcLen) {
+	char buf[256];
+	printf("flags=%s:\n", name);
+	for (int dl = 1; dl <= 40; dl++) {
+		int destLen = dl;
+		memset(buf, 0, sizeof(buf));
+		int ret = Base64Encode((const BYTE*)src, srcLen, buf, &destLen, flags);
+		if (ret > 0) {
+			printf("  first success at destLen=%d wrote=%d out=[%s] raw=", dl, destLen, buf);
+			for (int i = 0; i < destLen && i < 40; i++) {
+				unsigned char c = buf[i];
+				if (c < 32 || c > 126) printf("<%02X>", c); else putchar(c);
+			}
+			printf("\n");
+			return;
+		}
+	}
+	printf("  no success up to 40\n");
+}
+
 int main() {
-    const char* src = "103:Abdullah@x";
-    int srcLen = (int)strlen(src);
-
-    int probeLen = 0;
-    int probe = Base64Encode((const BYTE*)src, srcLen, NULL, &probeLen, ATL_BASE64_FLAG_NONE);
-    printf("1) ATL probe with NULL dest: ret=%d destLen=%d -> %s\n",
-           probe, probeLen, (probe != 0) ? "SUPPORTED" : "REJECTED (bug confirmed)");
-    fflush(stdout);
-
-    char* buf = (char*)malloc(((srcLen + 2) / 3) * 4 + 1);
-    int chain = ((srcLen + 2) / 3) * 4 + 1;
-    int ret = Base64Encode((const BYTE*)src, srcLen, buf, &chain, ATL_BASE64_FLAG_NONE);
-    printf("2) ATL pre-sized: ret=%d out=[%.*s] outLen=%d\n", ret, chain, buf, chain);
-    fflush(stdout);
-
-    const char* ref = "MTAzOkFiZHVsbGFoQHg=";
-    bool match = (ret > 0 && strncmp(buf, ref, strlen(ref) + 1) == 0);
-    free(buf);
-    if (!match) {
-        printf("::error::fixed pattern did not produce the reference Basic value\n");
-        return 2;
-    }
-    printf("3) reference match OK - the fixed code path yields a valid Basic header value\n");
-    return 0;
+	const char* src = "103:Abdullah@x";
+	int srcLen = (int)strlen(src);
+	probe_flag(ATL_BASE64_FLAG_NONE, "NONE", src, srcLen);
+	probe_flag(ATL_BASE64_FLAG_NOCRLF, "NOCRLF", src, srcLen);
+	return 0;
 }
