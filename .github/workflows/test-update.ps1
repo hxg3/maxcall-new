@@ -58,6 +58,23 @@ try {
   if (-not $ok) { throw "payload sha256 mismatch" }
   Log "sha256 MATCH"
 
+  # The machine may only have the other channel installed. Put this channel's
+  # signed build at the target path, and give it an INI modelled on whatever
+  # sibling already works, so the run below exercises the channel under test
+  # instead of failing because a file the install never had is missing.
+  if (-not (Test-Path $targetExe)) {
+    Copy-Item $payload $targetExe -Force
+    Log "bootstrapped $([System.IO.Path]::GetFileName($targetExe)) from the signed payload"
+  }
+  $iniPathEarly = [System.IO.Path]::ChangeExtension($targetExe, ".ini")
+  if (-not (Test-Path $iniPathEarly)) {
+    $template = Get-ChildItem $MaxCallDir -Filter "*.ini" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($template) {
+      Copy-Item $template.FullName $iniPathEarly -Force
+      Log "started $([System.IO.Path]::GetFileName($iniPathEarly)) from $($template.Name)"
+    }
+  }
+
   # --- 3. real updater: fetch, verify the RSA signature, download, install ---
   # The updater is exercised for real: it re-fetches and re-verifies everything
   # itself, then replaces this very executable. That is the path a user takes.
@@ -96,8 +113,17 @@ try {
   $iniPath = [System.IO.Path]::ChangeExtension($targetExe, ".ini")
   if (Test-Path $iniPath) {
     $ini = Get-Content $iniPath -Raw
-    $ini = [regex]::Replace($ini, '(?m)^updateChannel=.*$', "updateChannel=$(if ($Channel -eq 'beta') { 1 } else { 0 })")
-    $ini = [regex]::Replace($ini, '(?m)^enableLog=.*$', "enableLog=1")
+    $channelValue = if ($Channel -eq 'beta') { 1 } else { 0 }
+    if ($ini -match '(?m)^updateChannel=') {
+      $ini = [regex]::Replace($ini, '(?m)^updateChannel=.*$', "updateChannel=$channelValue")
+    } else {
+      $ini = $ini.TrimEnd() + "`r`nupdateChannel=$channelValue`r`n"
+    }
+    if ($ini -match '(?m)^enableLog=') {
+      $ini = [regex]::Replace($ini, '(?m)^enableLog=.*$', "enableLog=1")
+    } else {
+      $ini = $ini.TrimEnd() + "`r`nenableLog=1`r`n"
+    }
     Set-Content -Path $iniPath -Value $ini -Encoding UTF8
     Log "set updateChannel in $([System.IO.Path]::GetFileName($iniPath))"
   } else {
