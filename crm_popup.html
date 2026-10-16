@@ -402,7 +402,7 @@ function hisVisitsBlock(visits) {
 function hisOpenButton() {
   var btn = document.createElement('button');
   btn.type = 'button';
-  btn.textContent = 'Open in WebHIS (number on clipboard)';
+  btn.textContent = 'Open File';
   btn.onclick = function () { postNative({action: 'open_webhis'}); };
   btn.className = 'bg-white border border-border hover:bg-surface text-ink-sec font-semibold py-1.5 rounded-lg transition text-sm';
   return btn;

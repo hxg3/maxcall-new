@@ -715,6 +715,8 @@ void CrmPopupDlg::OnSize(UINT nType, int cx, int cy)
 void CrmPopupDlg::Restore()
 {
 	UpdateWebView();
+	// إعادة فتح نفس الرقم تبني القسم المرضي من جديد — updateCallerInfo يفرغه داخلياً
+	LoadHisInfo();
 	ShowWindow(SW_SHOWNORMAL);
 	SetForegroundWindow();
 	SetTimer(1, 120000, NULL);
