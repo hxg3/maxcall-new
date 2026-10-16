@@ -12,46 +12,13 @@ jobs:
   probe:
     runs-on: windows-latest
     steps:
-      - name: Write and compile the probe
+      - uses: actions/checkout@v4
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build and run the probe
         shell: pwsh
         run: |
-          $code = @'
-          #include <cstdio>
-          #include <cstring>
-          #include <cstdlib>
-          #include <windows.h>
-          #include <atlenc.h>
-
-          int main() {
-              const char* src = "103:Abdullah@x";
-              int srcLen = (int)strlen(src);
-
-              // 1) the exact pattern the shipped popup code used
-              int probeLen = 0;
-              int probe = Base64Encode((const BYTE*)src, srcLen, NULL, &probeLen, ATL_BASE64_FLAG_NONE);
-              printf("1) ATL probe with NULL dest: ret=%d destLen=%d -> %s\n",
-                     probe, probeLen, (probe != 0) ? "SUPPORTED" : "REJECTED (bug confirmed)");
-              fflush(stdout);
-
-              // 2) the fixed pattern: pre-sized buffer
-              char* buf = (char*)malloc(((srcLen + 2) / 3) * 4 + 1);
-              int chain = ((srcLen + 2) / 3) * 4 + 1;
-              int ret = Base64Encode((const BYTE*)src, srcLen, buf, &chain, ATL_BASE64_FLAG_NONE);
-              printf("2) ATL pre-sized: ret=%d out=[%.*s] outLen=%d\n", ret, chain, buf, chain);
-              fflush(stdout);
-
-              // 3) must equal the standard reference
-              const char* ref = "MTAzOkFiZHVsbGFoQHg=";
-              if (ret <= 0 || strncmp(buf, ref, strlen(ref) + 1) != 0) {
-                  printf("::error::fixed pattern produced [%s], expected [%s]\n", ret > 0 ? buf : "<empty>", ref);
-                  return 2;
-              }
-              printf("3) reference match OK - fixed pattern yields a valid Basic header value\n");
-              free(buf);
-              return 0;
-          }
-
-          '@
-          Set-Content -Path "$env:GITHUB_WORKSPACE\probe.cpp" -Value $code -Encoding ascii
-          cl /nologo /EHsc /MD probe.cpp /Fe:probe.exe
+          cl /nologo /EHsc /MD tools\atl_probe.cpp /Fe:probe.exe
           .\probe.exe
