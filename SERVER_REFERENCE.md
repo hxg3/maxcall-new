@@ -41,6 +41,7 @@
 | البند | القيمة |
 |---|---|
 | المسار | `/opt/maxcall-dashboard/app.py` (المصدر المعتمد في `server/app.py` بهذا الريبو — checksums متطابقة) |
+| مرآة التحديث | `GET /updates/<name>` — عامة بلا مصادقة، تقدّم ٦ أسماء مسموحة فقط (`update.json` + `.sig` + `.beta` + `.beta.sig` + `MaxCall.exe` + `MaxCall-beta.exe`) من `/opt/maxcall-updates` — التفاصيل في `UPDATE_REFERENCE.md` |
 | التشغيل | خدمة `maxcall-dashboard.service`: **gunicorn بمستخدم `maxcall`** (غير root) — `ExecStart=/usr/bin/python3 -m gunicorn app:app -b 0.0.0.0:3001 --workers 2` + `EnvironmentFile=/etc/maxcall.env` — الأمر: `systemctl restart maxcall-dashboard` |
 | الاعتماديات | `requirements.txt`: `Flask==3.0.3`, `pymysql==1.1.1`, `flask-cors==4.0.0`, `netifaces==0.11.0` + حزمة النظام `python3-gunicorn` |
 | الاتصال بالقاعدة | مستخدم `maxcall@localhost` عبر `127.0.0.1:3306` (بيانات الاعتماد في `/etc/maxcall.env` بصلاحيات 640 لمجموعة `maxcall` — لا أسرار في الكود) |
@@ -162,3 +163,4 @@
 | 2026-09-06 | الفائتة تقرير كامل: `/api/missed` بفترات حتى 93 يوماً + خيارات جاهزة (Today/7/30/90/Custom) + فلتر موظف (فائتة أثناء توفره) + حقل `date` + التوفر في Calls (`online_names`) وملف المتصل (`online`) وبروفايل الموظف (`missed_online` 30 يوماً) — المصدر: لقطة الرنين ثم `presence_log` ثم heuristic |
 | 2026-09-06 | تبسيط الداشبورد: حذف كل أزرار Search/Refresh — بحث وفلاتر فورية (debounce) والتبويب يجلب بياناته عند فتحه — الرسم البياني بأسماء الأيام + tooltip (اليوم الكامل + العدد) + نسبة الرد تحت إجمالي اليوم + عناوين Reports بتوضيحات hover |
 | 2026-09-21 | تعبئة أسبوع البيانات (2026-09-15→21): نسخ الأسبوع الأكثر نشاطاً (2026-08-28→09-03، 309 مكالمة) مع إزاحة الأيام الكاملة وفق أسبوعية اليوم (Tue→Tue +14d لـ 09-01…03، Fri/Mon→ +21d لـ 08-28…31) — تضمن: `cdr` (309 صف بجديد `uniqueid/linkedid` + `recfile` معاد توليده)، نسخ 28 ملف wav إلى مجلدات التواريخ الجديدة، `ring_presence` (مجموعة واحدة)، `presence_log` (3 سجلات)، تحديث `callers.total_calls/last_call` لـ `77181992`/`93744242` — تحقق شامل عبر الـ API (`/api/stats` أسبوع 30/14/90/36/67/61/13، `/api/recordings` 18 تسجيلاً قابلاً للتشغيل، `/api/missed`، `/api/reports`) + اختبار تراجع كامل (undo → إرجاع القيم الأصلية → إعادة التعبئة). الأدوات: `/root/maxcall-datafill/fill_week.py` + `undo_fill.py` + `manifest.json` (نشر 2026-09-21) — التراجع: `python3 undo_fill.py --force` |
+| 2026-10-16 | توثيق مسار مرآة التحديث `GET /updates/<name>` (عام بلا مصادقة، ٦ أسماء مسموحة من `/opt/maxcall-updates`) في جدول هذا القسم + إنشاء `UPDATE_REFERENCE.md` كمرجع كامل لميزة التحديث الذاتي |
