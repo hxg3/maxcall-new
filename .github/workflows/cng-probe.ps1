@@ -1,0 +1,64 @@
+$ErrorActionPreference = 'Stop'
+
+$h = Get-Content "UpdatePublicKey.h" -Raw
+$b = $h.Substring($h.IndexOf('g_maxcallUpdatePublicKey[] = {'))
+$blob = [byte[]]([regex]::Matches($b.Substring(0, $b.IndexOf('};')), '0x([0-9A-Fa-f]{2})') | ForEach-Object { [Convert]::ToByte($_.Groups[1].Value, 16) })
+"blob bytes      : $($blob.Length)"
+
+$wc = New-Object System.Net.WebClient
+$msg = $wc.DownloadData("http://192.168.1.32:3001/updates/update.json.beta")
+$sigTxt = [System.Text.Encoding]::ASCII.GetString($wc.DownloadData("http://192.168.1.32:3001/updates/update.json.beta.sig")).Trim()
+$sig = [Convert]::FromBase64String($sigTxt)
+$hash = [System.Security.Cryptography.SHA256]::Create().ComputeHash($msg)
+"manifest bytes  : $($msg.Length)"
+"signature bytes : $($sig.Length)"
+"digest hex      : $((($hash | ForEach-Object { $_.ToString('x2') }) -join '').Substring(0, 16))"
+
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class Bcrypt {
+    [DllImport("bcrypt.dll", CharSet=CharSet.Unicode)]
+    public static extern int BCryptOpenAlgorithmProvider(out IntPtr phAlgorithm, string pszAlgId, string pszImplementation, int dwFlags);
+    [DllImport("bcrypt.dll", CharSet=CharSet.Unicode)]
+    public static extern int BCryptImportKeyPair(IntPtr hAlgorithm, IntPtr hImportKey, string pszBlobType, out IntPtr phKey, byte[] pbInput, int cbInput, int dwFlags);
+    [DllImport("bcrypt.dll", CharSet=CharSet.Unicode)]
+    public static extern int BCryptVerifySignature(IntPtr hKey, IntPtr pPaddingInfo, byte[] pbHashValue, int cbHashValue, byte[] pbSignature, int cbSignature, int dwFlags);
+}
+[StructLayout(LayoutKind.Sequential)]
+public struct Pkcs1Info { public IntPtr pszAlgId; }
+"@
+
+$hAlg = [IntPtr]::Zero
+$st = [Bcrypt]::BCryptOpenAlgorithmProvider([ref]$hAlg, "RSA", $null, 0)
+"open provider   : 0x{0:X8}" -f $st
+
+$hKey = [IntPtr]::Zero
+$st = [Bcrypt]::BCryptImportKeyPair($hAlg, [IntPtr]::Zero, "RSAPUBLIC_BLOB", [ref]$hKey, $blob, $blob.Length, 0)
+"import keypair  : 0x{0:X8}" -f $st
+
+$algPtr = [Runtime.InteropServices.Marshal]::StringToHGlobalUni("SHA256")
+$info = New-Object Pkcs1Info
+$info.pszAlgId = $algPtr
+$infoPtr = [Runtime.InteropServices.Marshal]::AllocHGlobal([Runtime.InteropServices.Marshal]::SizeOf($info))
+[Runtime.InteropServices.Marshal]::StructureToPtr($info, $infoPtr, $false)
+
+"flags=2 + info  : 0x{0:X8}" -f [Bcrypt]::BCryptVerifySignature($hKey, $infoPtr,      $hash, $hash.Length, $sig, $sig.Length, 2)
+"flags=0 + null  : 0x{0:X8}" -f [Bcrypt]::BCryptVerifySignature($hKey, [IntPtr]::Zero, $hash, $hash.Length, $sig, $sig.Length, 0)
+"flags=0 + info  : 0x{0:X8}" -f [Bcrypt]::BCryptVerifySignature($hKey, $infoPtr,      $hash, $hash.Length, $sig, $sig.Length, 0)
+
+$rsa = New-Object System.Security.Cryptography.RSACng
+$cbExp = [BitConverter]::ToUInt32($blob, 8)
+$cbMod = [BitConverter]::ToUInt32($blob, 12)
+$expLE = $blob[24..($cbExp + 23)]
+$modLE = $blob[($cbExp + 24)..($cbExp + 23 + $cbMod)]
+[Array]::Reverse($expLE)
+[Array]::Reverse($modLE)
+$lead = New-Object System.Collections.Generic.List[byte]
+$on = $false
+foreach ($x in $modLE) { if (-not $on) { if ($x -ne 0) { $on = $true; $lead.Add($x) } } else { $lead.Add($x) } }
+$p = New-Object System.Security.Cryptography.RSAParameters
+$p.Modulus = $lead.ToArray()
+$p.Exponent = $expLE
+$rsa.ImportParameters($p)
+"dotnet RSACng   : $($rsa.VerifyData($msg, $sig, [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1))"
