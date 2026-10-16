@@ -1,6 +1,11 @@
 name: Probe cng
 on:
   workflow_dispatch:
+    inputs:
+      note:
+        description: unused
+        required: false
+        default: x
 jobs:
   p:
     runs-on: [self-hosted, Windows, X64]
