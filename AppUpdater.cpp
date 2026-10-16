@@ -133,8 +133,17 @@ bool SManifest::IsValid() const
 			return false;
 		}
 	}
-	// Anything other than HTTPS would defeat the signature check in practice.
-	return url.Left(8).CompareNoCase(_T("https://")) == 0;
+	// The mirror serves over plain HTTP because this network cannot complete TLS
+	// with github.com. What vouches for the manifest is its signature, and what
+	// vouches for the payload is the sha256 that signature covers, so the scheme
+	// does not weaken either check. Insisting on https here made the install
+	// button a silent no-op the moment the payload host was swapped to the
+	// mirror, which is the only route this network has.
+	CString scheme = url.Left(8);
+	if (scheme.CompareNoCase(_T("https://")) == 0) {
+		return true;
+	}
+	return url.Left(7).CompareNoCase(_T("http://")) == 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -1417,6 +1426,54 @@ bool LaunchApplyStage(const CString& targetExe, const CString& sourceExe, DWORD&
 		CloseHandle(pi.hProcess);
 	}
 	return ok != FALSE;
+}
+
+int RunSelfUpdate(const CString& exeFile, const CString& pathLocal, EUpdateChannel channel)
+{
+	// Deliberately the same order the install button follows, because the bug
+	// that made that button inert lived in the guard below and nowhere else.
+	SManifest manifest;
+	CString error;
+	if (!FetchManifest(channel, manifest, error)) {
+		HttpDiag(_T("self-update: manifest failed: ") + error);
+		return 1;
+	}
+	if (!manifest.IsValid()) {
+		HttpDiag(_T("self-update: manifest rejected, url ") + manifest.url);
+		return 1;
+	}
+	if (!IsNewer(manifest.version, CString(_T(_GLOBAL_VERSION)))) {
+		HttpDiag(_T("self-update: nothing newer than ") + CString(_T(_GLOBAL_VERSION)) +
+			_T(", manifest says ") + manifest.version);
+		return 2;
+	}
+
+	CString folder = pathLocal + _T("update");
+	CreateDirectory(folder, NULL);
+	CString path;
+	path.Format(_T("%s\\MaxCall-%s.exe"), folder, manifest.version);
+	DeleteFile(path);
+
+	DWORD total = 0, downloaded = 0;
+	if (!HttpDownloadToFile(manifest.url, path, total, downloaded, error, 300000, NULL)) {
+		HttpDiag(_T("self-update: download failed: ") + error);
+		return 1;
+	}
+
+	CString hex;
+	if (!Sha256File(path, hex) || hex.CompareNoCase(manifest.sha256) != 0) {
+		HttpDiag(_T("self-update: payload does not match the signed checksum"));
+		DeleteFile(path);
+		return 1;
+	}
+
+	DWORD previousPid = 0;
+	if (!LaunchApplyStage(exeFile, path, previousPid)) {
+		HttpDiag(_T("self-update: the apply stage did not start"));
+		return 1;
+	}
+	HttpDiag(_T("self-update: apply stage started for ") + manifest.version);
+	return 0;
 }
 
 } // namespace AppUpdate

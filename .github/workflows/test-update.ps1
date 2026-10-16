@@ -175,6 +175,59 @@ try {
     throw "the client never reported the manifest signature as verified"
   }
 
+  # --- 6. the install path itself, driven without a GUI ---
+  # The banner's button did nothing for every user because a guard inside the
+  # install path accepted https only, while the mirror - the only route this
+  # network has - serves plain http. --self-update runs that same guard and the
+  # download behind it, so a regression fails here instead of turning the button
+  # into a silent no-op again.
+  Log "driving the install path headlessly (--self-update)"
+  Stop-MaxCall
+  for ($i = 0; $i -lt 5 -and (Test-Path $realLog); $i++) {
+    try { Remove-Item $realLog -Force -ErrorAction Stop } catch { Start-Sleep -Seconds 2 }
+  }
+
+  $self = Start-Process -FilePath $targetExe -ArgumentList "--self-update" -WorkingDirectory $MaxCallDir -PassThru
+  $selfDone = $self.WaitForExit(300000)
+  if (-not $selfDone) { $self.Kill(); throw "--self-update did not finish within 5 minutes" }
+
+  $selfLog = if (Test-Path $realLog) { Get-Content $realLog -Raw } else { "" }
+  $r.steps.selfUpdate = @{
+    exitCode    = $self.ExitCode
+    rejected    = [bool]($selfLog -match "self-update: manifest rejected")
+    upToDate    = [bool]($selfLog -match "self-update: nothing newer")
+    applied     = [bool]($selfLog -match "self-update: apply stage started")
+    manifestErr = [bool]($selfLog -match "self-update: manifest failed")
+    downloadErr = [bool]($selfLog -match "self-update: download failed")
+    checksumErr = [bool]($selfLog -match "self-update: payload does not match")
+  }
+  Log ("self-update: exit {0} | rejected {1} | up-to-date {2} | applied {3}" -f `
+       $r.steps.selfUpdate.exitCode, $r.steps.selfUpdate.rejected, `
+       $r.steps.selfUpdate.upToDate, $r.steps.selfUpdate.applied)
+
+  if ($r.steps.selfUpdate.rejected) {
+    throw "the install path rejected the mirror's payload URL"
+  }
+  if ($r.steps.selfUpdate.exitCode -eq 0) {
+    # A newer build really was installed: the swap must leave the signed payload.
+    if (-not $r.steps.selfUpdate.applied) {
+      throw "--self-update downloaded a build but never handed over to the apply stage"
+    }
+    Start-Sleep -Seconds 3
+    if ((Sha256Of $targetExe) -ne (Sha256Of $payload)) {
+      throw "the install path replaced the executable with something other than the signed payload"
+    }
+    Log "the install path swapped in the signed payload"
+  } elseif ($r.steps.selfUpdate.exitCode -eq 2) {
+    # Nothing newer exists: the guard passed and the comparison ran, which is
+    # exactly the step that used to abort before either happened.
+    if (-not $r.steps.selfUpdate.upToDate) {
+      throw "--self-update reported nothing newer without logging why"
+    }
+  } else {
+    throw "the install path failed: exit $($r.steps.selfUpdate.exitCode)"
+  }
+
   $r.success = $true
   Log "ALL STEPS PASSED"
 }

@@ -204,6 +204,15 @@ BOOL CmicrosipApp::InitInstance()
 
 	accountSettings.Init();
 
+	// Headless install: drives exactly the path the update banner's button
+	// drives, so the release test can prove it works without a human clicking.
+	if (lstrcmp(theApp.m_lpCmdLine, _T("--self-update")) == 0) {
+		AppUpdate::RunSelfUpdate(accountSettings.exeFile, accountSettings.pathLocal,
+			accountSettings.updateChannel == 1
+				? AppUpdate::ChannelBeta : AppUpdate::ChannelStable);
+		return FALSE;
+	}
+
 	// Discard whatever an interrupted update left behind, so the program's folder
 	// holds MaxCall.exe and nothing else.
 	AppUpdate::CleanupLeftovers(accountSettings.exeFile,

@@ -5798,7 +5798,15 @@ void CmainDlg::InstallUpdate()
 	if (m_updateBusy) {
 		return;
 	}
-	if (m_updateState != AppUpdate::StateAvailable || !m_updateManifest.IsValid()) {
+	if (m_updateState != AppUpdate::StateAvailable) {
+		return;
+	}
+	if (!m_updateManifest.IsValid()) {
+		// Never return quietly here: a button that does nothing is worse than an
+		// error, because the user keeps pressing it.
+		m_updateState = AppUpdate::StateError;
+		m_updateMessage = Translate(_T("The update details are incomplete, so it cannot be installed."));
+		PushUpdateStateToShell();
 		return;
 	}
 

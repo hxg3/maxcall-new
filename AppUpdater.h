@@ -174,6 +174,13 @@ int RunApplyStage(const CString& targetExe, const CString& sourceExe);
 // reports the PID that instance must wait for.
 bool LaunchApplyStage(const CString& targetExe, const CString& sourceExe, DWORD& previousPid);
 
+// Headless twin of the install button: fetch the signed manifest, download the
+// payload, check it against the signed sha256 and hand over to the apply stage.
+// Exists so the path the user actually presses can be exercised without a GUI.
+// Returns 0 when a newer build was started, 2 when there was nothing newer and
+// 1 on any failure.
+int RunSelfUpdate(const CString& exeFile, const CString& pathLocal, EUpdateChannel channel);
+
 // Removes the scratch files an update leaves behind, so the program's folder
 // only ever contains MaxCall.exe again. Safe to call on every start: it never
 // touches MaxCall.exe itself and ignores anything that vanished meanwhile.
