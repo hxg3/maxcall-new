@@ -29,11 +29,11 @@
 // CI also rewrites these macros from the tag at build time for tag builds, so
 // a release binary always reports exactly the tag it was cut from.
 // ---------------------------------------------------------------------------
-#define _GLOBAL_VERSION "6.1.65"
+#define _GLOBAL_VERSION "6.1.69"
 #define _GLOBAL_VERSION_MAJOR 6
 #define _GLOBAL_VERSION_MINOR 1
-#define _GLOBAL_VERSION_PATCH 65
-#define _GLOBAL_VERSION_COMMA 6,1,65,0
+#define _GLOBAL_VERSION_PATCH 69
+#define _GLOBAL_VERSION_COMMA 6,1,69,0
 
 #define _GLOBAL_KEY "*********"
 #define _GLOBAL_VIDEO 
