@@ -25,7 +25,6 @@ jobs:
         shell: powershell
         run: |
           powershell.exe -ExecutionPolicy Bypass -File "$env:GITHUB_WORKSPACE\.github\workflows\test-update.ps1" -Channel "${{ github.event.inputs.channel }}" -Action full
-        continue-on-error: true
 
       - name: Result
         shell: powershell

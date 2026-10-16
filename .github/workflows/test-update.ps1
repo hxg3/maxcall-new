@@ -10,6 +10,14 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
 function Log($m) { Write-Host "[$(Get-Date -Format 'HH:mm:ss')] $m" }
+# The beta build runs as "MaxCall-beta", so matching the plain name left the
+# previous run alive holding the debug log and the executable.
+function Stop-MaxCall {
+  Get-Process -ErrorAction SilentlyContinue |
+    Where-Object { $_.ProcessName -like "MaxCall*" } |
+    Stop-Process -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Seconds 2
+}
 function Save($o) {
   $o | ConvertTo-Json -Depth 6 | Out-File -Encoding utf8 "$env:GITHUB_WORKSPACE\test-result.json"
 }
@@ -29,14 +37,14 @@ $targetExe = Join-Path $MaxCallDir $exeName
 $payload   = Join-Path $MaxCallDir $exeName
 
 try {
-  Get-Process -Name "MaxCall" -ErrorAction SilentlyContinue | Stop-Process -Force
-  Start-Sleep -Seconds 1
+  Stop-MaxCall
 
   # --- 1. manifest + signature from the mirror ---
   Log "manifest: $MirrorBase/$manifestName"
   $m = (Invoke-WebRequest "$MirrorBase/$manifestName" -UseBasicParsing -TimeoutSec 30).Content | ConvertFrom-Json
   $sig = (Invoke-WebRequest "$MirrorBase/$sigName" -UseBasicParsing -TimeoutSec 30)
-  $r.steps.manifest = @{ version = $m.version; sha256 = $m.sha256; size = $m.size; sigBytes = $sig.RawContentLength }
+  $sigText = ([string]$sig.Content) -replace '\s', ''
+  $r.steps.manifest = @{ version = $m.version; sha256 = $m.sha256; size = $m.size; sigBytes = ([Convert]::FromBase64String($sigText)).Length }
 
   # --- 2. payload + sha256 ---
   Log "payload: $MirrorBase/$exeName"
@@ -75,8 +83,12 @@ try {
   # The real log has to go first. Reading it without deleting it reports whatever
   # an earlier run left behind, which is how a stale log gets mistaken for a
   # current result.
+  Stop-MaxCall
   $logPath = Join-Path $MaxCallDir "maxcall_debug.log"
-  if (Test-Path $logPath) { Remove-Item $logPath -Force }
+  for ($i = 0; $i -lt 5 -and (Test-Path $logPath); $i++) {
+    try { Remove-Item $logPath -Force -ErrorAction Stop } catch { Start-Sleep -Seconds 2 }
+  }
+  if (Test-Path $logPath) { throw "the debug log is still locked: $logPath" }
 
   # Point the installed copy at the channel under test, otherwise it checks the
   # stable manifest and the beta result is never exercised.
