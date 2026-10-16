@@ -425,8 +425,10 @@ void CrmPopupDlg::OpenWebhisBrowser()
 }
 
 // استخدام نفس بيانات دخول الموظف عبر Basic auth (ترميز Base64 عبر ATL atlenc.h)
-// ملاحظة: ATL Base64Encode لا تدعم الاستقصاء بـ szDest=NULL (ترجع 0) — نوفر
-// المخزن بالحجم الرياضي المضمون (بدون فواصل أسطر) قبل النداء.
+// عقد ATL المثبت تجريبياً (فرع atl-probe): التمرير بـ szDest=NULL يفشل (ret=0)،
+// وATL_BASE64_FLAG_NONE تحجز أسطر CRLF كل 64 حرفاً فتتغير السعة المطلوبة؛
+// لذلك نستخدم ATL_BASE64_FLAG_NOCRLF بمخزن مقدَّر بحجم 4*ceil(n/3) + هامش —
+// مرفوض فقط عند أصغر من المطلوب، ويقبل أي أكبر منه.
 CString CrmPopupDlg::MakeBasicAuthHeader(const CString& username, const CString& password)
 {
 	CString raw;
@@ -439,10 +441,11 @@ CString CrmPopupDlg::MakeBasicAuthHeader(const CString& username, const CString&
 	CStringA encoded;
 	int srcLen = data.GetLength();
 	if (srcLen > 0) {
-		int destLen = ((srcLen + 2) / 3) * 4 + 1;
+		int destLen = ((srcLen + 2) / 3) * 4 + 2;
 		LPSTR buf = encoded.GetBuffer(destLen);
-		int written = Base64Encode((const BYTE*)(LPCSTR)data, srcLen, buf, &destLen, ATL_BASE64_FLAG_NONE);
+		int written = Base64Encode((const BYTE*)(LPCSTR)data, srcLen, buf, &destLen, ATL_BASE64_FLAG_NOCRLF);
 		encoded.ReleaseBuffer(written > 0 ? destLen : 0);
+		if (written <= 0) encoded.Empty();
 	}
 	CString header(_T("Basic "));
 	header += CString(encoded);
