@@ -48,7 +48,7 @@ $pubBlob = $pub.ToArray()
 "publickeyblob   : $($pubBlob.Length) bytes"
 
 $hProv = [IntPtr]::Zero
-$ok = [Capi]::CryptAcquireContextA([ref]$hProv, $null, $null, 24, 0xF0000000)
+$ok = [Capi]::CryptAcquireContextA([ref]$hProv, $null, $null, [uint32]24, [uint32]0xF0000000L)
 "acquire context : $ok  (err $([Runtime.InteropServices.Marshal]::GetLastWin32Error()))"
 $hKey = [IntPtr]::Zero
 $ok = [Capi]::CryptImportKey($hProv, $pubBlob, $pubBlob.Length, [IntPtr]::Zero, 0, [ref]$hKey)
