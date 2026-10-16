@@ -5,7 +5,7 @@ $b = $h.Substring($h.IndexOf('g_maxcallUpdatePublicKey[] = {'))
 $blob = [byte[]]([regex]::Matches($b.Substring(0, $b.IndexOf('};')), '0x([0-9A-Fa-f]{2})') | ForEach-Object { [Convert]::ToByte($_.Groups[1].Value, 16) })
 $cbExp = [BitConverter]::ToUInt32($blob, 8)
 $cbMod = [BitConverter]::ToUInt32($blob, 12)
-$modulus = $blob[($cbExp + 24)..($cbExp + 23 + $cbMod)]
+$modulus = [byte[]]$blob[($cbExp + 24)..($cbExp + 23 + $cbMod)]
 "blob bytes      : $($blob.Length)  (magic 0x{0:X8}, exp {1} bytes, mod {2} bytes)" -f [BitConverter]::ToUInt32($blob, 0), $cbExp, $cbMod
 
 $wc = New-Object System.Net.WebClient
