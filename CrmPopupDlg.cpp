@@ -421,7 +421,7 @@ void CrmPopupDlg::OpenWebhisBrowser()
 	if (!cleanNumber.IsEmpty() && mainDlg) {
 		mainDlg->CopyStringToClipboard(cleanNumber);
 	}
-	ShellExecute(NULL, _T("open"), _T("http://solverserver:81/#/home/hmis/op/PatientSearch"), NULL, NULL, SW_SHOWNORMAL);
+	ShellExecute(NULL, _T("open"), _T("http://solverserver:81/#/home/hmis/op/PatientRegistration"), NULL, NULL, SW_SHOWNORMAL);
 }
 
 // استخدام نفس بيانات دخول الموظف عبر Basic auth (ترميز Base64 عبر ATL atlenc.h)

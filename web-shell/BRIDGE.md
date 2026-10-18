@@ -95,7 +95,7 @@ js.Format(_T("onCallState(%d, '%s')"), call_id, _T("active"));
 | C++ → JS | `hisUnavailable()` — إخفاء صامت (انقطاع/توثيق مفقود) |
 | JS → C++ | `{action:'his_search', by:'name'\|'id', q: string}` — بديل البحث عند عدم المطابقة، يمرر إلى `LoadHisInfo('?by=..&q=..')` |
 | JS → C++ | `{action:'his_select', pat_id: string}` — اختيار مريض من عدة مطابقات → `LoadHisInfo('?pat_id=..')` |
-| JS → C++ | `{action:'open_webhis'}` — نسخ الرقم للحافظة وفتح `http://solverserver:81/#/home/hmis/op/PatientSearch` في المتصفح الافتراضي للموظف (جلسته الخاصة) |
+| JS → C++ | `{action:'open_webhis'}` — نسخ الرقم للحافظة وفتح `http://solverserver:81/#/home/hmis/op/PatientRegistration` في المتصفح الافتراضي للموظف (جلسته الخاصة) |
 
 ## 4) ملاحظات التنفيذ لـ C++
 
