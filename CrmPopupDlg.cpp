@@ -489,6 +489,9 @@ void CrmPopupDlg::LoadHisInfo(CString extraQuery)
 	url.Format(_T("http://maxcall.local:3001/api/his/caller/%s"), UrlEncodeCallerNumber(cleanNumber));
 	if (!extraQuery.IsEmpty()) url += extraQuery;
 
+	// مؤشر انتظار صادر فور بداية الجلب — يستبدله updateHisInfo أو يخفيه hisUnavailable
+	HisExecuteScript(_T("hisLoading()"));
+
 	CString headers = _T("Authorization: ") + MakeBasicAuthHeader(username, password);
 	URLGetAsync(url, m_hWnd, WM_HIS_RESULT, false, _T(""), headers);
 }

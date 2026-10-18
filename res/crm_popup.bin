@@ -493,6 +493,28 @@ function hisOpenButton() {
   return btn;
 }
 
+// مؤشر انتظار قصير يظهر فور بدء جلب بيانات المشفى، ثم يُستبدل بالبطاقة أو يُخفى بهدوء
+function hisLoading() {
+  var section = document.getElementById('hisSection');
+  var body = document.getElementById('hisBody');
+  var badge = document.getElementById('hisBadge');
+  var summary = document.getElementById('hisSummary');
+  if (!section || !body) return;
+  section.classList.remove('hidden');
+  if (badge) { badge.classList.add('hidden'); badge.textContent = ''; }
+  if (summary) summary.textContent = 'loading...';
+  body.innerHTML = '';
+  var row = document.createElement('div');
+  row.className = 'flex items-center justify-center gap-2 py-3 text-xs text-muted';
+  var spin = document.createElement('span');
+  spin.className = 'h-3.5 w-3.5 animate-spin rounded-full border-2 border-border border-t-transparent';
+  var lbl = document.createElement('span');
+  lbl.textContent = 'Loading patient file...';
+  row.appendChild(spin);
+  row.appendChild(lbl);
+  body.appendChild(row);
+}
+
 function updateHisInfo(jsonText) {
   var body = document.getElementById('hisBody');
   var section = document.getElementById('hisSection');
