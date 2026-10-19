@@ -374,14 +374,22 @@ function postNative(object) {
 function resetHis() {
   hisData = null;
   var section = document.getElementById('hisSection');
-  if (section) section.classList.add('hidden');
   var badge = document.getElementById('hisBadge');
-  if (badge) badge.classList.add('hidden');
   var summary = document.getElementById('hisSummary');
-  if (summary) summary.textContent = '';
   var body = document.getElementById('hisBody');
-  if (body) { body.classList.remove('hidden'); body.innerHTML = ''; }
   var ch = document.getElementById('hisChevron');
+  if (__hisPending) {
+    // جولة جلب جارية (سباق إقلاع/تحديث المتصل): أبقِ المؤشر ظاهراً بدل مسحه
+    if (section) section.classList.remove('hidden');
+    if (badge) { badge.classList.add('hidden'); badge.textContent = ''; }
+    if (summary) summary.textContent = 'loading...';
+    if (body) { body.classList.remove('hidden'); renderHisSpinner(body); }
+  } else {
+    if (section) section.classList.add('hidden');
+    if (badge) badge.classList.add('hidden');
+    if (summary) summary.textContent = '';
+    if (body) { body.classList.remove('hidden'); body.innerHTML = ''; }
+  }
   if (ch) ch.innerHTML = '&#9662;';
 }
 
@@ -394,6 +402,8 @@ function toggleHis() {
 }
 
 function hisUnavailable() {
+  __hisPending = false;
+  window.__hisSettled = true;
   resetHis();
 }
 
@@ -494,25 +504,47 @@ function hisOpenButton() {
 }
 
 // مؤشر انتظار قصير يظهر فور بدء جلب بيانات المشفى، ثم يُستبدل بالبطاقة أو يُخفى بهدوء
+// حالة معلقة محفوظة: أي resetHis لاحق (إقلاع الصفحة/تحديث المتصل) يعيد رسم المؤشر بدل مسحه
+var __hisPending = false;
+
+function renderHisSpinner(body) {
+  body.innerHTML = '';
+  var row = document.createElement('div');
+  row.className = 'flex items-center justify-center gap-2 py-4 text-[11px] text-muted';
+  var spin = document.createElement('span');
+  spin.className = 'h-4 w-4 animate-spin rounded-full border-2 border-teal-soft border-t-teal';
+  var lbl = document.createElement('span');
+  lbl.textContent = 'Loading patient file...';
+  row.appendChild(spin);
+  row.appendChild(lbl);
+  body.appendChild(row);
+}
+
 function hisLoading() {
   var section = document.getElementById('hisSection');
   var body = document.getElementById('hisBody');
   var badge = document.getElementById('hisBadge');
   var summary = document.getElementById('hisSummary');
   if (!section || !body) return;
+  __hisPending = true;
   section.classList.remove('hidden');
   if (badge) { badge.classList.add('hidden'); badge.textContent = ''; }
   if (summary) summary.textContent = 'loading...';
-  body.innerHTML = '';
-  var row = document.createElement('div');
-  row.className = 'flex items-center justify-center gap-2 py-3 text-xs text-muted';
-  var spin = document.createElement('span');
-  spin.className = 'h-3.5 w-3.5 animate-spin rounded-full border-2 border-border border-t-transparent';
-  var lbl = document.createElement('span');
-  lbl.textContent = 'Loading patient file...';
-  row.appendChild(spin);
-  row.appendChild(lbl);
-  body.appendChild(row);
+  renderHisSpinner(body);
+}
+
+// بدء جولة جلب من C++: يتحمل تأخر تحليل السكربت بإعادة المحاولة قليلاً،
+// ويتوقف فوراً إن حسمت جولة سابقة (بطاقة وصلت أو إخفاء صامت)
+// window.__hisSettled يضبطه updateHisInfo/hisUnavailable
+function hisLoadStart() {
+  window.__hisSettled = false;
+  var n = 0;
+  function w() {
+    if (window.__hisSettled) return;
+    if (typeof hisLoading === 'function') { hisLoading(); return; }
+    if (n++ < 40) setTimeout(w, 30);
+  }
+  w();
 }
 
 function updateHisInfo(jsonText) {
@@ -521,6 +553,8 @@ function updateHisInfo(jsonText) {
   var badge = document.getElementById('hisBadge');
   var summary = document.getElementById('hisSummary');
   if (!body || !section) return;
+  __hisPending = false;
+  window.__hisSettled = true;
   var d = null;
   try {
     d = (typeof jsonText === 'string') ? JSON.parse(jsonText) : jsonText;
