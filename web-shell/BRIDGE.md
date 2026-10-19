@@ -86,16 +86,21 @@ js.Format(_T("onCallState(%d, '%s')"), call_id, _T("active"));
 
 المصدر: `GET /api/his/caller/<phone>` عبر `his_broker.py` في السيرفر — قراءة فقط
 من Solver WebHIS، بتوثيق الموظف نفسه (Basic auth من `accountSettings.agentLoginName`
-+ `account.account.password`). التوثيق إن فشل أو انقطعت الشبكة يُخفى القسم بهدوء
-(دون toast) ويبقى ما عدا الخصم يعمل.
++ `account.account.password`). فشل التوثيق أو انقطاع الشبكة يُخفى القسم بهدوء
+(دون toast) ويبقى ما عدا قسم المريض كما كان.
+
+توقيت الجلب: يبدأ مع كل `OnWebViewReady` (بناء النافذة لرقم جديد) **وكل
+`Restore()`** (إعادة فتح نفس الرقم، لأن `updateCallerInfo` يفرّغ القسم داخلياً)؛
+ويظهر أثناء الجلب مؤشر انتظار قصير (`hisLoading`) يُستبدل بالبطاقة عند وصولها.
 
 | الاتجاه | الشكل |
 |---|---|
-| C++ → JS | `updateHisInfo('<json>')` — `EscapeJson` ثم حبر نصي: `{ok, matched, matches:[{pat_id,name,age,sex,phone}...], selected:{...}, visits:[...], bills:[...], source_url}` |
+| C++ → JS | `hisLoading()` — مؤشر انتظار صادر فور بدء الجلب (يُستبدل بالبطاقة أو يُخفى بهدوء) |
+| C++ → JS | `updateHisInfo('<json>')` — `EscapeJson` ثم حقن نصي: `{ok, matched, matches:[{pat_id,name,age,sex,phone}...], selected:{...}, visits:[...], bills:[...], source_url}` |
 | C++ → JS | `hisUnavailable()` — إخفاء صامت (انقطاع/توثيق مفقود) |
 | JS → C++ | `{action:'his_search', by:'name'\|'id', q: string}` — بديل البحث عند عدم المطابقة، يمرر إلى `LoadHisInfo('?by=..&q=..')` |
 | JS → C++ | `{action:'his_select', pat_id: string}` — اختيار مريض من عدة مطابقات → `LoadHisInfo('?pat_id=..')` |
-| JS → C++ | `{action:'open_webhis'}` — نسخ الرقم للحافظة وفتح `http://solverserver:81/#/home/hmis/op/PatientRegistration` في المتصفح الافتراضي للموظف (جلسته الخاصة) |
+| JS → C++ | `{action:'open_webhis'}` — نسخ الرقم للحافظة وفتح `http://solverserver:81/#/home/hmis/op/PatientRegistration` في المتصفح الافتراضي للموظف (جلسته الخاصة). الحقل في الواجهة هو الزر **Open File** (بقسم البطاقة ونموذج البديل) |
 
 ## 4) ملاحظات التنفيذ لـ C++
 
