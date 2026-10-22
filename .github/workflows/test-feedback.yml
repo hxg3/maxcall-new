@@ -1,7 +1,7 @@
 name: Feedback Queue Test
 
 # proves on a real Windows machine that the "Tasks" tab can load tasks
-# from the server — the same request the tab makes, without the GUI.
+# from the server - the same request the tab makes, without the GUI.
 #
 # Manual by design: it verifies the build that is PUBLISHED on the mirror,
 # so it runs after a release rather than on every source push.
@@ -64,7 +64,7 @@ jobs:
               Get-Content "$env:MAXCALL_DIR\maxcall_debug.log" -Tail 30
             } else { @("(no debug log)") }
             Write-Host ($log -join "`n")
-            throw "the self test wrote no report — the request never completed"
+            throw "the self test wrote no report - the request never completed"
           }
 
           $r = Get-Content $report -Raw | ConvertFrom-Json
@@ -74,7 +74,7 @@ jobs:
             throw "feedback queue self test FAILED: status=$($r.status) tasks=$($r.tasks) note=$($r.note)"
           }
           if ([int]$r.tasks -lt 1) {
-            throw "the server returned no tasks — the Tasks tab would be empty"
+            throw "the server returned no tasks - the Tasks tab would be empty"
           }
 
           Write-Host "PASS: the Tasks tab receives $($r.tasks) task(s) from the server"
