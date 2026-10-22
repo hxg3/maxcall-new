@@ -100,6 +100,10 @@ input[type="date"],select{color-scheme:light}
       <button onclick="show('reports')" id="b_reports" class="flex-1 lg:flex-none text-left px-3 py-2.5 rounded-xl flex items-center gap-2">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" d="M4 20V10m6 10V4m6 16v-7m4 7H2"/></svg> Reports
       </button>
+      <button onclick="show('feedback')" id="b_feedback" class="flex-1 lg:flex-none text-left px-3 py-2.5 rounded-xl flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> Feedback
+        <span id="fb_badge" class="ml-auto bg-brand text-white text-xs px-2 py-0.5 rounded-full hidden">0</span>
+      </button>
     </nav>
   </aside>
 
@@ -265,6 +269,87 @@ input[type="date"],select{color-scheme:light}
         <div id="reports_agents" class="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3"></div>
       </div>
     </section>
+
+    <!-- FEEDBACK -->
+    <section id="s_feedback" class="hidden space-y-4">
+      <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-soft p-5">
+        <div class="flex flex-wrap gap-3 items-center justify-between">
+          <div>
+            <h3 class="font-bold">Feedback Tasks</h3>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Patient call tasks for visit feedback</p>
+          </div>
+          <div class="flex gap-2">
+            <select id="fb_status" onchange="loadFeedbackTasks()" class="border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 rounded-xl px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand/40">
+              <option value="">Status — All</option>
+              <option value="pending">Pending</option>
+              <option value="in_progress">In Progress</option>
+              <option value="no_answer">No Answer</option>
+              <option value="done">Done</option>
+              <option value="closed">Closed (attempts exhausted)</option>
+              <option value="skipped">Skipped</option>
+            </select>
+            <input id="fb_q" placeholder="Search by patient name / phone / visit" oninput="debounce(() => { pageFb = 1; loadFeedbackTasks(); }, 300)" class="border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 rounded-xl px-3 py-1.5 text-sm w-64 focus:outline-none focus:ring-2 focus:ring-brand/40">
+            <button onclick="generateFeedback()" class="bg-brand hover:bg-brandDark text-white px-4 py-2 rounded-xl text-sm font-semibold transition active:scale-95">Generate Tasks from HIS</button>
+            <button onclick="exportFeedback()" class="border border-slate-200 dark:border-slate-700 px-4 py-2 rounded-xl text-sm hover:bg-slate-50 dark:hover:bg-slate-800">Export CSV</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="fb_status" class="px-5 pb-2"></div>
+
+      <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-soft overflow-hidden">
+        <div class="overflow-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 sticky top-0 z-10">
+              <tr>
+                <th class="p-3 text-left font-medium">Patient</th>
+                <th class="p-3 text-left font-medium">Phone</th>
+                <th class="p-3 text-left font-medium">Visit Date</th>
+                <th class="p-3 text-left font-medium">Doctor</th>
+                <th class="p-3 text-left font-medium">Payer</th>
+                <th class="p-3 text-left font-medium">Amount</th>
+                <th class="p-3 text-left font-medium">Status</th>
+                <th class="p-3 text-left font-medium">Attempts</th>
+                <th class="p-3 text-right font-medium">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="fb_rows" class="divide-y divide-slate-100 dark:divide-slate-800"></tbody>
+          </table>
+        </div>
+        <div class="p-3 flex items-center justify-between text-sm border-t border-slate-100 dark:border-slate-800">
+          <button onclick="chgFb(-1)" class="border border-slate-200 dark:border-slate-700 px-3 py-1.5 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800">Prev</button>
+          <span class="text-slate-500 dark:text-slate-400">Page <b id="fb_pg" class="text-slate-900 dark:text-slate-100">1</b> <span id="fb_info"></span></span>
+          <button onclick="chgFb(1)" class="border border-slate-200 dark:border-slate-700 px-3 py-1.5 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800">Next</button>
+        </div>
+      </div>
+
+      <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-soft p-5">
+        <div class="flex flex-wrap gap-2 items-center justify-between">
+          <div>
+            <h3 class="font-bold">Feedback Statistics</h3>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Performance and patient satisfaction overview</p>
+          </div>
+          <select id="fb_days" onchange="loadFeedbackSummary()" class="border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 rounded-xl px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand/40">
+            <option value="7">Last 7 Days</option>
+            <option value="30">Last 30 Days</option>
+            <option value="90">Last 90 Days</option>
+            <option value="">All</option>
+          </select>
+        </div>
+        <div id="fb_summary_status" class="mt-2"></div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-3" id="fb_stats_cards"></div>
+        <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-soft p-4">
+            <div class="text-xs text-slate-500 dark:text-slate-400">By Doctor</div>
+            <div id="fb_by_doctor" class="mt-2 space-y-1"></div>
+          </div>
+          <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-soft p-4">
+            <div class="text-xs text-slate-500 dark:text-slate-400">By Payer</div>
+            <div id="fb_by_payer" class="mt-2 space-y-1"></div>
+          </div>
+        </div>
+      </div>
+    </section>
   </main>
 </div>
 
@@ -355,9 +440,10 @@ input[type="date"],select{color-scheme:light}
 
 <script>
 let page = 1, chart = null, pwExt = null, callerPhone = null;
-let lastMissed = [], lastCallers = [], lastRecs = [];
+let lastMissed = [], lastCallers = [], lastRecs = [], lastFb = [];
 let extNames = {};
-const SECTIONS = ['overview', 'calls', 'missed', 'agents', 'recs', 'callers', 'reports'];
+let pageFb = 1;
+const SECTIONS = ['overview', 'calls', 'missed', 'agents', 'recs', 'callers', 'reports', 'feedback'];
 const ACTIVE = 'flex-1 lg:flex-none text-left px-3 py-2.5 rounded-xl font-bold flex items-center gap-2 bg-brand text-white transition duration-150 active:scale-95';
 const IDLE = 'flex-1 lg:flex-none text-left px-3 py-2.5 rounded-xl flex items-center gap-2 hover:bg-slate-50 dark:hover:bg-slate-800 transition duration-150 active:scale-95';
 
@@ -492,6 +578,7 @@ function show(id) {
   if (id === 'recs') loadRecs();
   if (id === 'callers') loadCallers();
   if (id === 'reports') loadReports();
+  if (id === 'feedback') loadFeedbackTasks();
 }
 function fixMissedBadge() {
   const badge = document.getElementById('miss_badge');
@@ -1071,6 +1158,121 @@ async function loadReports() {
       + '<div class="text-xl font-extrabold">' + esc(a.answered ?? 0) + '</div></div>'
     ).join('') : '<div class="text-sm text-slate-500 dark:text-slate-400 text-center py-6">No agent activity.</div>';
   } catch (e) { setStatus('reports_status', e.message, true); }
+}
+
+/* ---------- feedback ---------- */
+async function loadFeedbackTasks(opts) {
+  const silent = !!(opts && opts.silent);
+  lastRetry = loadFeedbackTasks;
+  if (!silent) setStatus('fb_status', 'Loading…');
+  try {
+    const status = document.getElementById('fb_status').value || '';
+    const q = document.getElementById('fb_q').value || '';
+    const j = await api('/api/feedback/tasks?status=' + encodeURIComponent(status) + '&q=' + encodeURIComponent(q) + '&limit=50&offset=' + ((pageFb - 1) * 50));
+    const rows = Array.isArray(j.data) ? j.data : [];
+    const snap = { status, q, page: pageFb, data: j };
+    if (silent && __peek('feedback', snap)) return;
+    const paint = () => {
+      setStatus('fb_status', '');
+      document.getElementById('fb_pg').textContent = pageFb;
+      document.getElementById('fb_info').textContent = j.total != null ? '· ' + j.total + ' total' : '';
+      document.getElementById('fb_rows').innerHTML = rows.length ? rows.map(r => {
+        const st = r.status || '';
+        let badge = 'bg-slate-100 text-slate-600';
+        if (st === 'done') badge = 'bg-emerald-50 text-emerald-700';
+        else if (st === 'no_answer') badge = 'bg-amber-50 text-amber-700';
+        else if (st === 'closed') badge = 'bg-rose-50 text-rose-700';
+        else if (st === 'skipped') badge = 'bg-slate-50 text-slate-500';
+        else if (st === 'in_progress') badge = 'bg-sky-50 text-sky-700';
+        else if (st === 'pending') badge = 'bg-brand/10 text-brand';
+        const date = (r.visit_date || '').slice(0, 10);
+        const amt = r.visit_amount != null ? parseFloat(r.visit_amount).toFixed(3) : '—';
+        return '<tr class="transition duration-150 hover:bg-slate-50 dark:hover:bg-slate-800/50"><td class="p-3 font-semibold">' + esc(r.patient_name || '—') + '</td>'
+          + '<td class="p-3 whitespace-nowrap text-slate-500 dark:text-slate-400">' + esc(r.phone || '—') + '</td>'
+          + '<td class="p-3 whitespace-nowrap text-slate-500 dark:text-slate-400">' + esc(date) + '</td>'
+          + '<td class="p-3 text-slate-500 dark:text-slate-400">' + esc(r.doctor || '—') + '</td>'
+          + '<td class="p-3 text-slate-500 dark:text-slate-400">' + esc(r.payer || '—') + '</td>'
+          + '<td class="p-3 text-right font-mono text-xs">' + esc(amt) + '</td>'
+          + '<td class="p-3"><span class="rounded-full px-2.5 py-0.5 text-xs ' + badge + '">' + esc(st) + '</span></td>'
+          + '<td class="p-3 text-right font-mono text-xs text-slate-400">' + esc(r.attempts) + '/' + esc(r.max_attempts) + '</td>'
+          + '<td class="p-3 text-right"><div class="flex items-center justify-end gap-1.5">'
+          + '<button onclick="openPopupFb(\'' + esc(r.phone) + '\')" title="فتح بطاقة المتصل" class="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 active:scale-95"><svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg></button>'
+          + (st === 'pending' || st === 'no_answer' ? '<button onclick="claimFeedback(' + r.id + ')" title="ادعاء المهمة" class="flex h-7 w-7 items-center justify-center rounded-full bg-brand text-white active:scale-95"><svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></button>' : '')
+          + '</div></td></tr>';
+      }).join('') : '<tr><td colspan="9" class="p-8 text-center text-slate-500 dark:text-slate-400">لا توجد مهام تطابق هذا الفلتر.</td></tr>';
+    };
+    if (silent) { const x = window.scrollX, y = window.scrollY; paint(); __mark('feedback', snap); window.scrollTo(x, y); }
+    else { paint(); __mark('feedback', snap); }
+  } catch (e) { setStatus('fb_status', e.message, true); }
+}
+function chgFb(d) { pageFb = Math.max(1, pageFb + d); loadFeedbackTasks(); }
+async function loadFeedbackSummary() {
+  const days = document.getElementById('fb_days').value || '';
+  try {
+    const j = await api('/api/feedback/summary?days=' + encodeURIComponent(days));
+    const cards = document.getElementById('fb_stats_cards');
+    cards.innerHTML = [
+      ['الإجمالي', j.total, 'bg-brand/10 text-brand'],
+      ['منجزة', j.done, 'bg-emerald-50 text-emerald-700'],
+      ['لم يجب', j.no_answer, 'bg-amber-50 text-amber-700'],
+      ['مغلقة', j.closed, 'bg-rose-50 text-rose-700'],
+    ].map(([label, val, cls]) => '<div class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 p-4"><div class="text-xs text-slate-500 dark:text-slate-400">' + label + '</div><div class="text-2xl font-extrabold ' + cls + '">' + val + '</div></div>').join('');
+    document.getElementById('fb_by_doctor').innerHTML = (j.by_doctor || []).map(d => '<div class="flex justify-between text-sm border-b border-slate-100 dark:border-slate-800 py-1"><span class="text-slate-500 dark:text-slate-400">' + esc(d.name) + '</span><span class="font-semibold">' + d.c + '</span></div>').join('') || '<div class="text-xs text-slate-400 py-2">لا بيانات</div>';
+    document.getElementById('fb_by_payer').innerHTML = (j.by_payer || []).map(d => '<div class="flex justify-between text-sm border-b border-slate-100 dark:border-slate-800 py-1"><span class="text-slate-500 dark:text-slate-400">' + esc(d.name) + '</span><span class="font-semibold">' + d.c + '</span></div>').join('') || '<div class="text-xs text-slate-400 py-2">لا بيانات</div>';
+    const badge = document.getElementById('fb_badge');
+    if (badge) { badge.textContent = j.pending || 0; badge.classList.toggle('hidden', !(j.pending || 0)); }
+  } catch (e) { setStatus('fb_summary_status', e.message, true); }
+}
+async function generateFeedback() {
+  const btn = event && event.target ? event.target : null;
+  if (btn) { const old = btn.textContent; btn.disabled = true; btn.textContent = 'جاري التوليد…'; setTimeout(() => { btn.disabled = false; btn.textContent = old; }, 2000); }
+  try {
+    const j = await api('/api/feedback/generate', { method: 'POST' });
+    toast('تم توليد ' + (j.created || 0) + ' مهمة جديدة (تجاهل ' + (j.skipped_existing || 0) + ' مكررة)');
+    loadFeedbackTasks();
+    loadFeedbackSummary();
+  } catch (e) { toast(e.message, false); }
+}
+function exportFeedback() {
+  const days = document.getElementById('fb_days').value || '';
+  window.open('/api/feedback/export?days=' + encodeURIComponent(days), '_blank');
+}
+async function claimFeedback(taskId) {
+  try {
+    await api('/api/feedback/task/' + taskId + '/claim', { method: 'POST' });
+    toast('تم ادعاء المهمة');
+    loadFeedbackTasks();
+  } catch (e) { toast(e.message, false); }
+}
+async function respondFeedback(taskId, outcome) {
+  const score = prompt('التقييم (1-5) — اترك فارغاً للتجاوز:', '');
+  if (score !== null && score !== '' && (!/^[1-5]$/.test(score))) { toast('التقييم يجب أن يكون بين 1 و 5'); return; }
+  const comment = prompt('ملاحظات التغذية الراجعة:', '');
+  if (comment === null) return;
+  try {
+    await api('/api/feedback/task/' + taskId + '/respond', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ outcome: outcome, score: score ? parseInt(score) : null, comment: comment || '' })
+    });
+    toast('تم تسجيل الاستجابة: ' + outcome);
+    loadFeedbackTasks();
+    loadFeedbackSummary();
+  } catch (e) { toast(e.message, false); }
+}
+async function skipFeedback(taskId) {
+  if (!confirm('تخطي هذه المهمة نهائياً؟')) return;
+  try {
+    await api('/api/feedback/task/' + taskId + '/skip', { method: 'POST' });
+    toast('تم تخطي المهمة');
+    loadFeedbackTasks();
+  } catch (e) { toast(e.message, false); }
+}
+function openPopupFb(phone) {
+  if (window.MaxCallBridge && typeof window.MaxCallBridge.openPopup === 'function') {
+    window.MaxCallBridge.openPopup(phone);
+  } else {
+    toast('افتح بطاقة المتصل من تطبيق سطح المكتب بالرقم: ' + phone);
+  }
 }
 
 function enhancePress(root) {
