@@ -949,12 +949,14 @@ bool RunFeedbackSelfTest(CString& outReportPath)
 
 	int status = 0;
 	int tasks = 0;
+	int due = 0;
 	CString note;
 
 	if (user.IsEmpty() || pass.IsEmpty()) {
 		note = "missing MAXCALL_TEST_USER/MAXCALL_TEST_PASS";
 	}
 	else {
+		// القائمة الفعلية: المهام التي حان موعدها (لها Delay بعد الزيارة).
 		CString url = _T("http://maxcall.local:3001/api/feedback/queue?limit=50");
 		CString headers = _T("Authorization: ") + MakeBasicAuthHeader(user, pass);
 		URLGetAsyncData r = URLGetSync(url, false, _T(""), headers);
@@ -964,8 +966,20 @@ bool RunFeedbackSelfTest(CString& outReportPath)
 		Json::Reader reader;
 		std::string utf8(r.body);
 		if (reader.parse(utf8, root) && root.isMember("data") && root["data"].isArray()) {
-			tasks = (int)root["data"].size();
+			due = (int)root["data"].size();
 		}
+
+		// وقائمة كل ما هو مجدول (بما فيه ما لم يحن موعده) — تثبت أن السيرفر
+		// ينتج مهام فعلاً حتى لو لم تحن دورتها بعد.
+		if (status == 200) {
+			CString allUrl = url + _T("&include_scheduled=1");
+			URLGetAsyncData r2 = URLGetSync(allUrl, false, _T(""), headers);
+			Json::Value root2;
+			if (reader.parse(std::string(r2.body), root2) && root2.isMember("data") && root2["data"].isArray()) {
+				tasks = (int)root2["data"].size();
+			}
+		}
+
 		if (status != 200) {
 			note.Format(_T("server returned %d"), status);
 		}
@@ -978,8 +992,8 @@ bool RunFeedbackSelfTest(CString& outReportPath)
 
 	// التقرير: بلا أي سرّ — الحالة وعدد المهام فقط.
 	CString json;
-	json.Format(_T("{\"ok\":%s,\"status\":%d,\"tasks\":%d,\"note\":\"%s\"}"),
-		ok ? _T("true") : _T("false"), status, tasks, (LPCTSTR)note);
+	json.Format(_T("{\"ok\":%s,\"status\":%d,\"tasks\":%d,\"due\":%d,\"note\":\"%s\"}"),
+		ok ? _T("true") : _T("false"), status, tasks, due, (LPCTSTR)note);
 
 	outReportPath = _T("feedback_test_result.json");
 	// التقرير ASCII بالكامل (لا أسماء مرضى ولا أسرار) — نكتبه بترميز ANSI.
@@ -992,8 +1006,8 @@ bool RunFeedbackSelfTest(CString& outReportPath)
 
 	FILE* dbg = fopen("maxcall_debug.log", "a");
 	if (dbg) {
-		fprintf(dbg, "feedback-selftest ok=%d status=%d tasks=%d %ls\n",
-			ok ? 1 : 0, status, tasks, (LPCTSTR)note);
+		fprintf(dbg, "feedback-selftest ok=%d status=%d tasks=%d due=%d %ls\n",
+			ok ? 1 : 0, status, tasks, due, (LPCTSTR)note);
 		fclose(dbg);
 	}
 	return ok;
