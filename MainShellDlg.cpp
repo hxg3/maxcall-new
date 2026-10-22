@@ -749,6 +749,9 @@ void MainShellDlg::FetchFeedbackQueue()
 	CString url = _T("http://maxcall.local:3001/api/feedback/queue?limit=50");
 	CString user = accountSettings.account.username;
 	CString pass = accountSettings.account.password;
+
+	// Pass username/password to URLGetAsync; WinInet will add Basic auth header via
+	// INTERNET_OPTION_USERNAME/PASSWORD (same pattern used by FetchHistory/CrmPopupDlg).
 	URLGetAsync(url, m_hWnd, WM_SHELL_FEEDBACK_RESULT, false, _T(""), _T(""), user, pass);
 }
 
@@ -756,6 +759,11 @@ LRESULT MainShellDlg::OnShellFeedbackResult(WPARAM wParam, LPARAM lParam)
 {
 	URLGetAsyncData* result = (URLGetAsyncData*)wParam;
 	if (result) {
+		FILE* fp = fopen("maxcall_debug.log", "a");
+		if (fp) {
+			fprintf(fp, "shell-tx: feedback status=%d body_len=%d\n", result->statusCode, result->body.GetLength());
+			fclose(fp);
+		}
 		if (result->statusCode >= 200 && result->statusCode < 300) {
 			CStringA bodyA = result->body;
 			if (!bodyA.IsEmpty()) {
@@ -941,4 +949,32 @@ int MainShellDlg::JsInt(const Json::Value& value, int fallback)
 		return (int)value.asUInt();
 	}
 	return fallback;
+}
+
+CString MainShellDlg::Base64Encode(const CString& input)
+{
+	static const char base64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+	CString output;
+	const char* data = CT2A(input, CP_UTF8);
+	int len = input.GetLength();
+	int i = 0;
+	while (i < len) {
+		uint32_t octet_a = i < len ? (unsigned char)data[i++] : 0;
+		uint32_t octet_b = i < len ? (unsigned char)data[i++] : 0;
+		uint32_t octet_c = i < len ? (unsigned char)data[i++] : 0;
+		uint32_t triple = (octet_a << 0x10) + (octet_b << 0x08) + octet_c;
+		output += base64[(triple >> 3 * 6) & 0x3F];
+		output += base64[(triple >> 2 * 6) & 0x3F];
+		output += base64[(triple >> 1 * 6) & 0x3F];
+		output += base64[(triple >> 0 * 6) & 0x3F];
+	}
+	int mod = len % 3;
+	if (mod == 1) {
+		output.SetAt(output.GetLength() - 2, '=');
+		output.SetAt(output.GetLength() - 1, '=');
+	}
+	else if (mod == 2) {
+		output.SetAt(output.GetLength() - 1, '=');
+	}
+	return output;
 }
