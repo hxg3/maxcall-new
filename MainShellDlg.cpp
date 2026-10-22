@@ -180,6 +180,7 @@ BEGIN_MESSAGE_MAP(MainShellDlg, CBaseDialog)
 	ON_MESSAGE(WM_SHELL_MESSAGE, &MainShellDlg::OnShellMessage)
 	ON_MESSAGE(WM_SHELL_HISTORY, &MainShellDlg::OnShellHistory)
 	ON_MESSAGE(WM_SHELL_FEEDBACK_RESULT, &MainShellDlg::OnShellFeedbackResult)
+	ON_MESSAGE(WM_SHELL_FEEDBACK_ACTION, &MainShellDlg::OnShellFeedbackAction)
 END_MESSAGE_MAP()
 
 // The version belongs on screen: beta and stable builds sit side by side during
@@ -353,6 +354,9 @@ void MainShellDlg::ProcessShellMessage(CString& message)
 		PushContacts();
 		PushAccount();
 		FetchHistory();
+		// عدد المهام على تبويب تاسك — يُجلب مع اللقطة ليظهر العداد فور
+		// إقلاع التطبيق بلا فتح التبويب.
+		FetchFeedbackQueue();
 		return;
 	}
 	if (action == _T("openSettings")) {
@@ -488,22 +492,30 @@ void MainShellDlg::ProcessShellMessage(CString& message)
 		FetchFeedbackQueue();
 		return;
 	}
-	if (action == _T("feedbackClaim")) {
+	// الإجراءات (ادعاء / استجابة / تخطي) كلها POST على نفس النقاط، فتشترك في
+	// نفس بيانات الموظف ونفس ترويسة Basic auth.
+	if (action == _T("feedbackClaim") || action == _T("feedbackRespond") || action == _T("feedbackSkip")) {
 		CString taskId = JsStringToCString(root["taskId"]);
 		taskId.Trim();
-		if (!taskId.IsEmpty()) {
-			CString url;
-			url.Format(_T("http://maxcall.local:3001/api/feedback/task/%s/claim"), (LPCTSTR)taskId);
-			CString user = accountSettings.account.username;
-			CString pass = accountSettings.account.password;
-			URLGetAsync(url, m_hWnd, WM_SHELL_FEEDBACK_RESULT, true, _T(""), _T(""), user, pass);
+		if (taskId.IsEmpty()) {
+			return;
 		}
-		return;
-	}
-	if (action == _T("feedbackRespond")) {
-		CString taskId = JsStringToCString(root["taskId"]);
-		taskId.Trim();
-		if (!taskId.IsEmpty()) {
+		CString username = accountSettings.agentLoginName;
+		if (username.IsEmpty()) username = accountSettings.account.username;
+		CString password = accountSettings.account.password;
+		if (username.IsEmpty() || password.IsEmpty()) {
+			FILE* fp = fopen("maxcall_debug.log", "a");
+			if (fp) { fprintf(fp, "shell: feedback action skipped - no agent credentials\n"); fclose(fp); }
+			return;
+		}
+		CString headers = _T("Authorization: ") + MakeBasicAuthHeader(username, password);
+
+		CString url;
+		CString postData;
+		if (action == _T("feedbackClaim")) {
+			url.Format(_T("http://maxcall.local:3001/api/feedback/task/%s/claim"), (LPCTSTR)taskId);
+		}
+		else if (action == _T("feedbackRespond")) {
 			CString outcome = JsStringToCString(root["outcome"]);
 			outcome.Trim();
 			CString score;
@@ -517,7 +529,6 @@ void MainShellDlg::ProcessShellMessage(CString& message)
 				duration.Format(_T("%d"), root["duration_sec"].asInt());
 			}
 			CString nextAttempt = JsStringToCString(root["next_attempt_at"]);
-			CString postData;
 			postData.Format(_T("outcome=%s&score=%s&categories=%s&comment=%s&duration_sec=%s&next_attempt_at=%s"),
 				(LPCSTR)CT2A(outcome, CP_UTF8),
 				(LPCSTR)CT2A(score, CP_UTF8),
@@ -525,28 +536,14 @@ void MainShellDlg::ProcessShellMessage(CString& message)
 				(LPCSTR)CT2A(comment, CP_UTF8),
 				(LPCSTR)CT2A(duration, CP_UTF8),
 				(LPCSTR)CT2A(nextAttempt, CP_UTF8));
-			CString url;
 			url.Format(_T("http://maxcall.local:3001/api/feedback/task/%s/respond"), (LPCTSTR)taskId);
-			CString user = accountSettings.account.username;
-			CString pass = accountSettings.account.password;
-			URLGetAsync(url, m_hWnd, WM_SHELL_FEEDBACK_RESULT, true, postData, _T(""), user, pass);
 		}
-		return;
-	}
-	if (action == _T("feedbackSkip")) {
-		CString taskId = JsStringToCString(root["taskId"]);
-		taskId.Trim();
-		if (!taskId.IsEmpty()) {
+		else {
 			CString reason = JsStringToCString(root["reason"]);
-			CString postData;
 			postData.Format(_T("reason=%s"), (LPCSTR)CT2A(reason, CP_UTF8));
-			CString url;
 			url.Format(_T("http://maxcall.local:3001/api/feedback/task/%s/skip"), (LPCTSTR)taskId);
-			CString user = accountSettings.account.username;
-			CString pass = accountSettings.account.password;
-			URLGetAsync(url, m_hWnd, WM_SHELL_FEEDBACK_RESULT, true, postData, _T(""), user, pass);
 		}
-		return;
+		URLGetAsync(url, m_hWnd, WM_SHELL_FEEDBACK_ACTION, true, postData, headers);
 	}
 }
 
@@ -787,6 +784,25 @@ LRESULT MainShellDlg::OnShellFeedbackResult(WPARAM wParam, LPARAM lParam)
 					ExecuteShellScript(js);
 				}
 			}
+		}
+		delete result;
+	}
+	return 0;
+}
+
+// استجابة إجراء (ادعاء/استجابة/تخطي): جسمها ليس قائمة، فلا تُدفع إلى الواجهة.
+// عند النجاح نعيد جلب القائمة فيتحدّث العدّاد وتختفي المهمة المنجزة فوراً.
+LRESULT MainShellDlg::OnShellFeedbackAction(WPARAM wParam, LPARAM lParam)
+{
+	URLGetAsyncData* result = (URLGetAsyncData*)wParam;
+	if (result) {
+		FILE* fp = fopen("maxcall_debug.log", "a");
+		if (fp) {
+			fprintf(fp, "shell: feedback action status=%d\n", result->statusCode);
+			fclose(fp);
+		}
+		if (result->statusCode >= 200 && result->statusCode < 300) {
+			FetchFeedbackQueue();
 		}
 		delete result;
 	}

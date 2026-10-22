@@ -1033,11 +1033,11 @@ window.onPinState = (...a) => MaxCallBridge.onPinState(...a);
         const comment = prompt('Comment:', '');
         if (comment === null) return;
         MaxCallBridge.feedbackRespond(t.id, 'done', { score: score ? parseInt(score) : null, comment: comment || '' });
-        _fetchFeedbackQueue();
+        // The native side refreshes the queue once the server confirms the
+        // action, so the counter and the list never show a stale race.
       });
       row.querySelector('[data-act="noanswer"]').addEventListener('click', () => {
         MaxCallBridge.feedbackRespond(t.id, 'no_answer');
-        _fetchFeedbackQueue();
       });
       list.appendChild(row);
     });
