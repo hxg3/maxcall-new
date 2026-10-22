@@ -982,9 +982,11 @@ bool RunFeedbackSelfTest(CString& outReportPath)
 		ok ? _T("true") : _T("false"), status, tasks, (LPCTSTR)note);
 
 	outReportPath = _T("feedback_test_result.json");
+	// التقرير ASCII بالكامل (لا أسماء مرضى ولا أسرار) — نكتبه بترميز ANSI.
+	CStringA narrow(json);
 	FILE* fp = fopen("feedback_test_result.json", "w");
 	if (fp) {
-		fwrite((LPCSTR)json, 1, json.GetLength(), fp);
+		fwrite((LPCSTR)narrow, 1, narrow.GetLength(), fp);
 		fclose(fp);
 	}
 
