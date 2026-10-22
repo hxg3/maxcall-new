@@ -548,6 +548,7 @@ void MainShellDlg::ProcessShellMessage(CString& message)
 		}
 		return;
 	}
+}
 
 void MainShellDlg::ExecuteShellScript(const CString& js)
 {
