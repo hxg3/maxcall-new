@@ -33,6 +33,10 @@
 | `checkUpdate` | — | — | فحص التحديثات يدوياً الآن (زر Retry عند الخطأ) |
 | `installUpdate` | — | — | بدء تنزيل وتثبيت التحديث المعلَن (زر `#btnUpdateNow`) |
 | `dismissUpdate` | — | — | إخفاء بانر التحديث لهذه الجلسة فقط — لا يُلغي تنزيلاً جارياً ولا يغيّر حالة C++ (`onUpdateState` التالية تُظهره مجدداً) |
+| `feedbackQueue` | — | — | طلب قائمة مهام التغذية الراجعة من C++ (الذي يجلبها من السيرفر عبر الجسر) |
+| `feedbackClaim` | `taskId` | `string` | ادعاء مهمة تغذية راجعة ⇒ تُصبح in_progress وتُسنَد للموظف |
+| `feedbackRespond` | `taskId`, `outcome`, `score?`, `categories?`, `comment?`, `duration_sec?`, `next_attempt_at?` | — | تسجيل استجابة على مهمة (done / no_answer / refused / wrong_number / callback_later / not_applicable) |
+| `feedbackSkip` | `taskId` | `string` | تخطي مهمة نهائياً ⇒ status='skipped' |
 
 > `setPresence` يُعيَّن في `MainShellDlg::ProcessShellMessage` كالتالي:
 > `available/away` → إلغاء DND + نشر متاح، `busy` → تفعيل DND + نشر متاح،
@@ -62,7 +66,8 @@ window.chrome.webview.postMessage({ action: 'hold', callId: -1, on: true });
 | `onAccount` | `(user: string, domain: string, name?: string)` | سطر الحساب في الهيدر بصيغة `user-name` |
 | `onPinState` | `(on: boolean)` | حالة زر التثبيت (تُدفع مع كل لقطة) |
 | `onCallHistory` | `(jsonText: string)` | سجل السيرفر: `{rows:[{time,number,name,direction,status,duration,answered_by,has_rec}]}` من `GET /api/calls/history` — يُجلب عند `shellReady/getData` وبعد كل إنهاء بـ 4 ثوانٍ |
-| `onUpdateState` | `(state: number, version: string, percent: number, message: string)` | حالة التحديث التلقائي: `0` لا شيء، `1` يُفحص (يبقى البانر مخفياً إن لم يكن مفتوحاً)، `2` متاح، `3` يُنزَّل (`percent` 0..100)، `4` يتحقق، `5` جاهز → إعادة تشغيل، `6` أُعيد التشغيل → إخفاء البانر، `7` خطأ → زر إعادة الفحص. `version` و`message` قد يكونان فارغين |
+| `onFeedbackQueue` | `(jsonText: string)` | قائمة مهام التغذية الراجعة من السيرفر: `{ok,data:[{id,phone,patient_name,visit_date,doctor,payer,visit_amount,status,attempts,max_attempts}],count}` — تُستدعى عند فتح تبويب تاسك / after each action |
+| `onUpdateState` | ... |
 
 مثال من C++ (نفس نمط `UpdateWebView` / `OnCrmSaveResult`):
 

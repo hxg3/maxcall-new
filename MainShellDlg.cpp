@@ -179,6 +179,7 @@ BEGIN_MESSAGE_MAP(MainShellDlg, CBaseDialog)
 	ON_MESSAGE(WM_SHELL_READY, &MainShellDlg::OnShellReady)
 	ON_MESSAGE(WM_SHELL_MESSAGE, &MainShellDlg::OnShellMessage)
 	ON_MESSAGE(WM_SHELL_HISTORY, &MainShellDlg::OnShellHistory)
+	ON_MESSAGE(WM_SHELL_FEEDBACK_RESULT, &MainShellDlg::OnShellFeedbackResult)
 END_MESSAGE_MAP()
 
 // The version belongs on screen: beta and stable builds sit side by side during
@@ -483,7 +484,70 @@ void MainShellDlg::ProcessShellMessage(CString& message)
 		}
 		return;
 	}
-}
+	if (action == _T("feedbackQueue")) {
+		FetchFeedbackQueue();
+		return;
+	}
+	if (action == _T("feedbackClaim")) {
+		CString taskId = JsStringToCString(root["taskId"]);
+		taskId.Trim();
+		if (!taskId.IsEmpty()) {
+			CString url;
+			url.Format(_T("http://maxcall.local:3001/api/feedback/task/%s/claim"), (LPCTSTR)taskId);
+			CString user = accountSettings.account.username;
+			CString pass = accountSettings.account.password;
+			URLGetAsync(url, m_hWnd, WM_SHELL_FEEDBACK_RESULT, true, _T(""), _T(""), user, pass);
+		}
+		return;
+	}
+	if (action == _T("feedbackRespond")) {
+		CString taskId = JsStringToCString(root["taskId"]);
+		taskId.Trim();
+		if (!taskId.IsEmpty()) {
+			CString outcome = JsStringToCString(root["outcome"]);
+			outcome.Trim();
+			CString score;
+			if (root.isMember("score")) {
+				score.Format(_T("%d"), root["score"].asInt());
+			}
+			CString categories = JsStringToCString(root["categories"]);
+			CString comment = JsStringToCString(root["comment"]);
+			CString duration;
+			if (root.isMember("duration_sec")) {
+				duration.Format(_T("%d"), root["duration_sec"].asInt());
+			}
+			CString nextAttempt = JsStringToCString(root["next_attempt_at"]);
+			CString postData;
+			postData.Format(_T("outcome=%s&score=%s&categories=%s&comment=%s&duration_sec=%s&next_attempt_at=%s"),
+				(LPCSTR)CT2A(outcome, CP_UTF8),
+				(LPCSTR)CT2A(score, CP_UTF8),
+				(LPCSTR)CT2A(categories, CP_UTF8),
+				(LPCSTR)CT2A(comment, CP_UTF8),
+				(LPCSTR)CT2A(duration, CP_UTF8),
+				(LPCSTR)CT2A(nextAttempt, CP_UTF8));
+			CString url;
+			url.Format(_T("http://maxcall.local:3001/api/feedback/task/%s/respond"), (LPCTSTR)taskId);
+			CString user = accountSettings.account.username;
+			CString pass = accountSettings.account.password;
+			URLGetAsync(url, m_hWnd, WM_SHELL_FEEDBACK_RESULT, true, postData, _T(""), user, pass);
+		}
+		return;
+	}
+	if (action == _T("feedbackSkip")) {
+		CString taskId = JsStringToCString(root["taskId"]);
+		taskId.Trim();
+		if (!taskId.IsEmpty()) {
+			CString reason = JsStringToCString(root["reason"]);
+			CString postData;
+			postData.Format(_T("reason=%s"), (LPCSTR)CT2A(reason, CP_UTF8));
+			CString url;
+			url.Format(_T("http://maxcall.local:3001/api/feedback/task/%s/skip"), (LPCTSTR)taskId);
+			CString user = accountSettings.account.username;
+			CString pass = accountSettings.account.password;
+			URLGetAsync(url, m_hWnd, WM_SHELL_FEEDBACK_RESULT, true, postData, _T(""), user, pass);
+		}
+		return;
+	}
 
 void MainShellDlg::ExecuteShellScript(const CString& js)
 {
@@ -666,6 +730,39 @@ LRESULT MainShellDlg::OnShellHistory(WPARAM wParam, LPARAM lParam)
 				if (ucs2) {
 					CString js;
 					js.Format(_T("onCallHistory('%s')"), EscapeJs(CString(ucs2)));
+					free(ucs2);
+					ExecuteShellScript(js);
+				}
+			}
+		}
+		delete result;
+	}
+	return 0;
+}
+
+void MainShellDlg::FetchFeedbackQueue()
+{
+	if (!IsWindow(m_hWnd)) {
+		return;
+	}
+	CString url = _T("http://maxcall.local:3001/api/feedback/queue?limit=50");
+	CString user = accountSettings.account.username;
+	CString pass = accountSettings.account.password;
+	URLGetAsync(url, m_hWnd, WM_SHELL_FEEDBACK_RESULT, false, _T(""), _T(""), user, pass);
+}
+
+LRESULT MainShellDlg::OnShellFeedbackResult(WPARAM wParam, LPARAM lParam)
+{
+	URLGetAsyncData* result = (URLGetAsyncData*)wParam;
+	if (result) {
+		if (result->statusCode >= 200 && result->statusCode < 300) {
+			CStringA bodyA = result->body;
+			if (!bodyA.IsEmpty()) {
+				wchar_t* ucs2 = NULL;
+				Utf8DecodeCP((char*)(LPCSTR)bodyA, CP_UTF8, &ucs2);
+				if (ucs2) {
+					CString js;
+					js.Format(_T("onFeedbackQueue('%s')"), EscapeJs(CString(ucs2)));
 					free(ucs2);
 					ExecuteShellScript(js);
 				}

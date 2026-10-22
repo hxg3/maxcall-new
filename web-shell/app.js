@@ -334,6 +334,37 @@ const MaxCallBridge = {
     _emit('update-dismissed', { state: _updateState, dismissed: true });
   },
 
+  /**
+   * Request the feedback task queue from C++ (via the bridge → server).
+   * @returns {void}
+   */
+  feedbackQueue() { _postToNative({ action: 'feedbackQueue' }); },
+
+  /**
+   * Claim a feedback task.
+   * @param {number|string} taskId Task id.
+   * @returns {void}
+   */
+  feedbackClaim(taskId) { _postToNative({ action: 'feedbackClaim', taskId: String(taskId) }); },
+
+  /**
+   * Respond to a feedback task.
+   * @param {number|string} taskId Task id.
+   * @param {string} outcome One of done|no_answer|refused|wrong_number|callback_later|not_applicable.
+   * @param {object} [fields] Extra fields (score, categories, comment, duration_sec, next_attempt_at).
+   * @returns {void}
+   */
+  feedbackRespond(taskId, outcome, fields = {}) {
+    _postToNative({ action: 'feedbackRespond', taskId: String(taskId), outcome, ...fields });
+  },
+
+  /**
+   * Skip a feedback task.
+   * @param {number|string} taskId Task id.
+   * @returns {void}
+   */
+  feedbackSkip(taskId) { _postToNative({ action: 'feedbackSkip', taskId: String(taskId) }); },
+
   // ---------- Receivers: C++ -> JS (called via ExecuteScript) ----------
 
   /**
@@ -819,7 +850,7 @@ function _applyLogFilter(query) {
  * @returns {void}
  */
 function _switchTab(id) {
-  ['tabDial', 'tabContacts', 'tabLog'].forEach((t) => document.getElementById(t)?.classList.add('hidden'));
+  ['tabDial', 'tabContacts', 'tabLog', 'tabFeedback'].forEach((t) => document.getElementById(t)?.classList.add('hidden'));
   document.getElementById(id)?.classList.remove('hidden');
   document.querySelectorAll('.tab-btn').forEach((b) => {
     const active = b.dataset.tab === id;
@@ -832,6 +863,7 @@ function _switchTab(id) {
   if (id === 'tabDial') document.getElementById('dialInput')?.focus();
   else if (id === 'tabContacts') document.getElementById('contactSearch')?.focus();
   else if (id === 'tabLog') document.getElementById('logSearch')?.focus();
+  else if (id === 'tabFeedback') { _fetchFeedbackQueue(); }
 }
 
 /** Wire up all DOM controls. */
@@ -914,6 +946,8 @@ function _wireUI() {
 
   document.getElementById('logSearch')?.addEventListener('input', (e) =>
     _applyLogFilter(e.target.value));
+
+  document.getElementById('feedbackRetry')?.addEventListener('click', () => _fetchFeedbackQueue());
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -930,6 +964,89 @@ window.onMessage = (...a) => MaxCallBridge.onMessage(...a);
 window.onContacts = (...a) => MaxCallBridge.onContacts(...a);
 window.onAccount = (...a) => MaxCallBridge.onAccount(...a);
 window.onPinState = (...a) => MaxCallBridge.onPinState(...a);
-window.onCallHistory = (...a) => MaxCallBridge.onCallHistory(...a);
-window.onUpdateState = (...a) => MaxCallBridge.onUpdateState(...a);
-window.MaxCallBridge = MaxCallBridge;
+  window.onCallHistory = (...a) => MaxCallBridge.onCallHistory(...a);
+  window.onUpdateState = (...a) => MaxCallBridge.onUpdateState(...a);
+
+  /* ---------- feedback queue (via C++ bridge) ---------- */
+  /** @type {Array<{id:number,phone:string,patient_name:string,visit_date:string,doctor:string,payer:string,visit_amount:number,status:string,attempts:number,max_attempts:number}>} */
+  let _feedbackTasks = [];
+
+  /** Ask C++ to fetch the active feedback task queue from the server. */
+  function _fetchFeedbackQueue() {
+    const list = document.getElementById('feedbackList');
+    const empty = document.getElementById('feedbackEmpty');
+    const err = document.getElementById('feedbackError');
+    const badge = document.getElementById('feedbackTabBadge');
+    const navBadge = document.getElementById('feedbackCountBadge');
+    if (list) list.innerHTML = '';
+    if (empty) empty.classList.add('hidden');
+    if (err) err.classList.add('hidden');
+    if (badge) { badge.textContent = '0'; badge.classList.add('hidden'); }
+    if (navBadge) { navBadge.textContent = '0'; navBadge.classList.add('hidden'); }
+    MaxCallBridge.feedbackQueue();
+  }
+
+  /** Render the feedback task cards returned by C++ via onFeedbackQueue. */
+  function _renderFeedback(jsonText) {
+    let arr = [];
+    try { arr = JSON.parse(String(jsonText || '[]')); } catch { arr = []; }
+    if (!Array.isArray(arr)) arr = (arr && arr.data) || [];
+    _feedbackTasks = arr;
+    const list = document.getElementById('feedbackList');
+    const empty = document.getElementById('feedbackEmpty');
+    const err = document.getElementById('feedbackError');
+    const badge = document.getElementById('feedbackTabBadge');
+    const navBadge = document.getElementById('feedbackCountBadge');
+    if (!list) return;
+    list.innerHTML = '';
+    if (err) err.classList.add('hidden');
+    if (arr.length === 0) {
+      if (empty) empty.classList.remove('hidden');
+      if (badge) { badge.textContent = '0'; badge.classList.add('hidden'); }
+      if (navBadge) { navBadge.textContent = '0'; navBadge.classList.add('hidden'); }
+      return;
+    }
+    if (empty) empty.classList.add('hidden');
+    if (badge) { badge.textContent = String(arr.length); badge.classList.remove('hidden'); }
+    if (navBadge) { navBadge.textContent = String(arr.length); navBadge.classList.remove('hidden'); }
+    arr.forEach((t) => {
+      const row = document.createElement('div');
+      row.className = 'flex items-center justify-between rounded-2xl border border-slate-100 bg-white p-2.5';
+      const date = (t.visit_date || '').slice(0, 10);
+      const attempts = String(t.attempts || 0) + '/' + String(t.max_attempts || 3);
+      row.innerHTML =
+        '<div class="flex min-w-0 items-center gap-2">' +
+        '<div class="min-w-0"><p class="truncate text-xs font-bold select-text" dir="ltr"></p><p class="text-[11px] text-slate-400 select-text"></p></div></div>' +
+        '<div class="flex shrink-0 items-center gap-1.5">' +
+        '<button data-act="call" title="اتصال" class="flex h-7 w-7 items-center justify-center rounded-full bg-teal-700/10 text-teal-800 active:scale-95"><svg class="h-3.5 w-3.5"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L8 10a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2Z"/></svg></button>' +
+        '<button data-act="popup" title="فتح بطاقة المتصل" class="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-slate-500 active:scale-95"><svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg></button>' +
+        '<button data-act="done" title="إتمام" class="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-600 text-white active:scale-95"><svg class="h-3.5 w-3.5"><path d="M5 13l4 4L19 7"/></svg></button>' +
+        '<button data-act="noanswer" title="لم يجب" class="flex h-7 w-7 items-center justify-center rounded-full bg-amber-600 text-white active:scale-95"><svg class="h-3.5 w-3.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></button>' +
+        '</div>';
+      row.querySelectorAll('p')[0].textContent = t.patient_name || '—';
+      row.querySelectorAll('p')[1].textContent = (t.phone || '') + ' · ' + date + ' · ' + attempts;
+      row.querySelector('[data-act="call"]').addEventListener('click', () => { MaxCallBridge.makeCall(t.phone); _switchTab('tabDial'); });
+      row.querySelector('[data-act="popup"]').addEventListener('click', () => { MaxCallBridge.openPopup(t.phone); });
+      row.querySelector('[data-act="done"]').addEventListener('click', () => {
+        const score = prompt('التقييم (1-5) — اختياري:', '');
+        if (score !== null && score !== '' && !/^[1-5]$/.test(score)) { alert('التقييم يجب أن يكون بين 1 و 5'); return; }
+        const comment = prompt('ملاحظات:', '');
+        if (comment === null) return;
+        MaxCallBridge.feedbackRespond(t.id, 'done', { score: score ? parseInt(score) : null, comment: comment || '' });
+        _fetchFeedbackQueue();
+      });
+      row.querySelector('[data-act="noanswer"]').addEventListener('click', () => {
+        MaxCallBridge.feedbackRespond(t.id, 'no_answer');
+        _fetchFeedbackQueue();
+      });
+      list.appendChild(row);
+    });
+    _emit('feedback-queue', { count: arr.length });
+  }
+
+  /** Called by C++ via ExecuteScript when the feedback queue arrives from the server. */
+  window.onFeedbackQueue = (jsonText) => {
+    _renderFeedback(jsonText);
+  };
+
+  window.MaxCallBridge = MaxCallBridge;
