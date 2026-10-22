@@ -2,10 +2,11 @@ name: Feedback Queue Test
 
 # proves on a real Windows machine that the "Tasks" tab can load tasks
 # from the server — the same request the tab makes, without the GUI.
+#
+# Manual by design: it verifies the build that is PUBLISHED on the mirror,
+# so it runs after a release rather than on every source push.
 on:
   workflow_dispatch:
-  push:
-    branches: [ main ]
 
 permissions:
   contents: read
@@ -19,7 +20,7 @@ jobs:
       MIRROR_BASE: "http://maxcall.local:3001/updates"
     steps:
       - name: Fetch the beta build from the internal mirror
-        shell: pwsh
+        shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
           $ProgressPreference = "SilentlyContinue"
@@ -38,7 +39,7 @@ jobs:
           Write-Host "sha256 OK: $sha"
 
       - name: Run the feedback queue self test
-        shell: pwsh
+        shell: powershell
         env:
           MAXCALL_TEST_USER: ${{ vars.MAXCALL_TEST_USER }}
           MAXCALL_TEST_PASS: ${{ secrets.MAXCALL_TEST_PASS }}
