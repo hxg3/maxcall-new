@@ -82,4 +82,5 @@ private:
 	static CString EscapeJs(const CString& input);
 	static CString JsStringToCString(const Json::Value& value);
 	static int JsInt(const Json::Value& value, int fallback);
+	static CString Base64Encode(const CString& input);
 };
