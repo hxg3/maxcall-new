@@ -1,0 +1,87 @@
+name: Feedback Queue Test
+
+# proves on a real Windows machine that the "Tasks" tab can load tasks
+# from the server — the same request the tab makes, without the GUI.
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  feedback-test:
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 20
+    env:
+      MAXCALL_DIR: "C:\\maxcall"
+      MIRROR_BASE: "http://maxcall.local:3001/updates"
+    steps:
+      - name: Fetch the beta build from the internal mirror
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ProgressPreference = "SilentlyContinue"
+
+          $manifest = Invoke-RestMethod "$env:MIRROR_BASE/update.json.beta" -TimeoutSec 30
+          Write-Host "mirror build: $($manifest.version)"
+          if (-not $manifest.version) { throw "manifest carries no version" }
+
+          $localExe = "$env:MAXCALL_DIR\MaxCall-beta.exe"
+          Invoke-WebRequest "$env:MIRROR_BASE/MaxCall-beta.exe" -OutFile $localExe -UseBasicParsing -TimeoutSec 180
+
+          $sha = (Get-FileHash -Algorithm SHA256 -Path $localExe).Hash.ToLower()
+          if ($sha -ne $manifest.sha256) {
+            throw "SHA256 mismatch: got $sha, manifest says $($manifest.sha256)"
+          }
+          Write-Host "sha256 OK: $sha"
+
+      - name: Run the feedback queue self test
+        shell: pwsh
+        env:
+          MAXCALL_TEST_USER: ${{ vars.MAXCALL_TEST_USER }}
+          MAXCALL_TEST_PASS: ${{ secrets.MAXCALL_TEST_PASS }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          if (-not $env:MAXCALL_TEST_USER -or -not $env:MAXCALL_TEST_PASS) {
+            throw "MAXCALL_TEST_USER / MAXCALL_TEST_PASS are not configured for this repo"
+          }
+
+          $report = "$env:MAXCALL_DIR\feedback_test_result.json"
+          if (Test-Path $report) { Remove-Item $report -Force }
+
+          $proc = Start-Process -FilePath "$env:MAXCALL_DIR\MaxCall-beta.exe" `
+            -ArgumentList "--test-feedback" `
+            -WorkingDirectory $env:MAXCALL_DIR `
+            -Wait -PassThru -NoNewWindow
+          Write-Host "self test exited with code $($proc.ExitCode)"
+
+          if (-not (Test-Path $report)) {
+            $log = if (Test-Path "$env:MAXCALL_DIR\maxcall_debug.log") {
+              Get-Content "$env:MAXCALL_DIR\maxcall_debug.log" -Tail 30
+            } else { @("(no debug log)") }
+            Write-Host ($log -join "`n")
+            throw "the self test wrote no report — the request never completed"
+          }
+
+          $r = Get-Content $report -Raw | ConvertFrom-Json
+          Write-Host "report: $($r | ConvertTo-Json -Compress)"
+
+          if (-not $r.ok) {
+            throw "feedback queue self test FAILED: status=$($r.status) tasks=$($r.tasks) note=$($r.note)"
+          }
+          if ([int]$r.tasks -lt 1) {
+            throw "the server returned no tasks — the Tasks tab would be empty"
+          }
+
+          Write-Host "PASS: the Tasks tab receives $($r.tasks) task(s) from the server"
+
+      - name: Upload the self test report
+        uses: actions/upload-artifact@v4
+        with:
+          name: feedback-test-result
+          path: ${{ env.MAXCALL_DIR }}\feedback_test_result.json
+          if-no-files-found: error
+          retention-days: 7

@@ -161,6 +161,25 @@ struct MsipEnumWindowsProcData {
 	int count;
 };
 
+// يفحص سطر الأوامر بحثاً عن --test-feedback (قد يكون argv[0] أول الرمز أو لا).
+// وضع بلا واجهة: يفحص مسار طلب قائمة التغذية الراجعة على جهاز حقيقي.
+static bool IsFeedbackTestCommandLine(LPCTSTR cmdLine)
+{
+	if (!cmdLine) return false;
+	CString s(cmdLine);
+	s.Trim();
+	if (s.IsEmpty()) return false;
+	int sp = s.Find(_T(' '));
+	if (sp > 0) {
+		CString first = s.Left(sp);
+		if (first.Find(_T("--test-feedback")) < 0) {
+			s = s.Mid(sp + 1);
+			s.Trim();
+		}
+	}
+	return s.CompareNoCase(_T("--test-feedback")) == 0;
+}
+
 BOOL CALLBACK MsipEnumWindowsProc(HWND hWnd, LPARAM lParam)
 {
 	MsipEnumWindowsProcData *data = (MsipEnumWindowsProcData *)lParam;
@@ -210,6 +229,15 @@ BOOL CmicrosipApp::InitInstance()
 		AppUpdate::RunSelfUpdate(accountSettings.exeFile, accountSettings.pathLocal,
 			accountSettings.updateChannel == 1
 				? AppUpdate::ChannelBeta : AppUpdate::ChannelStable);
+		return FALSE;
+	}
+
+	// Headless check of the feedback queue (Tasks tab): runs the very same
+	// request the tab makes, so the Windows CI job can prove on a real machine
+	// that the server answers with tasks instead of an empty list.
+	if (IsFeedbackTestCommandLine(theApp.m_lpCmdLine)) {
+		CString report;
+		RunFeedbackSelfTest(report);
 		return FALSE;
 	}
 

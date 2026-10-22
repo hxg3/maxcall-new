@@ -21,11 +21,14 @@
 #include "global.h"
 #include "settings.h"
 #include "utf.h"
+#include "lib/utf.h"
 #include "langpack.h"
 #include <afxinet.h>
 #include <Psapi.h>
 #include "atlrx.h"
 #include "addons.h"
+#include "json.h"
+#include <stdlib.h>
 
 #ifdef UNICODE
 #define CF_TEXT_T CF_UNICODETEXT
@@ -897,6 +900,101 @@ URLGetAsyncData URLGetSync(CString url, bool post, CString postData, CString hea
 	data.userData = userData;
 	URLGetAsyncThread(&data);
 	return data;
+}
+
+// ---------------------------------------------------------------------------
+// Basic auth for the dashboard API
+// ---------------------------------------------------------------------------
+// عقد ATL المثبت تجريبياً (مهمة atl-base64-probe على MSVC):
+// التمرير بـ szDest=NULL يفشل (يرجع 0)، وATL_BASE64_FLAG_NONE تحجز أسطر CRLF
+// كل 64 حرفاً فتتغير السعة المطلوبة — لذلك نستخدم ATL_BASE64_FLAG_NOCRLF
+// بمخزن مقدَّر بحجم 4*ceil(n/3) + هامش. ATL لا يكتب فاصلاً نهاية، فنقرأ
+// الطول المُبلَّغ عنه بدل البحث عن فاصل.
+CString MakeBasicAuthHeader(const CString& username, const CString& password)
+{
+	CString raw;
+	raw.Format(_T("%s:%s"), (LPCTSTR)username, (LPCTSTR)password);
+
+	char* utf8 = Utf8EncodeUcs2(raw);
+	CStringA data = utf8 ? CStringA(utf8) : CStringA();
+	if (utf8) free(utf8);
+
+	CStringA encoded;
+	int srcLen = data.GetLength();
+	if (srcLen > 0) {
+		int destLen = ((srcLen + 2) / 3) * 4 + 2;
+		LPSTR buf = encoded.GetBuffer(destLen);
+		int written = Base64Encode((const BYTE*)(LPCSTR)data, srcLen, buf, &destLen, ATL_BASE64_FLAG_NOCRLF);
+		encoded.ReleaseBuffer(written > 0 ? destLen : 0);
+		if (written <= 0) encoded.Empty();
+	}
+	CString header(_T("Basic "));
+	header += CString(encoded);
+	return header;
+}
+
+// ---------------------------------------------------------------------------
+// feedback queue self test (Windows CI)
+// ---------------------------------------------------------------------------
+// ينفّذ نفس طلب تبويب Tasks بالضبط — بلا واجهة رسومية — ليثبت مهمة CI على
+// جهاز ويندوز حقيقي أن السيرفر يرد بمهام وأن مسار المصادقة يعمل.
+bool RunFeedbackSelfTest(CString& outReportPath)
+{
+	CString user;
+	CString pass;
+	const char* envUser = getenv("MAXCALL_TEST_USER");
+	const char* envPass = getenv("MAXCALL_TEST_PASS");
+	if (envUser) user = envUser;
+	if (envPass) pass = envPass;
+
+	int status = 0;
+	int tasks = 0;
+	CString note;
+
+	if (user.IsEmpty() || pass.IsEmpty()) {
+		note = "missing MAXCALL_TEST_USER/MAXCALL_TEST_PASS";
+	}
+	else {
+		CString url = _T("http://maxcall.local:3001/api/feedback/queue?limit=50");
+		CString headers = _T("Authorization: ") + MakeBasicAuthHeader(user, pass);
+		URLGetAsyncData r = URLGetSync(url, false, _T(""), headers);
+		status = r.statusCode;
+
+		Json::Value root;
+		Json::Reader reader;
+		std::string utf8(r.body);
+		if (reader.parse(utf8, root) && root.isMember("data") && root["data"].isArray()) {
+			tasks = (int)root["data"].size();
+		}
+		if (status != 200) {
+			note.Format(_T("server returned %d"), status);
+		}
+		else if (tasks == 0) {
+			note = "server returned 200 but no tasks";
+		}
+	}
+
+	bool ok = (status == 200 && tasks > 0);
+
+	// التقرير: بلا أي سرّ — الحالة وعدد المهام فقط.
+	CString json;
+	json.Format(_T("{\"ok\":%s,\"status\":%d,\"tasks\":%d,\"note\":\"%s\"}"),
+		ok ? _T("true") : _T("false"), status, tasks, (LPCTSTR)note);
+
+	outReportPath = _T("feedback_test_result.json");
+	FILE* fp = fopen("feedback_test_result.json", "w");
+	if (fp) {
+		fwrite((LPCSTR)json, 1, json.GetLength(), fp);
+		fclose(fp);
+	}
+
+	FILE* dbg = fopen("maxcall_debug.log", "a");
+	if (dbg) {
+		fprintf(dbg, "feedback-selftest ok=%d status=%d tasks=%d %ls\n",
+			ok ? 1 : 0, status, tasks, (LPCTSTR)note);
+		fclose(dbg);
+	}
+	return ok;
 }
 
 CString get_account_username()

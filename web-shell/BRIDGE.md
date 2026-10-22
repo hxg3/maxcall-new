@@ -122,3 +122,22 @@ js.Format(_T("onCallState(%d, '%s')"), call_id, _T("active"));
   توليده قبل كل بناء (`Build Web Shell bundle`).
 * المضيف: `MainShellDlg` (نافذة `IDD_MAIN_SHELL`) — يفتح تلقائياً عند الإقلاع
   إذا `modernUI=1` (الافتراضي للثبيتات الجديدة)، ويُبدَّل من قائمة `Modern UI`.
+
+## 6) فحص قائمة التغذية الراجعة بلا واجهة (`--test-feedback`)
+
+`MaxCall.exe --test-feedback` ينفّذ **نفس طلب تبويب Tasks بالضبط** بلا فتح
+واجهة: يبني ترويسة `Authorization: Basic` من نفس بيانات دخول الموظف
+(`accountSettings.agentLoginName` + `accountSettings.account.password`)،
+يطلب `GET /api/feedback/queue`، ثم يكتب `feedback_test_result.json`:
+
+```json
+{"ok":true,"status":200,"tasks":3,"note":""}
+```
+
+* بيانات الاعتماد تُقرأ من `MAXCALL_TEST_USER` / `MAXCALL_TEST_PASS` فلا يمرّ
+  سرّ على سطر الأوامر.
+* `ok=true` تعني: السيرفر ردّ 200 **وقائمة المهام ليست فارغة** — أي أن تبويب
+  Tasks سيعرض مهام فعلاً.
+* المهمة `Feedback Queue Test` على جهاز ويندوز (`self-hosted`) تشغّل هذا الفحص
+  على البناء المنشور في المرآة، فأي كسر في المصادقة أو الجسر يفشل قبل أن
+  يصل إلى الموظف.

@@ -746,13 +746,24 @@ void MainShellDlg::FetchFeedbackQueue()
 	if (!IsWindow(m_hWnd)) {
 		return;
 	}
-	CString url = _T("http://maxcall.local:3001/api/feedback/queue?limit=50");
-	CString user = accountSettings.account.username;
-	CString pass = accountSettings.account.password;
+	// نفس بيانات دخول الموظف التي توثّق نداءات HIS: agentLoginName هو الاسم
+	// الذي كتبه الموظف عند الدخول (قد يختلف عن داخلة SIP)، وكلمة المرور هي
+	// نفسها التي تحقّقها نقطة /api/agent/login.
+	//
+	// الـ header يُبنى هنا صراحةً لأن تمرير username/password إلى URLGetAsync
+	// لا يجعل WinInet يرسل Authorization في الطلب الأول — والنتيجة 401.
+	CString username = accountSettings.agentLoginName;
+	if (username.IsEmpty()) username = accountSettings.account.username;
+	CString password = accountSettings.account.password;
+	if (username.IsEmpty() || password.IsEmpty()) {
+		FILE* fp = fopen("maxcall_debug.log", "a");
+		if (fp) { fprintf(fp, "shell: feedbackQueue skipped - no agent credentials\n"); fclose(fp); }
+		return;
+	}
 
-	// Pass username/password to URLGetAsync; WinInet will add Basic auth header via
-	// INTERNET_OPTION_USERNAME/PASSWORD (same pattern used by FetchHistory/CrmPopupDlg).
-	URLGetAsync(url, m_hWnd, WM_SHELL_FEEDBACK_RESULT, false, _T(""), _T(""), user, pass);
+	CString url = _T("http://maxcall.local:3001/api/feedback/queue?limit=50");
+	CString headers = _T("Authorization: ") + MakeBasicAuthHeader(username, password);
+	URLGetAsync(url, m_hWnd, WM_SHELL_FEEDBACK_RESULT, false, _T(""), headers);
 }
 
 LRESULT MainShellDlg::OnShellFeedbackResult(WPARAM wParam, LPARAM lParam)
@@ -951,30 +962,3 @@ int MainShellDlg::JsInt(const Json::Value& value, int fallback)
 	return fallback;
 }
 
-CString MainShellDlg::Base64Encode(const CString& input)
-{
-	static const char base64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-	CString output;
-	const char* data = CT2A(input, CP_UTF8);
-	int len = input.GetLength();
-	int i = 0;
-	while (i < len) {
-		uint32_t octet_a = i < len ? (unsigned char)data[i++] : 0;
-		uint32_t octet_b = i < len ? (unsigned char)data[i++] : 0;
-		uint32_t octet_c = i < len ? (unsigned char)data[i++] : 0;
-		uint32_t triple = (octet_a << 0x10) + (octet_b << 0x08) + octet_c;
-		output += base64[(triple >> 3 * 6) & 0x3F];
-		output += base64[(triple >> 2 * 6) & 0x3F];
-		output += base64[(triple >> 1 * 6) & 0x3F];
-		output += base64[(triple >> 0 * 6) & 0x3F];
-	}
-	int mod = len % 3;
-	if (mod == 1) {
-		output.SetAt(output.GetLength() - 2, '=');
-		output.SetAt(output.GetLength() - 1, '=');
-	}
-	else if (mod == 2) {
-		output.SetAt(output.GetLength() - 1, '=');
-	}
-	return output;
-}

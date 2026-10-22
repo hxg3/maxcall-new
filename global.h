@@ -430,6 +430,17 @@ typedef struct {
 void URLGetAsync(CString url, HWND hWnd=0, UINT message=0, bool post = false, CString postData = _T(""), CString headers = _T(""), CString username = _T(""), CString password = _T(""), void* userData = NULL);
 URLGetAsyncData URLGetSync(CString url, bool post = false, CString postData = _T(""), CString headers = _T(""), CString username = _T(""), CString password = _T(""), void* userData = NULL);
 
+// "Basic <base64>" لقيمة Authorization — نفس عقد ATL الذي توثّقه نافذة بطاقة
+// المتصل (مُثبت تجريبياً على MSVC عبر مهمة atl-base64-probe).
+CString MakeBasicAuthHeader(const CString& username, const CString& password);
+
+// فحص بلا واجهة لقائمة التغذية الراجعة: ينفّذ نفس طلب تبويب Tasks بالضبط
+// ويكتب تقريراً في feedback_test_result.json. يُستخدم من مهمة CI على ويندوز
+// لإثبات أن التبويب يجلب المهام فعلياً من السيرفر.
+// بيانات الاعتماد تُقرأ من MAXCALL_TEST_USER / MAXCALL_TEST_PASS فلا يمرّ سرّ
+// على سطر الأوامر. يُعيد true عند 200 مع مهمة واحدة على الأقل.
+bool RunFeedbackSelfTest(CString& outReportPath);
+
 CStringA urldecode(CStringA str);
 CStringA urlencode(CStringA str);
 CStringA char2hex(char dec);
