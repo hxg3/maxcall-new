@@ -1057,14 +1057,51 @@ window.onPinState = (...a) => MaxCallBridge.onPinState(...a);
     MaxCallBridge.feedbackMy();
   }
 
-  /** Shared task card shell (name + meta line, actions right). */
+  /** Shared task card shell (name + chips + meta, actions right). */
   function _taskCard() {
     const row = document.createElement('div');
     row.className = 'rounded-2xl border border-slate-100 bg-white p-2.5';
     row.innerHTML =
       '<div class="flex items-center justify-between gap-2">' +
-      '<div class="min-w-0"><p class="truncate text-xs font-bold select-text" dir="ltr"></p><p class="truncate text-[11px] text-slate-400 select-text" dir="ltr"></p></div></div>';
+      '<div class="min-w-0"><p class="truncate text-xs font-bold select-text" dir="ltr"></p></div></div>' +
+      '<div data-chips class="mt-1.5 flex flex-wrap items-center gap-1"></div>' +
+      '<p data-meta class="mt-1 truncate text-[10px] text-slate-400 select-text" dir="ltr"></p>';
     return row;
+  }
+
+  /** Small high-signal chip. */
+  function _chip(text, cls) {
+    return '<span class="rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ' + (cls || 'bg-slate-50 text-slate-500') + '">' + text.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</span>';
+  }
+
+  /**
+   * Quick-glance chips: age/gender, nationality, visit recency, cash/insurance.
+   * @param {object} t Task row from the server.
+   * @returns {string} HTML for the chips container.
+   */
+  function _chipsHtml(t) {
+    const parts = [];
+    const rawAge = String(t.pat_age || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    const sex = String(t.pat_sex || '').toUpperCase().charAt(0);
+    if (rawAge) {
+      // Formats: '40Y' simple years, or like '11M 15D' for infants — we
+      // abbreviate simply: '11m15d'. The gender joins only simple years.
+      const simple = /^(\d+)\s*y(?:r|rs|ear[s]?)?(?![a-z])/.exec(rawAge);
+      parts.push(_chip(simple
+        ? simple[1] + 'y' + (sex === 'M' || sex === 'F' ? ' ' + sex.toLowerCase() : '')
+        : rawAge));
+    }
+    if (t.pat_nationality) parts.push(_chip(String(t.pat_nationality).slice(0, 12)));
+    const vd = String(t.visit_date || '').slice(0, 10);
+    if (vd) {
+      const days = Math.max(0, Math.round((Date.now() - new Date(vd + 'T00:00:00').getTime()) / 86400000));
+      parts.push(_chip(days <= 0 ? 'today' : days + 'd', 'bg-slate-900 text-white'));
+    }
+    const code = String(t.pat_payer_code || '').toUpperCase();
+    if (code) {
+      parts.push(code === 'CSH' ? _chip('cash', 'bg-amber-50 text-amber-600') : _chip(code, 'bg-teal-50 text-teal-700'));
+    }
+    return parts.join('');
   }
 
   /** Compact icon button used in task cards. */
@@ -1097,15 +1134,15 @@ window.onPinState = (...a) => MaxCallBridge.onPinState(...a);
     if (empty) empty.classList.add('hidden');
     arr.forEach((t) => {
       const row = _taskCard();
-      const date = (t.visit_date || '').slice(0, 10);
       const attempts = String(t.attempts || 0) + '/' + String(t.max_attempts || 3);
       row.innerHTML +=
         '<div class="flex shrink-0 items-center gap-1.5">' +
         _taskBtn('call', 'Call', 'bg-emerald-500 text-white', CALL_SVG) +
         _taskBtn('popup', 'Caller details', 'bg-slate-100 text-slate-500', INFO_SVG) +
         '</div>';
-      row.querySelectorAll('p')[0].textContent = t.patient_name || '—';
-      row.querySelectorAll('p')[1].textContent = (t.phone || '') + ' · ' + date + ' · ' + attempts;
+      row.querySelector('p').textContent = t.patient_name || '—';
+      row.querySelector('[data-chips]').innerHTML = _chipsHtml(t);
+      row.querySelector('[data-meta]').textContent = (t.phone || '') + ' · ' + attempts;
       row.querySelector('[data-act="call"]').addEventListener('click', () => {
         // ادعاء + اتصال: المهمة تنتقل فوراً إلى My والموظف يتصل بالمريض.
         MaxCallBridge.feedbackClaim(t.id);
@@ -1142,8 +1179,9 @@ window.onPinState = (...a) => MaxCallBridge.onPinState(...a);
         _taskBtn('noanswer', 'No answer', 'bg-amber-50 text-amber-600', NOANSWER_SVG) +
         _taskBtn('done', 'Feedback received', 'bg-emerald-500 text-white', DONE_SVG) +
         '</div>';
-      row.querySelectorAll('p')[0].textContent = t.patient_name || '—';
-      row.querySelectorAll('p')[1].textContent = (t.phone || '') + ' · feedback pending';
+      row.querySelector('p').textContent = t.patient_name || '—';
+      row.querySelector('[data-chips]').innerHTML = _chipsHtml(t);
+      row.querySelector('[data-meta]').textContent = (t.phone || '') + ' · feedback pending';
       row.querySelector('[data-act="noanswer"]').addEventListener('click', () => {
         MaxCallBridge.feedbackRespond(t.id, 'no_answer');
       });
