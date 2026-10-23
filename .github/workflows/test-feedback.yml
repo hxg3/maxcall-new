@@ -25,6 +25,14 @@ jobs:
           $ErrorActionPreference = "Stop"
           $ProgressPreference = "SilentlyContinue"
 
+          # A leftover MaxCall-beta.exe from a previous run (or a stuck test)
+          # locks the target file and breaks the download. Close just the
+          # test copy - never the real installed MaxCall.exe. Failures are
+          # fine (it was not running).
+          Get-Process -Name "MaxCall-beta" -ErrorAction SilentlyContinue |
+            Stop-Process -Force -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 2
+
           $manifest = Invoke-RestMethod "$env:MIRROR_BASE/update.json.beta" -TimeoutSec 30
           Write-Host "mirror build: $($manifest.version)"
           if (-not $manifest.version) { throw "manifest carries no version" }
