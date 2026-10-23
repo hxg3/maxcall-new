@@ -13,6 +13,7 @@ struct ICoreWebView2Environment;
 #define WM_SHELL_MESSAGE (WM_USER + 111)
 #define WM_SHELL_HISTORY (WM_USER + 114)
 #define WM_SHELL_FEEDBACK_RESULT (WM_USER + 115)
+#define WM_SHELL_FEEDBACK_MY (WM_USER + 117)
 #define WM_SHELL_FEEDBACK_ACTION (WM_USER + 116)
 
 // MainShellDlg — النافذة الرئيسية الحديثة (WebView2 Shell).
@@ -41,6 +42,7 @@ public:
 	void PushUpdateState(int state, const CString& version, int percent, const CString& message);
 	void FetchHistory();
 	void FetchFeedbackQueue();
+	void FetchFeedbackMy();
 	void PushSnapshot();
 
 	bool IsWebViewReady() const { return m_webView != NULL && m_pageReady; }
@@ -60,6 +62,7 @@ protected:
 	afx_msg LRESULT OnShellMessage(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnShellHistory(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnShellFeedbackResult(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnShellFeedbackMy(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnShellFeedbackAction(WPARAM wParam, LPARAM lParam);
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
 	DECLARE_MESSAGE_MAP()

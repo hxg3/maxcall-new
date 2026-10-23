@@ -341,6 +341,12 @@ const MaxCallBridge = {
   feedbackQueue() { _postToNative({ action: 'feedbackQueue' }); },
 
   /**
+   * Request this agent's claimed (in-progress) feedback tasks from C++.
+   * @returns {void}
+   */
+  feedbackMy() { _postToNative({ action: 'feedbackMy' }); },
+
+  /**
    * Claim a feedback task.
    * @param {number|string} taskId Task id.
    * @returns {void}
@@ -863,7 +869,28 @@ function _switchTab(id) {
   if (id === 'tabDial') document.getElementById('dialInput')?.focus();
   else if (id === 'tabContacts') document.getElementById('contactSearch')?.focus();
   else if (id === 'tabLog') document.getElementById('logSearch')?.focus();
-  else if (id === 'tabFeedback') { _fetchFeedbackQueue(); }
+  else if (id === 'tabFeedback') { _fetchFeedbackQueue(); _fetchFeedbackMy(); }
+}
+
+/**
+ * Switch between the New and My panes inside the Tasks section.
+ * @param {string} which 'new' or 'my'.
+ * @returns {void}
+ */
+function _switchFeedbackSub(which) {
+  const isNew = which !== 'my';
+  [['fbSubNew', true], ['fbSubMy', false]].forEach(([id, cond]) => {
+    const b = document.getElementById(id);
+    if (!b) return;
+    const on = cond === isNew;
+    b.classList.toggle('shadow-sm', on);
+    b.classList.toggle('font-bold', on);
+    b.classList.toggle('text-slate-800', on);
+    b.classList.toggle('font-medium', !on);
+    b.classList.toggle('text-slate-400', !on);
+  });
+  document.getElementById('fbPaneNew')?.classList.toggle('hidden', !isNew);
+  document.getElementById('fbPaneMy')?.classList.toggle('hidden', isNew);
 }
 
 /** Wire up all DOM controls. */
@@ -947,7 +974,35 @@ function _wireUI() {
   document.getElementById('logSearch')?.addEventListener('input', (e) =>
     _applyLogFilter(e.target.value));
 
-  document.getElementById('feedbackRetry')?.addEventListener('click', () => _fetchFeedbackQueue());
+  document.getElementById('feedbackRetry')?.addEventListener('click', () => {
+    _fetchFeedbackQueue();
+    _fetchFeedbackMy();
+  });
+
+  /* feedback section: New/My sub-tabs + outcome dialog */
+  document.getElementById('fbSubNew')?.addEventListener('click', () => _switchFeedbackSub('new'));
+  document.getElementById('fbSubMy')?.addEventListener('click', () => _switchFeedbackSub('my'));
+
+  const dlg = document.getElementById('fbDialog');
+  dlg?.querySelectorAll('[data-score]').forEach((b) =>
+    b.addEventListener('click', () => {
+      dlg.querySelectorAll('[data-score]').forEach((x) => {
+        x.classList.remove('bg-brand', 'text-white');
+        x.classList.add('bg-slate-100', 'text-slate-500');
+      });
+      b.classList.remove('bg-slate-100', 'text-slate-500');
+      b.classList.add('bg-brand', 'text-white');
+    }));
+  document.getElementById('fbDialogCancel')?.addEventListener('click', _closeFeedbackDialog);
+  document.getElementById('fbDialogSubmit')?.addEventListener('click', () => {
+    if (!_fbDialogTask) return;
+    const sel = dlg?.querySelector('[data-score].bg-brand');
+    const score = sel ? parseInt(sel.dataset.score, 10) : null;
+    const comment = document.getElementById('fbComment')?.value.trim() || '';
+    MaxCallBridge.feedbackRespond(_fbDialogTask.id, 'done', { score, comment });
+    _closeFeedbackDialog();
+    // The native side refetches queue + my list once the server confirms.
+  });
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -970,23 +1025,59 @@ window.onPinState = (...a) => MaxCallBridge.onPinState(...a);
   /* ---------- feedback queue (via C++ bridge) ---------- */
   /** @type {Array<{id:number,phone:string,patient_name:string,visit_date:string,doctor:string,payer:string,visit_amount:number,status:string,attempts:number,max_attempts:number}>} */
   let _feedbackTasks = [];
+  /** @type {Array<object>} Claimed tasks waiting for an outcome (My pane). */
+  let _myTasks = [];
+  /** Task id currently open in the feedback dialog. */
+  let _fbDialogTask = null;
 
-  /** Ask C++ to fetch the active feedback task queue from the server. */
-  function _fetchFeedbackQueue() {
-    const list = document.getElementById('feedbackList');
-    const empty = document.getElementById('feedbackEmpty');
-    const err = document.getElementById('feedbackError');
-    const badge = document.getElementById('feedbackTabBadge');
+  /** Update the notification bubble on the Tasks tab icon + pane counters. */
+  function _setFeedbackCounts() {
+    const newCount = _feedbackTasks.length;
+    const myCount = _myTasks.length;
     const navBadge = document.getElementById('feedbackCountBadge');
-    if (list) list.innerHTML = '';
-    if (empty) empty.classList.add('hidden');
+    if (navBadge) {
+      navBadge.textContent = newCount > 99 ? '99+' : String(newCount);
+      navBadge.classList.toggle('hidden', newCount === 0);
+    }
+    const n = document.getElementById('fbNewCount');
+    const m = document.getElementById('fbMyCount');
+    if (n) n.textContent = String(newCount);
+    if (m) m.textContent = String(myCount);
+  }
+
+  /** Ask C++ to fetch the due feedback task queue from the server (New pane). */
+  function _fetchFeedbackQueue() {
+    const err = document.getElementById('feedbackError');
     if (err) err.classList.add('hidden');
-    if (badge) { badge.textContent = '0'; badge.classList.add('hidden'); }
-    if (navBadge) { navBadge.textContent = '0'; navBadge.classList.add('hidden'); }
     MaxCallBridge.feedbackQueue();
   }
 
-  /** Render the feedback task cards returned by C++ via onFeedbackQueue. */
+  /** Ask C++ to fetch the agent's claimed tasks (My pane). */
+  function _fetchFeedbackMy() {
+    MaxCallBridge.feedbackMy();
+  }
+
+  /** Shared task card shell (name + meta line, actions right). */
+  function _taskCard() {
+    const row = document.createElement('div');
+    row.className = 'rounded-2xl border border-slate-100 bg-white p-2.5';
+    row.innerHTML =
+      '<div class="flex items-center justify-between gap-2">' +
+      '<div class="min-w-0"><p class="truncate text-xs font-bold select-text" dir="ltr"></p><p class="truncate text-[11px] text-slate-400 select-text" dir="ltr"></p></div></div>';
+    return row;
+  }
+
+  /** Compact icon button used in task cards. */
+  function _taskBtn(action, title, cls, svg) {
+    return '<button data-act="' + action + '" title="' + title + '" aria-label="' + title + '" class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full ' + cls + ' active:scale-95">' + svg + '</button>';
+  }
+
+  const CALL_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5"><path stroke-linecap="round" stroke-linejoin="round" d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L8 10a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2Z"/></svg>';
+  const INFO_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>';
+  const NOANSWER_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5"><path stroke-linecap="round" d="M10.7 13.3a16 16 0 0 1-2.7-2.7l1.3-1.3a2 2 0 0 0 .5-2.1c-.3-.9-.6-1.9-.7-2.9a2 2 0 0 0-2-1.7H4.1a2 2 0 0 0-2 2.1c.1 1.4.5 2.8 1 4.1m6.6 9.6c1.3.5 2.7.9 4.1 1a2 2 0 0 0 2.1-2v-2.9a2 2 0 0 0-1.7-2c-1-.1-2-.4-2.9-.7a2 2 0 0 0-2.1.5l-.5.5"/><path d="m2 2 20 20"/></svg>';
+  const DONE_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5"><path stroke-linecap="round" stroke-linejoin="round" d="m5 13 4 4L19 7"/></svg>';
+
+  /** Render the due-task list (New pane): the only in-place action is Call. */
   function _renderFeedback(jsonText) {
     let arr = [];
     try { arr = JSON.parse(String(jsonText || '[]')); } catch { arr = []; }
@@ -995,58 +1086,111 @@ window.onPinState = (...a) => MaxCallBridge.onPinState(...a);
     const list = document.getElementById('feedbackList');
     const empty = document.getElementById('feedbackEmpty');
     const err = document.getElementById('feedbackError');
-    const badge = document.getElementById('feedbackTabBadge');
-    const navBadge = document.getElementById('feedbackCountBadge');
     if (!list) return;
     list.innerHTML = '';
     if (err) err.classList.add('hidden');
     if (arr.length === 0) {
       if (empty) empty.classList.remove('hidden');
-      if (badge) { badge.textContent = '0'; badge.classList.add('hidden'); }
-      if (navBadge) { navBadge.textContent = '0'; navBadge.classList.add('hidden'); }
+      _setFeedbackCounts();
       return;
     }
     if (empty) empty.classList.add('hidden');
-    if (badge) { badge.textContent = String(arr.length); badge.classList.remove('hidden'); }
-    if (navBadge) { navBadge.textContent = String(arr.length); navBadge.classList.remove('hidden'); }
     arr.forEach((t) => {
-      const row = document.createElement('div');
-      row.className = 'flex items-center justify-between rounded-2xl border border-slate-100 bg-white p-2.5';
+      const row = _taskCard();
       const date = (t.visit_date || '').slice(0, 10);
       const attempts = String(t.attempts || 0) + '/' + String(t.max_attempts || 3);
-      row.innerHTML =
-        '<div class="flex min-w-0 items-center gap-2">' +
-        '<div class="min-w-0"><p class="truncate text-xs font-bold select-text" dir="ltr"></p><p class="text-[11px] text-slate-400 select-text"></p></div></div>' +
+      row.innerHTML +=
         '<div class="flex shrink-0 items-center gap-1.5">' +
-        '<button data-act="call" title="Call" class="flex h-7 w-7 items-center justify-center rounded-full bg-teal-700/10 text-teal-800 active:scale-95"><svg class="h-3.5 w-3.5"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L8 10a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2Z"/></svg></button>' +
-        '<button data-act="popup" title="Open Caller Card" class="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-slate-500 active:scale-95"><svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg></button>' +
-        '<button data-act="done" title="Done" class="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-600 text-white active:scale-95"><svg class="h-3.5 w-3.5"><path d="M5 13l4 4L19 7"/></svg></button>' +
-        '<button data-act="noanswer" title="No Answer" class="flex h-7 w-7 items-center justify-center rounded-full bg-amber-600 text-white active:scale-95"><svg class="h-3.5 w-3.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></button>' +
+        _taskBtn('call', 'Call', 'bg-emerald-500 text-white', CALL_SVG) +
+        _taskBtn('popup', 'Caller details', 'bg-slate-100 text-slate-500', INFO_SVG) +
         '</div>';
       row.querySelectorAll('p')[0].textContent = t.patient_name || '—';
       row.querySelectorAll('p')[1].textContent = (t.phone || '') + ' · ' + date + ' · ' + attempts;
-      row.querySelector('[data-act="call"]').addEventListener('click', () => { MaxCallBridge.makeCall(t.phone); _switchTab('tabDial'); });
+      row.querySelector('[data-act="call"]').addEventListener('click', () => {
+        // ادعاء + اتصال: المهمة تنتقل فوراً إلى My والموظف يتصل بالمريض.
+        MaxCallBridge.feedbackClaim(t.id);
+        MaxCallBridge.makeCall(t.phone);
+        _switchTab('tabDial');
+      });
       row.querySelector('[data-act="popup"]').addEventListener('click', () => { MaxCallBridge.openPopup(t.phone); });
-      row.querySelector('[data-act="done"]').addEventListener('click', () => {
-        const score = prompt('Score (1-5) — optional:', '');
-        if (score !== null && score !== '' && !/^[1-5]$/.test(score)) { alert('Score must be between 1 and 5'); return; }
-        const comment = prompt('Comment:', '');
-        if (comment === null) return;
-        MaxCallBridge.feedbackRespond(t.id, 'done', { score: score ? parseInt(score) : null, comment: comment || '' });
-        // The native side refreshes the queue once the server confirms the
-        // action, so the counter and the list never show a stale race.
-      });
-      row.querySelector('[data-act="noanswer"]').addEventListener('click', () => {
-        MaxCallBridge.feedbackRespond(t.id, 'no_answer');
-      });
       list.appendChild(row);
     });
+    _setFeedbackCounts();
     _emit('feedback-queue', { count: arr.length });
   }
 
-  /** Called by C++ via ExecuteScript when the feedback queue arrives from the server. */
+  /** Render the agent's claimed tasks (My pane): record outcome here. */
+  function _renderMy(jsonText) {
+    let arr = [];
+    try { arr = JSON.parse(String(jsonText || '[]')); } catch { arr = []; }
+    if (!Array.isArray(arr)) arr = (arr && arr.data) || [];
+    _myTasks = arr;
+    const list = document.getElementById('myList');
+    const empty = document.getElementById('myEmpty');
+    if (!list) return;
+    list.innerHTML = '';
+    if (arr.length === 0) {
+      if (empty) empty.classList.remove('hidden');
+      _setFeedbackCounts();
+      return;
+    }
+    if (empty) empty.classList.add('hidden');
+    arr.forEach((t) => {
+      const row = _taskCard();
+      row.innerHTML +=
+        '<div class="flex shrink-0 items-center gap-1.5">' +
+        _taskBtn('noanswer', 'No answer', 'bg-amber-50 text-amber-600', NOANSWER_SVG) +
+        _taskBtn('done', 'Feedback received', 'bg-emerald-500 text-white', DONE_SVG) +
+        '</div>';
+      row.querySelectorAll('p')[0].textContent = t.patient_name || '—';
+      row.querySelectorAll('p')[1].textContent = (t.phone || '') + ' · feedback pending';
+      row.querySelector('[data-act="noanswer"]').addEventListener('click', () => {
+        MaxCallBridge.feedbackRespond(t.id, 'no_answer');
+      });
+      row.querySelector('[data-act="done"]').addEventListener('click', () => {
+        _openFeedbackDialog(t);
+      });
+      list.appendChild(row);
+    });
+    _setFeedbackCounts();
+  }
+
+  /* ---------- feedback recording dialog ---------- */
+
+  /** Open the outcome dialog for a claimed task. */
+  function _openFeedbackDialog(task) {
+    _fbDialogTask = task;
+    const dlg = document.getElementById('fbDialog');
+    const who = document.getElementById('fbDialogWho');
+    const comment = document.getElementById('fbComment');
+    if (!dlg) return;
+    if (who) who.textContent = (task.patient_name || '') + (task.phone ? ' · ' + task.phone : '');
+    if (comment) comment.value = '';
+    dlg.querySelectorAll('[data-score]').forEach((b) => {
+      b.classList.remove('bg-brand', 'text-white');
+      b.classList.add('bg-slate-100', 'text-slate-500');
+    });
+    dlg.classList.remove('hidden');
+    dlg.classList.add('flex');
+  }
+
+  /** Close the outcome dialog without saving. */
+  function _closeFeedbackDialog() {
+    const dlg = document.getElementById('fbDialog');
+    if (!dlg) return;
+    dlg.classList.add('hidden');
+    dlg.classList.remove('flex');
+    _fbDialogTask = null;
+  }
+
+  /** Called by C++ via ExecuteScript when the due-task queue arrives from the server. */
   window.onFeedbackQueue = (jsonText) => {
     _renderFeedback(jsonText);
+  };
+
+  /** Called by C++ via ExecuteScript when the claimed-task list arrives. */
+  window.onFeedbackMy = (jsonText) => {
+    _renderMy(jsonText);
   };
 
   window.MaxCallBridge = MaxCallBridge;

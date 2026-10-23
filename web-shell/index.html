@@ -125,7 +125,7 @@
       <button id="tabBtnDial" role="tab" aria-controls="tabDial" data-tab="tabDial" class="tab-btn flex flex-1 items-center justify-center gap-1 rounded-full bg-brand px-2 py-1.5 text-xs font-bold text-white"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L8 10a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2Z"/></svg><span>Dial</span></button>
       <button id="tabBtnContacts" role="tab" aria-controls="tabContacts" data-tab="tabContacts" class="tab-btn flex flex-1 items-center justify-center gap-1 rounded-full px-2 py-1.5 text-xs font-medium text-slate-400 hover:text-slate-600"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/></svg><span>Contacts</span></button>
       <button id="tabBtnLog" role="tab" aria-controls="tabLog" data-tab="tabLog" class="tab-btn flex flex-1 items-center justify-center gap-1 rounded-full px-2 py-1.5 text-xs font-medium text-slate-400 hover:text-slate-600"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg><span>Log</span></button>
-      <button id="tabBtnFeedback" role="tab" aria-controls="tabFeedback" data-tab="tabFeedback" class="tab-btn flex flex-1 items-center justify-center gap-1 rounded-full px-2 py-1.5 text-xs font-medium text-slate-400 hover:text-slate-600"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5"><path stroke-linecap="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg><span>Tasks</span><span id="feedbackCountBadge" class="hidden ml-1 rounded-full bg-brand px-1.5 text-[10px] font-bold text-white">0</span></button>
+      <button id="tabBtnFeedback" role="tab" aria-controls="tabFeedback" data-tab="tabFeedback" class="tab-btn flex flex-1 items-center justify-center gap-1 rounded-full px-2 py-1.5 text-xs font-medium text-slate-400 hover:text-slate-600"><span class="relative inline-flex"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2m-6 7h6m-6 4h4"/></svg><span id="feedbackCountBadge" class="hidden absolute -top-1.5 -right-2 min-w-[15px] rounded-full bg-rose-500 px-1 text-center text-[9px] font-bold leading-[15px] text-white ring-2 ring-white">0</span></span><span>Tasks</span></button>
     </nav>
 
     <main class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
@@ -220,13 +220,18 @@
 
       <!-- 6. Feedback / Tasks -->
       <section id="tabFeedback" role="tabpanel" class="hidden space-y-2">
-        <div class="flex items-center gap-2 rounded-2xl bg-slate-50 px-3 py-2">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4 shrink-0 text-slate-400"><path stroke-linecap="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-          <p class="text-xs font-bold text-slate-500">Feedback Tasks</p>
-          <span id="feedbackTabBadge" class="shrink-0 text-[11px] text-slate-400">0</span>
+        <div class="flex gap-0.5 rounded-full bg-slate-100 p-0.5" role="tablist" aria-label="Task views">
+          <button id="fbSubNew" role="tab" aria-controls="fbPaneNew" class="flex flex-1 items-center justify-center gap-1 rounded-full px-2 py-1 text-[11px] font-bold text-slate-800 shadow-sm"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3 w-3"><path stroke-linecap="round" stroke-linejoin="round" d="M13 19 21 12l-8-7M21 12H9a6 6 0 0 0-6 6v2"/></svg><span>New</span><span id="fbNewCount" class="font-medium text-slate-400">0</span></button>
+          <button id="fbSubMy" role="tab" aria-controls="fbPaneMy" class="flex flex-1 items-center justify-center gap-1 rounded-full px-2 py-1 text-[11px] font-medium text-slate-400"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3 w-3"><path stroke-linecap="round" stroke-linejoin="round" d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="m16 11 2 2 4-4"/></svg><span>My</span><span id="fbMyCount" class="font-medium text-slate-400">0</span></button>
         </div>
-        <div id="feedbackList" class="h-[300px] max-h-[300px] space-y-1.5 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"></div>
-        <p id="feedbackEmpty" class="rounded-2xl border border-dashed border-slate-200 px-3 py-6 text-center text-xs text-slate-400">No feedback tasks due.</p>
+        <div id="fbPaneNew" role="tabpanel">
+          <div id="feedbackList" class="h-[300px] max-h-[300px] space-y-1.5 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"></div>
+          <p id="feedbackEmpty" class="rounded-2xl border border-dashed border-slate-200 px-3 py-6 text-center text-xs text-slate-400">No tasks due right now.</p>
+        </div>
+        <div id="fbPaneMy" role="tabpanel" class="hidden">
+          <div id="myList" class="h-[300px] max-h-[300px] space-y-1.5 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"></div>
+          <p id="myEmpty" class="rounded-2xl border border-dashed border-slate-200 px-3 py-6 text-center text-xs text-slate-400">Nothing here. Call a task from New and it moves to My.</p>
+        </div>
         <div id="feedbackError" class="hidden rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 flex items-center gap-2">
           <span>Failed to load list</span>
           <button id="feedbackRetry" type="button" class="underline hover:text-rose-900">Retry</button>
@@ -236,6 +241,32 @@
 
     <div id="msgToast" class="fixed bottom-3 left-1/2 hidden w-[280px] max-w-[calc(100%-1.5rem)] -translate-x-1/2 rounded-xl bg-slate-900 px-3 py-2 shadow-xl">
       <p id="msgText" class="text-xs text-white"></p>
+    </div>
+
+    <!-- Feedback recording dialog (opened from a My task) -->
+    <div id="fbDialog" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/40 p-4">
+      <div class="w-full max-w-[260px] rounded-2xl bg-white p-4 shadow-2xl">
+        <div class="flex items-start gap-2">
+          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-teal-50 text-teal-700"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4"><path stroke-linecap="round" stroke-linejoin="round" d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M10.3 21a2 2 0 0 0 3.4 0"/></svg></span>
+          <div class="min-w-0">
+            <p class="text-xs font-bold">Record feedback</p>
+            <p id="fbDialogWho" class="truncate text-[11px] text-slate-400" dir="ltr"></p>
+          </div>
+        </div>
+        <p class="mt-3 text-[10px] font-medium uppercase tracking-wide text-slate-400">Satisfaction</p>
+        <div id="fbScoreRow" class="mt-1 flex gap-1">
+          <button data-score="1" class="h-7 flex-1 rounded-lg bg-slate-100 text-xs font-bold text-slate-500 active:scale-95">1</button>
+          <button data-score="2" class="h-7 flex-1 rounded-lg bg-slate-100 text-xs font-bold text-slate-500 active:scale-95">2</button>
+          <button data-score="3" class="h-7 flex-1 rounded-lg bg-slate-100 text-xs font-bold text-slate-500 active:scale-95">3</button>
+          <button data-score="4" class="h-7 flex-1 rounded-lg bg-slate-100 text-xs font-bold text-slate-500 active:scale-95">4</button>
+          <button data-score="5" class="h-7 flex-1 rounded-lg bg-slate-100 text-xs font-bold text-slate-500 active:scale-95">5</button>
+        </div>
+        <textarea id="fbComment" rows="2" placeholder="Comment (optional)…" class="mt-2 w-full resize-none rounded-xl bg-slate-50 px-2.5 py-1.5 text-xs outline-none ring-1 ring-slate-200 placeholder:text-slate-400 focus:ring-teal-500"></textarea>
+        <div class="mt-3 flex gap-2">
+          <button id="fbDialogCancel" class="flex-1 rounded-xl bg-slate-100 py-1.5 text-xs font-bold text-slate-600 active:scale-95">Cancel</button>
+          <button id="fbDialogSubmit" class="flex-1 rounded-xl bg-brand py-1.5 text-xs font-bold text-white active:scale-95">Save</button>
+        </div>
+      </div>
     </div>
   </div>
 

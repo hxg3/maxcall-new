@@ -180,6 +180,7 @@ BEGIN_MESSAGE_MAP(MainShellDlg, CBaseDialog)
 	ON_MESSAGE(WM_SHELL_MESSAGE, &MainShellDlg::OnShellMessage)
 	ON_MESSAGE(WM_SHELL_HISTORY, &MainShellDlg::OnShellHistory)
 	ON_MESSAGE(WM_SHELL_FEEDBACK_RESULT, &MainShellDlg::OnShellFeedbackResult)
+	ON_MESSAGE(WM_SHELL_FEEDBACK_MY, &MainShellDlg::OnShellFeedbackMy)
 	ON_MESSAGE(WM_SHELL_FEEDBACK_ACTION, &MainShellDlg::OnShellFeedbackAction)
 END_MESSAGE_MAP()
 
@@ -357,6 +358,7 @@ void MainShellDlg::ProcessShellMessage(CString& message)
 		// عدد المهام على تبويب تاسك — يُجلب مع اللقطة ليظهر العداد فور
 		// إقلاع التطبيق بلا فتح التبويب.
 		FetchFeedbackQueue();
+		FetchFeedbackMy();
 		return;
 	}
 	if (action == _T("openSettings")) {
@@ -490,6 +492,10 @@ void MainShellDlg::ProcessShellMessage(CString& message)
 	}
 	if (action == _T("feedbackQueue")) {
 		FetchFeedbackQueue();
+		return;
+	}
+	if (action == _T("feedbackMy")) {
+		FetchFeedbackMy();
 		return;
 	}
 	// الإجراءات (ادعاء / استجابة / تخطي) كلها POST على نفس النقاط، فتشترك في
@@ -763,6 +769,24 @@ void MainShellDlg::FetchFeedbackQueue()
 	URLGetAsync(url, m_hWnd, WM_SHELL_FEEDBACK_RESULT, false, _T(""), headers);
 }
 
+void MainShellDlg::FetchFeedbackMy()
+{
+	if (!IsWindow(m_hWnd)) {
+		return;
+	}
+	// قائمة مهام الموظف قيد العمل (بعد الاتصال وقبل تسجيل النتيجة) — نفس التوثيق.
+	CString username = accountSettings.agentLoginName;
+	if (username.IsEmpty()) username = accountSettings.account.username;
+	CString password = accountSettings.account.password;
+	if (username.IsEmpty() || password.IsEmpty()) {
+		return;
+	}
+
+	CString url = _T("http://maxcall.local:3001/api/feedback/my");
+	CString headers = _T("Authorization: ") + MakeBasicAuthHeader(username, password);
+	URLGetAsync(url, m_hWnd, WM_SHELL_FEEDBACK_MY, false, _T(""), headers);
+}
+
 LRESULT MainShellDlg::OnShellFeedbackResult(WPARAM wParam, LPARAM lParam)
 {
 	URLGetAsyncData* result = (URLGetAsyncData*)wParam;
@@ -790,8 +814,31 @@ LRESULT MainShellDlg::OnShellFeedbackResult(WPARAM wParam, LPARAM lParam)
 	return 0;
 }
 
+LRESULT MainShellDlg::OnShellFeedbackMy(WPARAM wParam, LPARAM lParam)
+{
+	URLGetAsyncData* result = (URLGetAsyncData*)wParam;
+	if (result) {
+		if (result->statusCode >= 200 && result->statusCode < 300) {
+			CStringA bodyA = result->body;
+			if (!bodyA.IsEmpty()) {
+				wchar_t* ucs2 = NULL;
+				Utf8DecodeCP((char*)(LPCSTR)bodyA, CP_UTF8, &ucs2);
+				if (ucs2) {
+					CString js;
+					js.Format(_T("onFeedbackMy('%s')"), EscapeJs(CString(ucs2)));
+					free(ucs2);
+					ExecuteShellScript(js);
+				}
+			}
+		}
+		delete result;
+	}
+	return 0;
+}
+
 // استجابة إجراء (ادعاء/استجابة/تخطي): جسمها ليس قائمة، فلا تُدفع إلى الواجهة.
-// عند النجاح نعيد جلب القائمة فيتحدّث العدّاد وتختفي المهمة المنجزة فوراً.
+// عند النجاح نعيد جلب القائمتين (New وMy) فيتحدّث العدّاد وتنتقل المهمة بينهما
+// فوراً بلا أي سباق عرض.
 LRESULT MainShellDlg::OnShellFeedbackAction(WPARAM wParam, LPARAM lParam)
 {
 	URLGetAsyncData* result = (URLGetAsyncData*)wParam;
@@ -803,6 +850,7 @@ LRESULT MainShellDlg::OnShellFeedbackAction(WPARAM wParam, LPARAM lParam)
 		}
 		if (result->statusCode >= 200 && result->statusCode < 300) {
 			FetchFeedbackQueue();
+			FetchFeedbackMy();
 		}
 		delete result;
 	}

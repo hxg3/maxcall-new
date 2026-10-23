@@ -33,10 +33,16 @@
 | `checkUpdate` | — | — | فحص التحديثات يدوياً الآن (زر Retry عند الخطأ) |
 | `installUpdate` | — | — | بدء تنزيل وتثبيت التحديث المعلَن (زر `#btnUpdateNow`) |
 | `dismissUpdate` | — | — | إخفاء بانر التحديث لهذه الجلسة فقط — لا يُلغي تنزيلاً جارياً ولا يغيّر حالة C++ (`onUpdateState` التالية تُظهره مجدداً) |
-| `feedbackQueue` | — | — | طلب قائمة مهام التغذية الراجعة من C++ (الذي يجلبها من السيرفر عبر الجسر) |
-| `feedbackClaim` | `taskId` | `string` | ادعاء مهمة تغذية راجعة ⇒ تُصبح in_progress وتُسنَد للموظف |
+| `feedbackQueue` | — | — | طلب قائمة المهام المستحقة (تبويب Tasks ← لوحة New) من السيرفر |
+| `feedbackMy` | — | — | طلب مهام الموظف قيد العمل (لوحة My): `GET /api/feedback/my` |
+| `feedbackClaim` | `taskId` | `string` | ادعاء مهمة تغذية راجعة ⇒ تُصبح in_progress وتُسنَد للموظف، فتنتقل من New إلى My |
 | `feedbackRespond` | `taskId`, `outcome`, `score?`, `categories?`, `comment?`, `duration_sec?`, `next_attempt_at?` | — | تسجيل استجابة على مهمة (done / no_answer / refused / wrong_number / callback_later / not_applicable) |
 | `feedbackSkip` | `taskId` | `string` | تخطي مهمة نهائياً ⇒ status='skipped' |
+
+> **دورة حياة المهمة في الواجهة:** زر Call في لوحة New يرسل `feedbackClaim` + `makeCall`
+> معاً — تنتقل المهمة فوراً إلى لوحة My (بعد أن يبدّل C++ القائمتين عند نجاح الادعاء)،
+> ويسجّل الموظف النتيجة من لوحة My: "لا يرد" أو "تم الرد" (تفتح نافذة تسجيل
+> الفيدباك: تقييم 1-5 + ملاحظة، ثم `feedbackRespond(done, …)`).
 
 > `setPresence` يُعيَّن في `MainShellDlg::ProcessShellMessage` كالتالي:
 > `available/away` → إلغاء DND + نشر متاح، `busy` → تفعيل DND + نشر متاح،
@@ -66,7 +72,8 @@ window.chrome.webview.postMessage({ action: 'hold', callId: -1, on: true });
 | `onAccount` | `(user: string, domain: string, name?: string)` | سطر الحساب في الهيدر بصيغة `user-name` |
 | `onPinState` | `(on: boolean)` | حالة زر التثبيت (تُدفع مع كل لقطة) |
 | `onCallHistory` | `(jsonText: string)` | سجل السيرفر: `{rows:[{time,number,name,direction,status,duration,answered_by,has_rec}]}` من `GET /api/calls/history` — يُجلب عند `shellReady/getData` وبعد كل إنهاء بـ 4 ثوانٍ |
-| `onFeedbackQueue` | `(jsonText: string)` | قائمة مهام التغذية الراجعة من السيرفر: `{ok,data:[{id,phone,patient_name,visit_date,doctor,payer,visit_amount,status,attempts,max_attempts}],count}` — تُستدعى عند فتح تبويب تاسك / after each action |
+| `onFeedbackQueue` | `(jsonText: string)` | قائمة المهام المستحقة (لوحة New): `{ok,data:[{id,phone,patient_name,visit_date,doctor,payer,visit_amount,status,attempts,max_attempts}],count}` — عدّاد فقاعة تبويب tasks هو `count` |
+| `onFeedbackMy` | `(jsonText: string)` | مهام الموظف قيد العمل (لوحة My) بنفس شكل `onFeedbackQueue` — تُجلب عند إقلاع القشرة وفتح التبويب وبعد كل إجراء ناجح |
 | `onUpdateState` | ... |
 
 مثال من C++ (نفس نمط `UpdateWebView` / `OnCrmSaveResult`):
