@@ -73,6 +73,109 @@
 | `GET /api/agents/<ext>/export` | جلسة | ملف الموظف الكامل CSV (شهر + 200 مكالمة + تسجيلات) |
 | `GET /api/callers/export?q=` | جلسة | ملف المتصلين الكامل CSV |
 | `GET /maxcall-ip` | عامة | عناوين السيرفر ومنافذه |
+| `GET /api/his/caller/<phone>` | جلسة أو Basic auth (نفس بيانات `/api/agent/login`) | بطاقة مريض من Solver WebHIS لنافذة المتصل (قراءة فقط) عبر `his_broker.py` — تفصيل كامل في §2.1 أدناه |
+| `GET /api/insurer/health` | LAN فقط (`ipaddress.is_private`) | حالة وعمال الوساطة — بلا دخول موظف |
+| `POST /api/insurer/job` | LAN فقط | `insurer` + `member` (+`card`) → طابور الوساطة على السيرفر — يفتح تبويب تأمين معزول ولا تبويب عند الموظف؛ يرد بـ `jobId` |
+| `GET /api/insurer/job/<id>` | LAN فقط | حالة المهمة + خطوات التقدّم؛ `?pdf=1` يعيد PDF مضمّناً (base64) عند الاكتمال |
+| `POST /api/insurer/job/<id>/answer` | LAN فقط | إجابة كابتشا مرتبطة برمز عقد إيجار 15 ثانية (`token`) — إجابة أولى تُقبل، والبقية تُرفض برسالة تنقل |
+
+### 2.1 تكامل WebHIS — `his_broker.py` (منشور 2026-10-19)
+
+وساطة قراءة فقط بين نافذة caller details في تطبيق MaxCall وسجل المريض في Solver WebHIS
+على `192.168.1.77:81` (اسمه المحلي `solverserver`). تخدم نقطة `GET /api/his/caller/<phone>`:
+بطاقة مريض مضغوطة (العمر/الجنس، الفئة/التأمين، المبيت، المديونية، الموعد القادم،
+آخر 3 زيارات، آخر فاتورة صافية)، وقائمة اقتراحات مرضى عند أن الرقم مسجل على أكثر من سجل،
+مع `source_url` للارجاع.
+
+| البند | القيمة |
+|---|---|
+| المسار | `/opt/maxcall-dashboard/his_broker.py` (المصدر المعتمد `server/his_broker.py`) |
+| عمليات WebHIS المسموحة | أربع عمليات مرمَّزة في الكود (بحث/بطاقة/زيارات/فواتير — كلها قراءة) + `POST UserInfo/ValidateUser` للتوكين (JWT ~100 يوم) — لا بروكسي عام ولا أي عملية كتابة |
+| التوكين | بالذاكرة فقط (لا ملفات ولا سجلات) + تجديد تلقائي عند بقاء < 65 يوماً + إعادة دخول واحدة عند 401/403 + كاش نتائج 10 دقائق (LRU حده 500) |
+| متغيرات البيئة | `HIS_USERNAME`/`HIS_PASSWORD` إلزامية و`HIS_HOST`/`HIS_PORT` اختيارية في `/etc/maxcall.env` — غيابهما أو كلمة مرور خاطئة → `{"ok":false}` وتُخفى بطاقة المريض بهدوء دون إزعاج الموظف |
+| التوثيق على المسار | جلسة الداشبورد أو Basic auth بنفس بيانات الموظف المتحقق منها في `/api/agent/login` (`_verify_agent_credentials`) — لا آلية دخول موازية |
+| حد المعدل | 30 طلباً في الدقيقة لكل IP على مسارات HIS |
+| ضمانات الخصوصية | لا كلمة مرور أو توكين في كود العميل أو الـ HTML المضمّن، ولا تسجيل لبيانات مرضى/توكين في سجلات السيرفر؛ بيانات المريض تبقى داخل شبكة MaxCall الداخلية |
+| اختبارات القبول | `cd server && HIS_USERNAME=... HIS_PASSWORD=... python3 test_his_broker.py` — 57 اختباراً ضد WebHIS الحقيقي |
+| تحصينات موصى بها (لم تُنفذ) | TLS أمام 3001 أو جدار يحصر المنفذ على شبكة MaxCall + حساب WebHIS مخصص read-only بدل حساب شخصي (`abdullah`) |
+
+## 2.2 وسيط التأمين على السيرفر — `insurer_broker.py` + خدمة `maxcall-broker` (منشور 2026-11-04)
+
+وساطة تشغيل لغوية Python Playwright تشغّل مواقع التأمين على السيرفر
+(بلا نافذة على أجهزة الموظفين): يحل التحقيق والطباعة نيابة عنهم، ثم ترجع الإضافة
+بالكامل — من طلب HIS إلى مستند PDF يُطبع في صفحة تشغيل الموظف.
+
+| البند | القيمة |
+|---|---|
+| الخدمة | خدمة `maxcall-broker.service` (user=root) — `Restart=on-failure` |
+| مصدر الكود | `server/insurer_broker.py` (الخدمة) + `server/brokers/{base,mednet}.py` |
+| التثبيت على السيرفر | `/opt/maxcall-broker/` (venv معزول: playwright + flask — خارج بايثون النظام) + بروفايل ثابت `/var/lib/maxcall-broker/profiles/<id>/` |
+| المنفذ الداخلي | `127.0.0.1:3011` (لا يُقدم للموظفين — يقبله `app.py` فقط كوسيط LAN) |
+| واجهة الموظف | المسار `/api/insurer/*` في `app.py` — **LAN فقط** (`ipaddress.is_private`) بلا تسجيل دخول لكل موظف — التثبيت فقط |
+| نموذج العمل | عامل دائم لكل تأمين + طابور تسلسلي (الموظفون يتشاركون الجلسة)؛ إعادة تحميل الصفحة/النجا. |
+| الحالة | **MedNet جاهز ومُختبر حيّاً** — كامل التدفق: دخول → Eligibility → Print → PDF خلال ~6 ثوانٍ؛ `NextCare` معدّة للمرحلة التالية |
+| الطباعة (كيف نصل للـPDF) | اعترض `window.open` قبل الموقع نفسه → الطلب يُجلب مباشرة بكوكيز الجلسة (`pdfdisplayservlet` يُعيد `application/pdf`؛ |
+| | `window.open` لا يفتح نافذة إطلاقاً في الـheadless — لا popup ولا viewer — إذن التدفق هشّ ويُقاس مباشرة |
+| النبضة | كل 4 دقائق (في حال عدم جريان أي طلب حقيقي) — تحقق حقيقي بآخر رقم عضوية ناجح (يتخزّن `/var/lib/maxcall-broker/heartbeat.json`) |
+| الكابتشا (تخص Liva فقط) | الصورة تُمنح للجهاز الطلب بفترة 15 ث تدوير لكل جهاز؛ الإجابة الأولى تُقبل والبقية تُرفض برسالة انتقال؛ |
+| | عند عدم الاتفاق، الطلب يفشل ("نفّذ يدوياً") — `NextCare`/`MedNet` بلا كابتشا |
+| بيانات الدخول | `/etc/maxcall-insurers.json` بصلاحيات 600، قابلة للتحديث في أي وقت؛ الوسيط يقرؤها عند كل محاولة دخول (بلا restart) |
+| التنظيف | كل 6 ساعات: حذف `Cache*`/`Code Cache`/`GPUCache` + ذاكرة التخزين المؤقت للمتصفح — **لا تلتمس كوكيز الجلسة**؛ |
+| | `MemoryMax=3G` في الوحدة |
+| صورة الجلسة | ملفات session-confined فقط — لا تخرج للموظف؛ ابتقاء ثابت عبر الأيام بين الإشعالات الروتينية |
+
+---
+
+## 2.3 الوصول إلى سجلات المشفى (Solver WebHIS) — `solverserver`
+
+> **هذا القسم هو "الدليل (quick access)" لأي وكيل أو مطور يتعامل مع بيانات المرضى.**
+> لا تعيد اكتشافه — استخدم ما يلي directly.
+
+### الاتصال (verified)
+
+| البند | القيمة |
+|---|---|
+| المضيف | `solverserver` (اسم السيرفر في رسائل الخطأ: `Server: SOLVERSERVER`) — عنوانه حالياً `192.168.1.77` but **لا تستخدمه** (DHCP) |
+| المنفذ | `81` (واجهة Angular + API معاً) |
+| **قاعدة الـ API** | `http://solverserver:81/API/Api/` — **تنبيه:** بدون `/API/Api/` بادئة → 404 |
+| تسجيل الدخول | `POST /API/Api/UserInfo/ValidateUser` بـ `{"Usr_Id":..., "Usr_Pwd":..., "ApiKey":"", "isPasswordEncrypted":false, "Origin":""}` → يعيد `AuthorizationToken` (JWT، ~100 يوم) |
+| كل طلب | `POST /API/Api/<Controller>/<Method>` + body `{"loggedInInfo":{...}, "Payload":...}` + header `Authorization: Bearer <JWT>` |
+| **فخ إلزامي** | `loggedInInfo` **يجب** أن يحتوي `"ApiKey":"MAX"` (أو أي non-empty). بدونه كل طلب يفشل بـ `Object reference not set to an instance of an object.` — ليس خطأ تشفير ولا صلاحيات |
+| الـ token | JWT — `exp` قابل للقراءة محلياً (base64 للـpayload، لا تحقق توقيع). تجديد قبل 65 يوماً (مarge safety) |
+| أزمنة الاستجابة | بحث بالهاتف: 1.1–1.8 ثانية. كاش 10 دقائق (LRU حده 500) في `his_broker.py` |
+| الواجهة | `http://solverserver:81/#/home/hmis/op/PatientSearch` (يعمل) |
+
+### أشكال الـPayload (verified — لا تخمّن)
+
+| Endpoint | payload | ملاحظة |
+|---|---|---|
+| `PatientSearch/GetSearchResult` | **كائن** (جميع الحقول، `""` = لا فلتر) — `PhoneNumber` بحث جزئي | يعيد قائمة (رقم واحد قد يعود لعدة مرضى) |
+| `patient/GetPatientByID` | `{"Pat_ID":"<id>"}` — **string** + exact key capital | ملف ~200 حقل (طبيب معالج، تأمين، مديونية، موعد) |
+| `PatientSearch/GetPatientVisitHistory` | **RAW value** (Pat_ID integer/string) — ليس كائناً | `{"Pat_ID":...}` → SQL conversion error |
+| `PatientSearch/GetPatientBillHistory` | `{"Visit_No":n, "Trans_Type":"BILL"}` | فواتير زيارة واحدة |
+| `IPAdmission/GetAdmissionDetailByPatID` | `{"Pat_ID":n}` | `"No Current Admission found"` = حالة طبيعية، لا خطأ |
+
+### لا تستخدم
+
+- `patient/GetPatientFileReportByID` — يخلط `Pat_ID` برقم ملف داخلي → يعيد مريضاً مختلفاً.
+- `PHR_API/Api/*` — غير منشور (404).
+- منفذ 83 (النظام القديم WebForms) — خارج النطاق.
+
+### فحص `solverserver` (للتأكد من الوصول)
+
+```bash
+curl -sS -o /dev/null -w "%{http_code}\n" http://solverserver:81/   # 200
+curl -sS --max-time 10 -X POST http://solverserver:81/API/Api/Utility/GetApiVersion   -H "Content-Type: application/json" -d '{}'   # "2.1.50303.1800"
+```
+
+### مرجع code
+
+- `his-integration/his_client.py` — مكتبة Python قراءة فقط، مختبَرة (لكن `.gitignore`d — لا يُنسخ مع repo).
+- `his-integration/EXECUTION_PROMPT.md` — 512 سطر، كل تفصيل (§1.1–§2.7).
+- `his-integration/webhis_endpoints.txt` — خريطة 1300+ endpoint / 298 controller.
+- `server/his_broker.py` — الوسيط (القراءة فقط) — مرجع "كيفية التكامل".
+
+---
 
 ## 3. قواعد البيانات (MariaDB 10.11 — `mariadb.service`)
 
@@ -125,6 +228,7 @@
 
 | التاريخ | الوصف |
 |---|---|
+| 2026-10-19 | إطلاق تكامل WebHIS بخدمة `his_broker.py` + نقطة `/api/his/caller/<phone>` (قراءة فقط، توثيق جلسة/Basic بنفس بيانات الموظف، توكين في الذاكرة مع تجديد تلقائي، كاش 10 دقائق، حد معدل) — منشورة ومُثبَّتة على السيرفر مع 57 اختبار قبول ناخلها ~0.85 ثانية لكل بطاقة عبر الكاش — بطاقة المريض تظهر في نافذة caller details المنبثقة |
 | 2026-10-08 | تصحيح إقلاع نهائي: تحويل القرص إلى GPT + قسم ESP (1GB على `sdb3`) + تثبيت GRUB-EFI (`x86_64-efi`) على sda — السيرفر الآن يقلع الآن من القرص مباشرة عبر **UEFI** بدون USB تمام (تم التحقق: uptime نظيف، `/` على `/dev/sdb1`، `/dev/sda1` تسجيلات، sdc1 الفلاش غير مستعمل) — ملاحظة: أسماء sda/sdb تتقلب بين البطّارات (SATA) ومرتبطة حالياً: الجذر UUID `50a292a0…`، التسجيلات UUID `8541918b…` |
 | 2026-10-08 | هجرة إلى سيرفر bare-metal i5/8GB (VitalPBX نفسه بكامل الإعدادات): نسخ خام `VitalPBX-MaxCare.vmdk → RAW` عبر USB، تصحيح `avahi-daemon.conf` (`allow-interfaces=enp1s0` بدل `enp0s3`)، الشبكو `enp1s0` عبر DHCP، ديسكات منفضلين: sda (223G ext4 → `/var/spool/asterisk/monitor` للتسجيلات عبر fstab بـ UUID) وsdb (238G، الجذر على `sdb1` 19G ext4 من الصورة) — Windows أُلغي — النظام يعمل الآن من القرص مباشرة (YYYY-10-08، uptime نظيف، asterisk/mariadb/maxcall-dashboard running، `maxcall.local` ينحو إلى `192.168.1.32`) |
 | 2026-09-03 | إنشاء المرجع من جرد SSH شامل (أول توثيق) |

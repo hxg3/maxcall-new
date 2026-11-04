@@ -34,3 +34,9 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
+/Excel-Insurer/
+
+# مفاتيح التوقيع الخاصة — لا تُرفع إلى git
+Extension/tools/extension-key.pem
+Extension/build/extension.zip
+Extension/build/maxcare-reception.crx

@@ -1,0 +1,101 @@
+{
+  "manifest_version": 3,
+  "name": "MaxCare Reception Assistant",
+  "version": "0.9.15",
+  "description": "مساعد موظف الاستقبال: جلب بيانات المريض والتأمين من MAXCARE وتشغيل مواقع شركات التأمين تلقائياً حتى صفحة الطباعة.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "src/popup/popup.html",
+    "default_title": "MaxCare Reception Assistant"
+  },
+  "options_page": "src/options/options.html",
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "permissions": [
+    "storage",
+    "tabs",
+    "webRequest",
+    "nativeMessaging",
+    "downloads",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://maxcall.local:3001/*",
+    "http://solverserver:81/*",
+    "http://192.168.1.77:81/*",
+    "https://pulse-uae.nextcarehealth.com/*",
+    "https://mednetapprovals.com/*",
+    "https://online.nlicgulf.com:12443/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "http://solverserver:81/*",
+        "http://192.168.1.77:81/*"
+      ],
+      "js": [
+        "src/content/his-reader.js",
+        "src/content/his-assist.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://pulse-uae.nextcarehealth.com/*"
+      ],
+      "js": [
+        "src/content/bridge.js",
+        "src/content/insurers/nextcare.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://mednetapprovals.com/*"
+      ],
+      "js": [
+        "src/content/report-capture.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "https://mednetapprovals.com/*"
+      ],
+      "js": [
+        "src/content/bridge.js",
+        "src/content/insurers/mednet.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://online.nlicgulf.com:12443/*"
+      ],
+      "js": [
+        "src/content/report-capture.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "https://online.nlicgulf.com:12443/*"
+      ],
+      "js": [
+        "src/content/bridge.js",
+        "src/content/insurers/liva.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

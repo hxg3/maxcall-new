@@ -346,6 +346,99 @@ def login():
     return render_template("login.html")
 
 
+# ---- Insurer broker proxy (LAN فقط، بلا دخول لكل موظف) ----
+# للتكامل مع المحاورة المحلية: الإضافة تتصل بـ maxcall.local:3001/api/insurer/...
+# — الوساطة نفسها معزولة على 127.0.0.1:3011 ولا تقبل إلا من اللوحة بعد
+# فحص الشبكة الخاصة (لا تسجيل دخول؛ طلب محدود من شبكة المستشفى فقط).
+import ipaddress as _ipaddress
+import urllib.request as _urlreq
+
+BROKER_BASE = "http://127.0.0.1:3011"
+
+
+def _lan_only():
+    try:
+        ip = _ipaddress.ip_address(request.remote_addr or "")
+        return ip.is_private
+    except Exception:
+        return False
+
+
+def _broker_json(path, payload=None, method="GET", timeout=30):
+    data = json.dumps(payload).encode("utf-8") if payload is not None else None
+    req = _urlreq.Request(
+        BROKER_BASE + path,
+        data=data,
+        method=method,
+        headers={"Content-Type": "application/json"},
+    )
+    with _urlreq.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def _insurer_proxy_error():
+    return jsonify({"ok": False,
+                    "error": "الخدمة الجماعية للمستندات غير متاحة الآن — "
+                             "نفّذ العملية يدوياً كما تعودت"}), 503
+
+
+@app.route("/api/insurer/health")
+def insurer_health():
+    if not _lan_only():
+        abort(403)
+    try:
+        return jsonify(_broker_json("/health", timeout=5))
+    except Exception:
+        return jsonify({"ok": False, "error": "broker_unavailable"}), 503
+
+
+@app.route("/api/insurer/job", methods=["POST"])
+def insurer_job_create():
+    if not _lan_only():
+        abort(403)
+    d = request.get_json(silent=True) or {}
+    insurer = str(d.get("insurer") or "").strip()
+    member = str(d.get("member") or "").strip()
+    card = d.get("card") or {}
+    ins = card.get("insurance") or {}
+    if not member:
+        member = str(ins.get("card_no") or "").strip()
+    if not insurer or not member:
+        return jsonify({"ok": False, "error": "رقم التأمين مطلوب"}), 400
+    payload = {"insurer": insurer, "member": member, "card": card,
+               "kind": d.get("kind") or "doc"}
+    try:
+        return jsonify(_broker_json("/job", payload, method="POST", timeout=10))
+    except Exception:
+        return _insurer_proxy_error()
+
+
+@app.route("/api/insurer/job/<jid>", methods=["GET"])
+def insurer_job_get(jid):
+    if not _lan_only():
+        abort(403)
+    want_pdf = request.args.get("pdf") == "1"
+    try:
+        return jsonify(_broker_json(f"/job/{jid}?pdf=1" if want_pdf else f"/job/{jid}",
+                                    timeout=30 if want_pdf else 10))
+    except Exception:
+        return _insurer_proxy_error()
+
+
+@app.route("/api/insurer/job/<jid>/answer", methods=["POST"])
+def insurer_job_answer(jid):
+    if not _lan_only():
+        abort(403)
+    d = request.get_json(silent=True) or {}
+    try:
+        return jsonify(_broker_json(f"/job/{jid}/answer",
+                                    {"token": str(d.get("token") or ""),
+                                     "text": str(d.get("text") or "")},
+                                    method="POST", timeout=10))
+    except Exception:
+        return _insurer_proxy_error()
+
+
 @app.route("/api/agent/login", methods=["POST"])
 def agent_login():
     if _hit("agentlogin:" + _client_ip(), 20, 300):

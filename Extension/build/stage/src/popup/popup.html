@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    :root { --ink:#0f172a; --sub:#64748b; --line:#e2e8f0; --brand:#0ea5e9; --ok:#059669; --err:#dc2626; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { width: 320px; font-family: "Segoe UI", Tahoma, sans-serif; font-size: 13px; color: var(--ink); background: #f8fafc; }
+    header { display: flex; align-items: center; gap: 8px; padding: 12px 14px 10px; }
+    .logo { width: 22px; height: 22px; border-radius: 7px; background: linear-gradient(135deg, #0ea5e9, #0369a1); }
+    header h1 { font-size: 13.5px; font-weight: 700; flex: 1; }
+    header a { color: var(--sub); font-size: 15px; text-decoration: none; }
+    header a:hover { color: var(--ink); }
+    #updBar { display: none; align-items: center; gap: 8px; margin: 0 14px 8px; padding: 8px 12px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 10px; font-size: 12px; color: #92400e; }
+    #updBar.show { display: flex; }
+    #updBtn { border: none; border-radius: 8px; background: #d97706; color: #fff; font: inherit; font-weight: 700; padding: 4px 12px; cursor: pointer; }
+    main { padding: 0 14px 12px; display: flex; flex-direction: column; gap: 10px; }
+    .card { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+    .empty { color: var(--sub); text-align: center; padding: 14px 6px; }
+    .p-name { font-size: 15px; font-weight: 700; }
+    .p-meta { color: var(--sub); margin-top: 2px; }
+    .chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 999px; background: #ecfeff; color: #0e7490; font-weight: 600; font-size: 12px; }
+    .chip.warn { background: #fff7ed; color: #c2410c; }
+    .kv { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 3px 0; }
+    .kv b { font-weight: 600; color: var(--sub); font-size: 12px; }
+    .kv span { direction: ltr; font-family: Consolas, monospace; font-size: 12px; }
+    .cardno { font-size: 15px; font-weight: 700; letter-spacing: 1px; }
+    select { border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; font: inherit; font-size: 12px; background: #fff; color: var(--ink); max-width: 185px; }
+    button.cta { border: none; border-radius: 10px; padding: 10px; font: inherit; font-weight: 700; color: #fff; background: var(--brand); cursor: pointer; }
+    button.cta:hover { background: #0284c7; }
+    button.cta:disabled { opacity: .45; cursor: default; }
+    .manual { display: none; gap: 6px; }
+    .manual input { flex: 1; border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; font: inherit; direction: ltr; }
+    .manual button { border: none; border-radius: 9px; background: #1e293b; color: #fff; font: inherit; font-weight: 600; padding: 0 14px; cursor: pointer; }
+    #steps { display: none; flex-direction: column; gap: 5px; padding: 4px 2px; }
+    .step { display: flex; align-items: center; gap: 7px; color: var(--sub); }
+    .step.ok { color: var(--ok); }
+    .step.err { color: var(--err); }
+    .spin { width: 11px; height: 11px; border: 2px solid var(--brand); border-top-color: transparent; border-radius: 50%; animation: sp .7s linear infinite; flex: none; }
+    @keyframes sp { to { transform: rotate(360deg); } }
+    .spin-white { display: inline-block; width: 12px; height: 12px; border: 2px solid #fff; border-top-color: transparent; border-radius: 50%; animation: sp .7s linear infinite; vertical-align: -2px; margin-inline-end: 7px; }
+    .ic { width: 14px; text-align: center; flex: none; }
+    #status { font-size: 12px; color: var(--sub); text-align: center; min-height: 16px; }
+    #status.err { color: var(--err); font-weight: 600; }
+    footer { display: flex; justify-content: space-between; padding: 0 14px 10px; font-size: 11px; color: var(--sub); }
+    footer a { color: var(--sub); }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo"></div>
+    <h1>Reception Assistant</h1>
+    <a href="#" id="refreshBtn" title="Re-read the page">↻</a>
+    <a href="#" id="openOptions" title="Settings">⚙</a>
+  </header>
+  <div id="updBar">
+    <span id="updText"></span>
+    <button id="updBtn">Update</button>
+  </div>
+  <main>
+    <div class="card" id="patientCard">
+      <div class="empty" id="patientEmpty">Reading patient from the HIS page…</div>
+      <div id="patientBody" style="display:none">
+        <div class="p-name" id="pName"></div>
+        <div class="p-meta" id="pMeta"></div>
+      </div>
+    </div>
+
+    <div class="card" id="insCard" style="display:none">
+      <div class="chip" id="insChip"></div>
+      <div style="margin-top:8px">
+        <div class="kv"><b>Card No</b><span class="cardno" id="iCard"></span></div>
+        <div class="kv" id="typeRow" style="display:none"><b>Type</b>
+          <select id="typeSel"></select>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" id="excelFields" style="display:none">
+      <div style="font-weight:700; margin-bottom:6px">Fields to complete</div>
+      <div id="excelInputs"></div>
+    </div>
+
+    <button class="cta" id="printBtn" disabled>Print insurance document</button>
+
+    <div class="manual" id="manual">
+      <input id="manualId" placeholder="Patient file no" inputmode="numeric" />
+      <button id="manualGo">Search</button>
+    </div>
+
+    <div id="steps"></div>
+    <div id="status"></div>
+  </main>
+  <footer>
+    <a href="#" id="probeLink">Probe + record (2 min)</a>
+    <a href="#" id="copyLog">📋 Copy log</a>
+  </footer>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
