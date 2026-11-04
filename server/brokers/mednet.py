@@ -230,14 +230,20 @@ class MedNet(Backend):
             raise BackendError("login_failed")
         w.progress("login", "ok")
 
-    def await_verdict(self, w, timeout_s=45, prev_notice=None):
-        """نقل حرفي من awaitVerdict: نجاح (it3) أو فشل (رسالة جديدة —
-        بالمقارنة عبر معرف العنصر) أو timeout. ظهور الدرع ثم اختفاؤه
-        يعني انتهاء جولة كاملة."""
+    def await_verdict(self, w, timeout_s=45, prev_notice=None, prev_elig=None):
+        """نقل حرفي من awaitVerdict: نجاح (it3) **بشرط اختلاف الرقم عن
+        ما كان موجوداً قبل نقر الفحص** (رقم أهلية قديم يعني رد لم يصل بعد)
+        أو فشل (رسالة جديدة) أو timeout. ظهور الدرع ثم اختفاؤه يعني نهاية جولة."""
         door = time.monotonic() + timeout_s
         round_seen = False
+        prev_elig = str(prev_elig or "").strip()
+        def final_ok():
+            cur = str(self._safe_eval(w, JS_ELIG_NUMBER) or "").strip()
+            return "ok" if cur and cur != prev_elig else "timeout"
+
         while time.monotonic() < door:
-            if self._safe_eval(w, JS_ELIG_NUMBER):
+            cur = str(self._safe_eval(w, JS_ELIG_NUMBER) or "").strip()
+            if cur and cur != prev_elig:
                 return "ok"
             notice = self._safe_eval(w, JS_INVALID_NOTICE)
             if notice and notice != prev_notice:
@@ -247,9 +253,9 @@ class MedNet(Backend):
                 round_seen = True
             elif round_seen:
                 time.sleep(0.3)
-                return "ok" if self._safe_eval(w, JS_ELIG_NUMBER) else "invalid"
+                return final_ok()
             time.sleep(0.25)
-        return "ok" if self._safe_eval(w, JS_ELIG_NUMBER) else "timeout"
+        return final_ok()
 
     def state(self, w):
         try:
@@ -322,6 +328,7 @@ class MedNet(Backend):
         # 5) دورة التحقق + إعادة المزامنة (طباعة مهملة) — MAX_ATTEMPTS=8
         MAX_ATTEMPTS = 8
         notice = self._safe_eval(w, JS_INVALID_NOTICE)
+        prev_elig = str(self._safe_eval(w, JS_ELIG_NUMBER) or "").strip()
         elig_no = None
         for attempt in range(1, MAX_ATTEMPTS + 1):
             field, fval = self._member_value(w)
@@ -329,6 +336,8 @@ class MedNet(Backend):
                 field.evaluate("el => el.focus()")
                 w.set_value(field, member)
                 self._adf_idle(w, 15)
+            # الشريحة قبل النقر: أي رقم يجب أن يكون طازج الإحصائية
+            prev_elig = str(self._safe_eval(w, JS_ELIG_NUMBER) or "").strip()
             cur = self._find(w, JS_CHECK_BTN)
             if not cur:
                 break
@@ -340,6 +349,7 @@ class MedNet(Backend):
                 w,
                 timeout_s=min(45, max(5, w.remaining(kind))),
                 prev_notice=notice,
+                prev_elig=prev_elig,
             )
             notice = self._safe_eval(w, JS_INVALID_NOTICE)
             w.progress("eligibility",

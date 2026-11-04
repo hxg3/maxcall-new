@@ -155,7 +155,12 @@ class Worker:
           if (window.__mcrOpenHook) return;
           window.__mcrOpenHook = true;
           window.open = function (u) {
-            try { if (u) window.__MCR_OPEN_URL = String(u); } catch (e) {}
+            try {
+              if (u) {
+                window.__MCR_OPEN_URL = String(u);
+                window.__MCR_OPEN_AT = Date.now();   // مطبوعة جديدة — للسنة!
+              }
+            } catch (e) {}
             return { focus() {}, close() {}, self: window,
                      location: { href: String(u || '') } };
           };
@@ -305,6 +310,13 @@ class Worker:
         self.suppress_popups = bool(discard)
         clicked = False
         try:
+            # امنع التقاط عنوان "معلّق" من طباعة سابقة — الطباعة الجديدة
+            # فقط تستحق أن تُرسل (هذا هو مصدر خطأ مستند المريض السابق)
+            try:
+                self.page.evaluate(
+                    "() => { window.__MCR_OPEN_URL = ''; window.__MCR_OPEN_AT = 0; }")
+            except Exception:
+                pass
             while time.monotonic() < deadline:
                 if not clicked:
                     ctl = find_control()
@@ -328,13 +340,17 @@ class Worker:
 
     def _open_url(self):
         try:
-            url = self.page.evaluate("() => (window.__MCR_OPEN_URL || \"\").trim()")
-            if url and url not in ("", "about:blank"):
-                self.log.info(f"[{self.insurer}] window.open intercepted {url[:120]}")
-                return url
+            url, at = self.page.evaluate(
+                """() => [String(window.__MCR_OPEN_URL || "").trim(),
+                          Number(window.__MCR_OPEN_AT || 0)]""")
+            if not url or url in ("", "about:blank"):
+                return None
+            if (time.time() * 1000) - at > 30000:
+                return None            # طباعة قديمة — تجاهل
+            self.log.info(f"[{self.insurer}] window.open intercepted {url[:120]}")
+            return url
         except Exception:
-            pass
-        return None
+            return None
 
     def _finish_hit(self, hit, discard):
         url = hit.get("url", "")
