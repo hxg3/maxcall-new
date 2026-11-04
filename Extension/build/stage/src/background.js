@@ -883,7 +883,17 @@ async function openBrokerCaptchaAsk(jobId, captcha, insurerId) {
 // نهاية جسر الوساطة (المواقع تعمل على السيرفر — بلا نوافذ)
 // ------------------------------------------------------------------
 
+// قفل مهمة واحدة — يمنع النقر المزدوج/المتعارض الذي أبطل المحاولات
+const activeBrokerJobs = new Set();
+async function brokerJobActive(insurerId) {
+  return activeBrokerJobs.has(insurerId);
+}
+
 async function runInsurer({ insurerId, card, serviceType }) {
+  if (!insurerId) return { ok: false, reason: "unknown_insurer" };
+  if (activeBrokerJobs.has(insurerId)) {
+    return { ok: false, reason: "already_running", message: "المهمة قيد التنفيذ — انتظر حتى تكتمل" };
+  }
   const insurer = INSURERS.find((i) => i.id === insurerId);
   if (!insurer) return { ok: false, reason: "unknown_insurer" };
   const settings = await getSettings();
@@ -894,7 +904,12 @@ async function runInsurer({ insurerId, card, serviceType }) {
 
   // وضع الوسيط (الوساطة على السيرفر — بواعلام التأمين تشبه NextCare)
   if (BROKER_INSURERS.has(insurerId)) {
-    return await runBrokerInsurer(insurerId, card, serviceType);
+    activeBrokerJobs.add(insurerId);
+    try {
+      return await runBrokerInsurer(insurerId, card, serviceType);
+    } finally {
+      activeBrokerJobs.delete(insurerId);
+    }
   }
 
     // v0.4.3: وضع الوكيل — تنسيق كامل من الخلفية عبر MAIN-world injection

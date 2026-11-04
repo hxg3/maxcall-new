@@ -351,6 +351,7 @@ chrome.runtime.onMessage.addListener((msg) => {
   } else if (msg.step === "print" && msg.status === "ok") {
     addStep("Print dialog opened", "ok");
     setStatus("Done ✓ — the print dialog is open in your window");
+    runBusy = false;
     printBtnReset("Print insurance document");
   } else if (msg.step === "document") {
     addStep(label, "ok");
@@ -372,10 +373,14 @@ function printBtnBusy(text) {
 function printBtnReset(text = "Print insurance document") {
   $("printBtn").textContent = text;
   $("printBtn").disabled = false;
+  runBusy = false;
 }
 
+let runBusy = false;
 async function startRun() {
+  if (runBusy) { setStatus("المهمة قيد التنفيذ بالفعل — سأُبقيك على اطلاع", true); return; }
   if (!state.insurer || !state.card) return;
+  runBusy = true;
   $("printBtn").disabled = true;
   printBtnBusy("Working in background…");
   $("steps").textContent = "";
@@ -404,6 +409,7 @@ async function startRun() {
   }
   state.tabId = res.tabId;
   addStep("Running insurer site in background", "run");
+  if (!res.ok) runBusy = false;
 }
 
 async function probe() {
