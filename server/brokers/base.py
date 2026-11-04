@@ -131,6 +131,10 @@ class Worker:
         self.waiting_report = False
         self.suppress_popups = False
         self._started_at = 0.0
+        # حالات dialogs أصلية WebForms (alert/confirm) — تُقرأ أثناء المهمة
+        self._already_printed = False
+        self._wrong_captcha = False
+        self._provider_submit_at = 0.0   # لحظة إرسال نموذج الكابتشا (فترة سماح)
 
     # ---------------- إدارة السياق ----------------
     def ensure_context(self):
@@ -183,6 +187,26 @@ class Worker:
         self.needs_context = False
         self.log.info(f"[{self.insurer}] context ready profile={profile}")
 
+    # ---------------- dialogs أصلية (WebForms alert/confirm) ----------------
+    # WebForms يصل رسائل مثل "Action Failed / Enter wrong captcha!" عبر
+    # window.alert — لا تصل إلى DOM. بدون هذا المستمع كانت المهمة ترى
+    # "لا شيء حدث" وتفشل بصمت.
+    def _on_dialog(self, dialog):
+        try:
+            msg = (dialog.message or "").strip()
+            self.log.info(f"[{self.insurer}] dialog: {msg[:180]}")
+            low = msg.lower()
+            if "already printed" in low or "re-print" in low:
+                self._already_printed = True
+            elif "wrong captcha" in low or "invalid captcha" in low:
+                self._wrong_captcha = True
+            dialog.accept()
+        except Exception:
+            try:
+                dialog.dismiss()
+            except Exception:
+                pass
+
     def _on_popup(self, page):
         try:
             if self.suppress_popups:
@@ -197,6 +221,7 @@ class Worker:
     def _hook(self, page):
         page.on("response", self._on_response)
         page.on("download", self._on_download)
+        page.on("dialog", self._on_dialog)
 
     def _on_download(self, dl):
         try:

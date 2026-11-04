@@ -144,10 +144,6 @@ JS_SPECIALITY_OK = """() => {
 }"""
 
 JS_GSM_VALUE = "() => (document.querySelector('#txtGsmNo') || {}).value || ''"
-JS_GSM_CARET = """() => { const el = document.querySelector('#txtGsmNo');
-  if (!el) return 0; const v = String(el.value || el.placeholder || '');
-  return /^968-/.test(v) ? 4 : v.length; }"""
-
 
 def _norm_name(s):
     s = re.sub(r"\bDR\b\.?", " ", str(s or "").upper())
@@ -463,6 +459,8 @@ class Liva(Backend):
         btn = self._submit_button(w)
         if not btn:
             raise BackendError("provider_submit_not_found")
+        w._wrong_captcha = False           # ألغِ راية قديمة — يبدأ رصد الاستجابة من الآن
+        w._provider_submit_at = time.time()
         w.click(btn)
 
     # ---------- رابط "Member Eligiblity" ----------
@@ -574,25 +572,59 @@ class Liva(Backend):
         if not el:
             w.progress("eligibility", "run", "gsm field absent — skipped")
             return
+        full = f"968-{digits}"
+        # الطريقة المُثبتة محلياً: القناع نفسه (jQuery inputmask) — يضمن
+        # تطابق مخزن القناع الداخلي مع ما يصل للسيرفر (المستند كان يخرج بلا رقم!)
+        r = None
+        try:
+            r = w.page.evaluate(
+                """(gsm) => {
+                    const el = document.querySelector('#txtGsmNo');
+                    if (!el) return { ok: false, err: 'no_field' };
+                    const $ = window.jQuery || window.$;
+                    const full = '968-' + gsm;
+                    const hasMask = !!($ && $.fn && $.fn.inputmask);
+                    if (hasMask) {
+                        try { $(el).inputmask('setvalue', gsm); } catch (e) {}
+                        if (String(el.value || '') !== full) {
+                            try { $(el).inputmask('setvalue', full); } catch (e) {}
+                        }
+                    } else if ($) {
+                        try { $(el).val(full); } catch (e) {}
+                    } else {
+                        el.value = full;
+                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                    return { ok: String(el.value || '') === full,
+                             val: String(el.value || ''), mask: hasMask };
+                }""", digits)
+        except Exception:
+            r = None
+        if r and r.get("ok"):
+            w.progress("eligibility", "run",
+                       f"gsm={digits} ok via=mask-setvalue (mask={bool(r.get('mask'))})")
+            return
+        w.progress("eligibility", "run",
+                   f"gsm={digits} mask-setvalue failed val={((r or {}).get('val'))!r} — caret fallback")
+        # احتياط: مؤشر حقيقي عند أول خانة + كتابة رقم-رقم
         try:
             el.click()
-            caret = w.page.evaluate(JS_GSM_CARET) or 0
             w.page.evaluate(
                 "(pos) => { const el = document.querySelector('#txtGsmNo');"
                 " if (el) { el.focus(); try { el.setSelectionRange(pos, pos); } catch (e) {} } }",
-                int(caret))
+                4)
             w.page.keyboard.type(digits, delay=55)
             val = w.page.evaluate(JS_GSM_VALUE) or ""
-            if val == f"968-{digits}":
-                w.progress("eligibility", "run", f"gsm={digits} ok via=mask")
+            if val == full:
+                w.progress("eligibility", "run", f"gsm={digits} ok via=caret")
                 return
         except Exception:
             val = ""
-        # احتياط أخير: قيمة خام
-        w.set_value(el, f"968-{digits}")
+        w.set_value(el, full)
         val = w.page.evaluate(JS_GSM_VALUE) or ""
         w.progress("eligibility", "run",
-                   f"gsm={digits} {'ok via=raw' if val == f'968-{digits}' else f'MISMATCH field={val}'}")
+                   f"gsm={digits} {'ok via=raw' if val == full else f'MISMATCH field={val}'}")
 
     def _wait_speciality(self, w):
         state = w.page.evaluate(JS_SPECIALITY_OK)
@@ -734,18 +766,29 @@ class Liva(Backend):
     def _print_or_reprint(self, w, member, card):
         """المسار الطبيعي (Print Online Claim Form) وإلا مسار Reprint تلقائياً
         عند رسالة "Claim Form already printed"."""
+        # انتظر الزر ظاهراً ومفعّلاً — النقر على المعطّل/المخفي صامت تماماً
+        ready = w.wait_for(
+            """() => { const b = document.querySelector('button.Printmember');
+                      return !!b && b.getClientRects().length > 0 && !b.disabled; }""",
+            timeout_s=20, poll_s=0.5)
+        if not ready:
+            state = self._state_label(w)
+            info = w.page.evaluate(
+                "() => { const b = document.querySelector('button.Printmember');"
+                " return b ? ('disabled=' + b.disabled + ' visible=' + (b.getClientRects().length > 0)) : 'ABSENT'; }")
+            raise BackendError(f"print_button_not_ready | {info} | {state}")
         btn = self._find(w, JS_PRINT_BTN)
-        if not btn:
-            raise BackendError(f"print_button_not_found | {self._state_label(w)}")
+        w._already_printed = False
         w.progress("print", "run")
         w.click(btn)
-        r = self._report_hit_poll(w, 22, stop_pred=lambda _w: self._already_printed_visible(_w))
+        r = self._report_hit_poll(w, 22, stop_pred=lambda _w: _w._already_printed
+                                                     or self._already_printed_visible(_w))
         if r.get("ok"):
             w.progress("print", "ok", f"url={str(r.get('url', ''))[:110]}")
             return {"member": member, "pdf_bytes": r.get("bytes"),
                     "pdf_url": r.get("url", "")}
 
-        if not self._already_printed_visible(w):
+        if not (w._already_printed or self._already_printed_visible(w)):
             raise BackendError(f"print_failed | {r.get('error')}")
         w.progress("print", "run", "already printed — auto fallback to Reprint")
         if not self._dismiss_already_printed(w):
@@ -932,6 +975,17 @@ class Liva(Backend):
                 self._open_provider(w)
                 continue
             if state == "provider-login":
+                # أثناء الانتقال بعد إرسال تسجيل الدخول يبقى حقل الكابتشا
+                # في DOM لحظات — لا نطلب كابتشا ثانية؛ ننتظر التنقل الفعلي
+                if w._provider_submit_at and (time.time() - w._provider_submit_at) < 25:
+                    ok = w.wait_for("() => !document.querySelector('#CaptchaInputText')",
+                                    timeout_s=15, poll_s=0.5)
+                    if ok:
+                        continue
+                    # ما زلنا داخل النموذج بعد 15 ث — إما كابتشا خاطئة (ظهر
+                    # alert) أو خادم بطيء — نرفع كابتشا جديدة بصورة محدّثة
+                    w.progress("login", "run",
+                               "captcha rejected or portal slow — fresh captcha issued")
                 raise self._captcha_needs_human(w) or BackendError("captcha_unavailable")
             if state == "portal-home":
                 self._open_member_details(w)
