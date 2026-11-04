@@ -111,8 +111,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const claim = brokerCaptchaClaims.get(msg.requestId);
           if (claim) {
             brokerCaptchaClaims.delete(msg.requestId);
-            const ok = await submitCaptchaAnswer(msg.requestId, claim, msg.value ?? "");
-            if (!ok) await log("warn", "broker captcha answer rejected", msg.requestId);
+            const ok = await submitCaptchaAnswer(msg.requestId, claim.token, msg.value ?? "");
+            if (!ok) await log("warn", "broker human answer rejected", msg.requestId);
             sendResponse({ ok });
             break;
           }
@@ -714,7 +714,9 @@ async function agentFlow(insurer, card, serviceType, settings) {
 // ---- جسر مستندات التأمين (الوساطة على السيرفر) ----
 // المواقع تُشغَّل على السيرفر (خدمات لا نافذة على جهاز الموظف)؛
 // الإضافة تكتفي بطلب + تقدم + زر طباعة في صفحة المشفى.
+// التأمينات المدعومة: mednet (مكتمل) + nextcare (مكتمل) — يجري توسيعها لاحقاً.
 const INSURER_API = "http://maxcall.local:3001";
+const BROKER_INSURERS = new Set(["mednet", "nextcare", "liva"]);
 const brokerCaptchaClaims = new Map();          // jobId → lease token (15ث)
 
 async function insurerRequest(path, { method = "GET", body, timeoutMs = 20000 } = {}) {
@@ -755,25 +757,25 @@ const STEP_LINK = {
   print: "print", captcha: "captcha",
 };
 
-async function runMednetBroker(insurer, card, serviceType) {
+async function runBrokerInsurer(insurerId, card, serviceType) {
   const member = strMember(card) || "-";
-  await log("info", "run: mednet via insurer-broker", `member=${member}`);
+  await log("info", `run: ${insurerId} via insurer-broker`, `member=${member}`);
   report(null, { step: "navigate", status: "run", detail: `running for ${member}` });
 
   let job;
   try {
     job = await insurerRequest("/api/insurer/job", {
       method: "POST",
-      body: { insurer: "mednet", card, serviceType: serviceType || null },
+      body: { insurer: insurerId, card, serviceType: serviceType || null },
       timeoutMs: 15000,
     });
   } catch (e) {
-    await brokerFailed(String(e));
+    await brokerFailed(insurerId, String(e));
     return { ok: false, reason: String(e).slice(0, 80) };
   }
   const jobId = job?.jobId;
   if (!jobId) {
-    await brokerFailed("no_job_id");
+    await brokerFailed(insurerId, "no_job_id");
     return { ok: false, reason: "broker_rejected" };
   }
 
@@ -795,25 +797,26 @@ async function runMednetBroker(insurer, card, serviceType) {
         detail: last.detail || "",
       });
     }
-    if (s.state === "captcha" && s.captcha?.img_b64 && !captchaShown) {
+    if (s.state === "captcha" && s.captcha && !s.captcha.busy && !captchaShown
+        && (s.captcha.img_b64 || (s.captcha.options || []).length)) {
       captchaShown = true;
-      brokerCaptchaClaims.set(jobId, s.captcha.token);
-      await openBrokerCaptchaAsk(jobId, s.captcha);
+      brokerCaptchaClaims.set(jobId, { token: s.captcha.token, type: s.captcha.type || "captcha" });
+      await openBrokerCaptchaAsk(jobId, s.captcha, insurerId);
     }
     if (s.state === "done") {
-      return await finishBrokerPrint(jobId, "mednet");
+      return await finishBrokerPrint(jobId, insurerId);
     }
     if (s.state === "error") {
-      await brokerFailed(s.error || "broker_failed");
+      await brokerFailed(insurerId, s.error || "broker_failed");
       return { ok: false, reason: s.error || "broker_failed" };
     }
   }
-  await brokerFailed("انتهت مهلة العملية — نفّذ يدوياً كما تعودت");
+  await brokerFailed(insurerId, "انتهت مهلة العملية — نفّذ يدوياً كما تعودت");
   return { ok: false, reason: "broker_timeout" };
 }
 
-async function brokerFailed(err) {
-  await log("warn", "mednet broker failed", String(err).slice(0, 200));
+async function brokerFailed(insurerId, err) {
+  await log("warn", `${insurerId} broker failed`, String(err).slice(0, 200));
   report(null, {
     step: "print", status: "error",
     detail: "تعذر استخراج المستند — نفّذ العملية يدوياً كما تعودت",
@@ -829,11 +832,11 @@ async function finishBrokerPrint(jobId, insurerId) {
   try {
     pdf = await insurerRequest(`/api/insurer/job/${jobId}?pdf=1`, { timeoutMs: 60000 });
   } catch (e) {
-    await brokerFailed(String(e));
+    await brokerFailed(insurerId, String(e));
     return { ok: false, reason: "pdf_fetch_failed" };
   }
   if (!pdf?.pdf_b64) {
-    await brokerFailed("pdf_missing");
+    await brokerFailed(insurerId, "pdf_missing");
     return { ok: false, reason: "pdf_missing" };
   }
   report(null, { step: "document", status: "ok" });
@@ -845,27 +848,34 @@ async function finishBrokerPrint(jobId, insurerId) {
 
 // نافذة التحقق البشري على صفحة المشفى — يتطلب 10 ث للقراءة و15 ث للإجابة؛
 // عند الانقضاء يتلاشى تلقائياً (الخلفية تلتقط الطلب التالي المتزامن).
-async function openBrokerCaptchaAsk(jobId, captcha) {
+const INSURER_NAMES = { mednet: "MedNet", nextcare: "NextCare", liva: "Liva" };
+
+// نافذة التحقق على صفحة المشفى — كابتشا (15 ث) أو اختيار من قائمة (75 ث)؛
+// عند الانقضاء تنتقل الرخصة للجهاز الآخر تلقائياً.
+async function openBrokerCaptchaAsk(jobId, captcha, insurerId) {
   const tabs = await chrome.tabs.query({ url: HIS_TAB_PATTERNS }).catch(() => []);
   const hisTab = tabs.find((t) => t.active) || tabs[0];
+  const name = INSURER_NAMES[insurerId] || insurerId || "Insurer";
   if (!hisTab) {
-    await revealInsurerWindow({ insurerId: "mednet" });
-    await log("warn", "no_his_tab for captcha ask", `job=${jobId.slice(0, 6)}`);
+    await revealInsurerWindow({ insurerId });
+    await log("warn", "no_his_tab for human ask", `job=${jobId.slice(0, 6)}`);
     return;
   }
   const requestId = jobId; // يُستهلك في insurer:askAnswer → submitCaptchaAnswer
-  chrome.tabs.sendMessage(hisTab.id, {
-    type: "ui:ask",
-    requestId,
-    request: {
-      kind: "captcha",
-      title: "MedNet — التحقق البشري",
-      image: `data:image/jpeg;base64,${captcha.img_b64}`,
-      countdownSeconds: 15,
-      hint: "أدخل رمز التحقق — سينتهي وقد يتحرك التحقق إلى جهاز آخر",
-      placeholder: "الرمز الظاهر في الصورة",
-    },
-  }).catch(() => {});
+  const base = { countdownSeconds: captcha.lease || 15 };
+  const request = captcha.type === "choice"
+    ? { kind: "choice",
+        title: captcha.title || `${name} — اختر من القائمة`,
+        options: Array.isArray(captcha.options) ? captcha.options : [],
+        hint: captcha.hint || "اختر العنصر المطابق — ستنتقل المهمة لجهاز آخر عند انتهاء الوقت",
+        ...base }
+    : { kind: "captcha",
+        title: `${name} — التحقق البشري`,
+        image: `data:image/jpeg;base64,${captcha.img_b64}`,
+        hint: "أدخل رمز التحقق — سينتهي وقد يتحرك التحقق إلى جهاز آخر",
+        placeholder: "الرمز الظاهر في الصورة",
+        ...base };
+  chrome.tabs.sendMessage(hisTab.id, { type: "ui:ask", requestId, request }).catch(() => {});
 }
 
 // ------------------------------------------------------------------
@@ -882,8 +892,8 @@ async function runInsurer({ insurerId, card, serviceType }) {
   }
 
   // وضع الوسيط (الوساطة على السيرفر — بواعلام التأمين تشبه NextCare)
-  if (insurerId === "mednet") {
-    return await runMednetBroker(insurer, card, serviceType);
+  if (BROKER_INSURERS.has(insurerId)) {
+    return await runBrokerInsurer(insurerId, card, serviceType);
   }
 
     // v0.4.3: وضع الوكيل — تنسيق كامل من الخلفية عبر MAIN-world injection

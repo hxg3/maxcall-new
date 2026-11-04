@@ -91,7 +91,7 @@
     // سباق تنازلي للكابتشا — انتهى يختفي تلقائياً (الجهاز الأول) والشريك التالي يلتقطه
     let countEl = null, countTimer = null;
     const total = Number(countdownSeconds || 0);
-    if (kind === "captcha" && total > 0) {
+    if (total > 0) {
       countEl = document.createElement("span");
       countEl.className = "mcr-ask-count";
       countEl.textContent = String(total);
@@ -103,7 +103,9 @@
           countEl.textContent = "منقض";
           countEl.classList.add("low");
           clearInterval(countTimer);
-          setTimeout(() => { answer(requestId, ""); hide(); }, 900);
+          // لا تُرسل شيئاً — الرخصة تنتهي على السيرفر وتنتقل للجهاز التالي؛
+          // الإرسال بإجابة فارغة كان سيُجهض المهمة للجميع
+          setTimeout(hide, 900);
           return;
         }
         countEl.textContent = String(left);

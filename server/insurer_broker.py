@@ -31,10 +31,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from flask import Flask, jsonify, request
 
 from brokers.base import (
-    BackendError, NeedsCaptcha, last_good_member, STATE_DIR,
+    BackendError, NeedsCaptcha, NeedsChoice, last_good_member, STATE_DIR,
 )
 from brokers.mednet import MedNet
 from brokers.nextcare import NextCare
+from brokers.liva import Liva
 
 try:
     from playwright.sync_api import sync_playwright
@@ -44,8 +45,9 @@ except Exception:  # pragma: no cover
 
 
 BROKER_PORT = 3011
-CAPTCHA_LEASE_S = 15.0       # مهلة الإيداع لكل جهاز
-CAPTCHA_TOTAL_S = 90.0       # الحد الكلي قبل فشل التحقق البشري
+CAPTCHA_LEASE_S = 15.0       # مهلة الإيداع لكل جهاز (كابتشا نصية)
+CHOICE_LEASE_S = 75.0        # مهلة اختيار عنصر من قائمة (طبيب) — أطول للقراءة
+CAPTCHA_TOTAL_S = 120.0      # الحد الكلي قبل فشل التحقق البشري
 HEARTBEAT_WINDOW_S = 240.0   # نافذة نبض 4 دقائق
 KEEPALIVE_MAX_S = 90.0
 
@@ -59,7 +61,7 @@ app = Flask(__name__)
 _jobs = {}
 _jobs_lock = threading.Lock()
 
-INSURERS = {"mednet": MedNet, "nextcare": NextCare}
+INSURERS = {"mednet": MedNet, "nextcare": NextCare, "liva": Liva}
 
 
 def _uuid():
@@ -138,7 +140,16 @@ class InsurerWorker(threading.Thread):
             )
             self.finish(job, out)
         except NeedsCaptcha as e:
-            self.human_checkpoint(job, kind, e.image_b64)
+            self.human_checkpoint(
+                job, kind,
+                {"type": "captcha", "img_b64": e.image_b64,
+                 "lease": CAPTCHA_LEASE_S})
+        except NeedsChoice as e:
+            self.human_checkpoint(
+                job, kind,
+                {"type": "choice", "options": e.options,
+                 "title": e.title, "hint": e.hint,
+                 "lease": CHOICE_LEASE_S})
         except BackendError as e:
             self.fail(job, str(e) or "backend_error")
         except Exception as e:
@@ -167,17 +178,21 @@ class InsurerWorker(threading.Thread):
             job["backendDetail"] = backend_detail
         self.log_job(job, "error", msg)
 
-    # ---------------- كابتشا: عقد إيجار 15 ث + تنقّل بين الأجهزة ----------------
-    def human_checkpoint(self, job, kind, img_b64):
-        """الكابتشا: الصورة تُعرض على الجهاز الذي يرصد المهمة (عقد إيجار
-        15 ث لكل جهاز، فإذا انتهى انتقل للجهاز التالي الذي يعرض المؤشر
-        بشكل طبيعي). عند قبول الإجابة الأولى يُستأنف العمل من الحالة
-        الحية نفسها (نموذج الدخول لا يُبدأ من الصفر فيُنسخ التوكن)."""
+    # ---------------- تحقق بشري: كابتشا/اختيار — عقد إيجار + تنقّل بين الأجهزة ----------------
+    def human_checkpoint(self, job, kind, prompt):
+        """تحقق بشري: الطلب يُعرض على الجهاز الذي يرصد المهمة (عقد إيجار
+        لكل جهاز؛ عند انتهائه ينتقل للجهاز التالي). عند قبول الإدخال الأول
+        يُستأنف العمل من الحالة الحية نفسها (النموذج لا يبدأ من الصفر).
+        prompt: {type: "captcha"|"choice", img_b64?|options?, title?, hint?, lease}"""
+        prompt = dict(prompt or {})
         with self.cap_lock:
-            self.cap = {"img": img_b64, "token": None, "until": 0.0,
+            self.cap = {"prompt": prompt,
+                        "img": prompt.get("img_b64", ""),
+                        "lease": prompt.get("lease", CAPTCHA_LEASE_S),
+                        "token": None, "until": 0.0,
                         "answer": None, "event": threading.Event()}
         job["state"] = "captcha"
-        job["captcha_img"] = img_b64
+        job["captcha_type"] = prompt.get("type", "captcha")
         job.add_stage("captcha", "run", "بانتظار التحقق البشري")
         deadline = time.monotonic() + CAPTCHA_TOTAL_S
         answer = None
@@ -193,8 +208,14 @@ class InsurerWorker(threading.Thread):
             self.fail(job, "لم يكتمل التحقق البشري",
                       backend_detail="captcha_timeout")
             return
-        job.add_stage("captcha", "ok", "تم قبول التحقق — استئناف العمل")
+        if str(answer).strip() == "":
+            self.fail(job, "أُلغيت العملية من الموظف",
+                      backend_detail="human_cancelled")
+            return
+        job.add_stage("captcha", "ok", "تم قبول الإدخال — استئناف العمل")
         resume = getattr(self.backend, "resume_after_captcha", None)
+        # مرّر نوع الطلب للخلفية — تقرر معه كيف تستأنف
+        self.worker._pending_prompt = prompt
         try:
             self.worker.current_job = job
             out = (
@@ -207,7 +228,16 @@ class InsurerWorker(threading.Thread):
             )
             self.finish(job, out)
         except NeedsCaptcha as e:
-            self.human_checkpoint(job, kind, e.image_b64)  # صورة جديدة — كرّر
+            self.human_checkpoint(
+                job, kind,
+                {"type": "captcha", "img_b64": e.image_b64,
+                 "lease": CAPTCHA_LEASE_S})
+        except NeedsChoice as e:
+            self.human_checkpoint(
+                job, kind,
+                {"type": "choice", "options": e.options,
+                 "title": e.title, "hint": e.hint,
+                 "lease": CHOICE_LEASE_S})  # صورة جديدة — كرّر
         except BackendError as e:
             self.fail(job, str(e) or "backend_error")
         except Exception as e:
@@ -226,19 +256,28 @@ class InsurerWorker(threading.Thread):
             return True, ""
 
     def claim_captcha(self):
-        """أي جهاز يعرض المؤشر يستطيع استطلاع الرخصة: أول جهاز يحجز
-        15 ث؛ إذا انتهت عادت الرخصة فينتقل لها الجهاز الآخر تلقائياً.
-        الإجابة تعمل فقط برمز عقد صالح — لا تداخل بين جهازين."""
+        """أي جهاز يعرض المؤشر يستطيع استطلاع الرخصة: أول جهاز يحجز;
+        إذا انتهت عادت الرخصة فينتقل لها الجهاز الآخر تلقائياً.
+        الإدخال يعمل فقط برمز عقد صالح — لا تداخل بين جهازين."""
         with self.cap_lock:
             cap = self.cap
             if not cap:
                 return None
             if cap["until"] > time.time():
                 return {"busy": True}
+            prompt = cap.get("prompt") or {}
+            lease = cap.get("lease", CAPTCHA_LEASE_S)
             cap["token"] = _uuid()
-            cap["until"] = time.time() + CAPTCHA_LEASE_S
-            return {"token": cap["token"], "img_b64": cap["img"],
-                    "lease": CAPTCHA_LEASE_S}
+            cap["until"] = time.time() + lease
+            out = {"token": cap["token"],
+                   "type": prompt.get("type", "captcha"),
+                   "img_b64": prompt.get("img_b64", ""),
+                   "lease": lease}
+            if prompt.get("type") == "choice":
+                out["options"] = prompt.get("options") or []
+                out["title"] = prompt.get("title") or "اختر من القائمة"
+                out["hint"] = prompt.get("hint") or ""
+            return out
 
     def log_job(self, job, lvl, detail):
         log.log(logging.INFO if lvl == "info" else logging.WARNING,
@@ -329,9 +368,7 @@ def _job_view(j, include_pdf=False):
     if j["state"] == "captcha" and worker:
         claim = worker.claim_captcha()
         if claim and claim.get("token"):
-            out["captcha"] = {"img_b64": claim["img_b64"],
-                              "token": claim["token"],
-                              "lease": claim["lease"]}
+            out["captcha"] = claim
         elif claim:
             out["captcha"] = {"busy": True}
     return out

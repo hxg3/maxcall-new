@@ -82,6 +82,16 @@ class NeedsCaptcha(Exception):
         self.image_b64 = image_b64
 
 
+class NeedsChoice(Exception):
+    """يحتاج الموظف أن يختار من قائمة (مثلاً: اسم طبيب غير مطابق في HIS)."""
+
+    def __init__(self, options, title, hint=""):
+        super().__init__("choice_required")
+        self.options = [str(o) for o in (options or [])]
+        self.title = str(title or "اختر من القائمة")
+        self.hint = str(hint or "")
+
+
 class BackendError(Exception):
     pass
 

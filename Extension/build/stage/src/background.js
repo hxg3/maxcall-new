@@ -111,8 +111,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const claim = brokerCaptchaClaims.get(msg.requestId);
           if (claim) {
             brokerCaptchaClaims.delete(msg.requestId);
-            const ok = await submitCaptchaAnswer(msg.requestId, claim, msg.value ?? "");
-            if (!ok) await log("warn", "broker captcha answer rejected", msg.requestId);
+            const ok = await submitCaptchaAnswer(msg.requestId, claim.token, msg.value ?? "");
+            if (!ok) await log("warn", "broker human answer rejected", msg.requestId);
             sendResponse({ ok });
             break;
           }
@@ -716,7 +716,7 @@ async function agentFlow(insurer, card, serviceType, settings) {
 // الإضافة تكتفي بطلب + تقدم + زر طباعة في صفحة المشفى.
 // التأمينات المدعومة: mednet (مكتمل) + nextcare (مكتمل) — يجري توسيعها لاحقاً.
 const INSURER_API = "http://maxcall.local:3001";
-const BROKER_INSURERS = new Set(["mednet", "nextcare"]);
+const BROKER_INSURERS = new Set(["mednet", "nextcare", "liva"]);
 const brokerCaptchaClaims = new Map();          // jobId → lease token (15ث)
 
 async function insurerRequest(path, { method = "GET", body, timeoutMs = 20000 } = {}) {
@@ -797,10 +797,11 @@ async function runBrokerInsurer(insurerId, card, serviceType) {
         detail: last.detail || "",
       });
     }
-    if (s.state === "captcha" && s.captcha?.img_b64 && !captchaShown) {
+    if (s.state === "captcha" && s.captcha && !s.captcha.busy && !captchaShown
+        && (s.captcha.img_b64 || (s.captcha.options || []).length)) {
       captchaShown = true;
-      brokerCaptchaClaims.set(jobId, s.captcha.token);
-      await openBrokerCaptchaAsk(jobId, s.captcha);
+      brokerCaptchaClaims.set(jobId, { token: s.captcha.token, type: s.captcha.type || "captcha" });
+      await openBrokerCaptchaAsk(jobId, s.captcha, insurerId);
     }
     if (s.state === "done") {
       return await finishBrokerPrint(jobId, insurerId);
@@ -847,27 +848,34 @@ async function finishBrokerPrint(jobId, insurerId) {
 
 // نافذة التحقق البشري على صفحة المشفى — يتطلب 10 ث للقراءة و15 ث للإجابة؛
 // عند الانقضاء يتلاشى تلقائياً (الخلفية تلتقط الطلب التالي المتزامن).
-async function openBrokerCaptchaAsk(jobId, captcha) {
+const INSURER_NAMES = { mednet: "MedNet", nextcare: "NextCare", liva: "Liva" };
+
+// نافذة التحقق على صفحة المشفى — كابتشا (15 ث) أو اختيار من قائمة (75 ث)؛
+// عند الانقضاء تنتقل الرخصة للجهاز الآخر تلقائياً.
+async function openBrokerCaptchaAsk(jobId, captcha, insurerId) {
   const tabs = await chrome.tabs.query({ url: HIS_TAB_PATTERNS }).catch(() => []);
   const hisTab = tabs.find((t) => t.active) || tabs[0];
+  const name = INSURER_NAMES[insurerId] || insurerId || "Insurer";
   if (!hisTab) {
-    await revealInsurerWindow({ insurerId: "mednet" });
-    await log("warn", "no_his_tab for captcha ask", `job=${jobId.slice(0, 6)}`);
+    await revealInsurerWindow({ insurerId });
+    await log("warn", "no_his_tab for human ask", `job=${jobId.slice(0, 6)}`);
     return;
   }
   const requestId = jobId; // يُستهلك في insurer:askAnswer → submitCaptchaAnswer
-  chrome.tabs.sendMessage(hisTab.id, {
-    type: "ui:ask",
-    requestId,
-    request: {
-      kind: "captcha",
-      title: "MedNet — التحقق البشري",
-      image: `data:image/jpeg;base64,${captcha.img_b64}`,
-      countdownSeconds: 15,
-      hint: "أدخل رمز التحقق — سينتهي وقد يتحرك التحقق إلى جهاز آخر",
-      placeholder: "الرمز الظاهر في الصورة",
-    },
-  }).catch(() => {});
+  const base = { countdownSeconds: captcha.lease || 15 };
+  const request = captcha.type === "choice"
+    ? { kind: "choice",
+        title: captcha.title || `${name} — اختر من القائمة`,
+        options: Array.isArray(captcha.options) ? captcha.options : [],
+        hint: captcha.hint || "اختر العنصر المطابق — ستنتقل المهمة لجهاز آخر عند انتهاء الوقت",
+        ...base }
+    : { kind: "captcha",
+        title: `${name} — التحقق البشري`,
+        image: `data:image/jpeg;base64,${captcha.img_b64}`,
+        hint: "أدخل رمز التحقق — سينتهي وقد يتحرك التحقق إلى جهاز آخر",
+        placeholder: "الرمز الظاهر في الصورة",
+        ...base };
+  chrome.tabs.sendMessage(hisTab.id, { type: "ui:ask", requestId, request }).catch(() => {});
 }
 
 // ------------------------------------------------------------------

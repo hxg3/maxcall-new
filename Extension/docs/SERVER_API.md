@@ -95,14 +95,16 @@ def _lan_only():
 
 | المسار | النتيجة |
 |---|---|
-| `GET /api/insurer/health` | حالة العمال (alive/busy/queue/sessionWarm/captchaPending· للتأمين) |
-| `POST /api/insurer/job` | body: `{insurer:"mednet", member:"919492"\|"B624...", card:{...}}` → `{ok, jobId, queuePos}` |
-| `GET /api/insurer/job/<id>` | `{state, stages[], queuePos, result}` — `?pdf=1` يضيف `pdf_b64` عند `state=done` |
-| `POST /api/insurer/job/<id>/answer` | body `{token, text}` لإجابة الكابتشا (15 ث عقد إيجار لكل جهاز، تنقّل تلقائي بين الأجهزة) — إجابة أولى تُقبل وغيرها مرفوضة |
+| `GET /api/insurer/health` | حالة العمال (alive/busy/queue/sessionWarm/captchaPending· للتأمين) — `mednet` · `nextcare` · `liva` |
+| `POST /api/insurer/job` | body: `{insurer:"mednet"\|"nextcare"\|"liva", member:"919492"\|"B624...", card:{...}}` → `{ok, jobId, queuePos}` |
+| `GET /api/insurer/job/<id>` | `{state, stages[], queuePos, result}` — `?pdf=1` يضيف `pdf_b64` عند `state=done`؛ عند `state=captcha` ينقل `captcha:{type,img_b64\|options,title?,hint?,lease,token}` |
+| `POST /api/insurer/job/<id>/answer` | body `{token, text}` لإجابة التحقق البشري — كابتشا (عقد 15 ث) أو اختيار من قائمة (عقد 75 ث) — تنقّل تلقائي بين الأجهزة؛ أول إجابة تُقبل والبقية مرفوضة؛ إجابة فارغة = إلغاء المهمة |
+
+**انشرت Liva عبر الوسيط (0.9.21):** بوابة FortiGate SSL-VPN على السيرفر (تجديد جلسة VPN فقط في النبضة — بلا اقتراب من كابتشا البوابة)، ثم بوابة المزوّد Angular (نفس بيانات الدخول + كابتشا تُعرض على شاشة الموظف)، ثم صفحة العضوية: Search → اختيار الطبيب (مطابقة مع اسم HIS؛ إن تعذر تظهر قائمة اختيار للموظف بمهلة 75 ث) → الهاتف `968-` → امتلاء الاختصاص → طباعة PDF في HIS.
+- الكابتشا: `captcha.type="captcha"` — `img_b64` (JPEG) تُعرض في HIS مع عدّاد؛ عند الانقضاء تذوب تلقائياً وتنتقل الرخصة للجهاز التالي (لا إجابة فارغة تُرسل).
+- الاختيار: `captcha.type="choice"` — `options[]` + `title` + `hint`؛ النقر على عنصر يُرسله كإجابة.
 
 - التقدم: يصل كـ `stages[]` مع `ts` — الإضافة تنسخه لشريطها على صفحة المشفى.
-- الكابتشا: الصورة في `img_b64` داخل `captcha` (إذا `state==="captcha"`) — تُعرض
-  في نافذة داخل HIS مع عدّاد 15 ث؛ عند الانقضاء تذوب وتلتقطها الشاشة التالية.
 - أخطاء خارج المنطقية (السيرفر مطفأ / موظف غريب): `503 {"ok":false,"error":"broker_unavailable"}` —
   الإضافة تبلغ: "تعذّر استخراج المستند — نفّذ العملية يدوياً كما تعودت".
 
