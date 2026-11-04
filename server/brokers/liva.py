@@ -574,58 +574,57 @@ class Liva(Backend):
             w.progress("eligibility", "run", "gsm field absent — skipped")
             return
         full = f"968-{digits}"
-        # الطريقة المُثبتة محلياً: القناع نفسه (jQuery inputmask) — يضمن
-        # تطابق مخزن القناع الداخلي مع ما يصل للسيرفر (المستند كان يخرج بلا رقم!)
-        r = None
-        try:
-            r = w.page.evaluate(
-                """(gsm) => {
-                    const el = document.querySelector('#txtGsmNo');
-                    if (!el) return { ok: false, err: 'no_field' };
-                    const $ = window.jQuery || window.$;
-                    const full = '968-' + gsm;
-                    const hasMask = !!($ && $.fn && $.fn.inputmask);
-                    if (hasMask) {
-                        try { $(el).inputmask('setvalue', gsm); } catch (e) {}
-                        if (String(el.value || '') !== full) {
-                            try { $(el).inputmask('setvalue', full); } catch (e) {}
-                        }
-                    } else if ($) {
-                        try { $(el).val(full); } catch (e) {}
-                    } else {
-                        el.value = full;
-                        el.dispatchEvent(new Event('input', { bubbles: true }));
-                        el.dispatchEvent(new Event('change', { bubbles: true }));
-                    }
-                    return { ok: String(el.value || '') === full,
-                             val: String(el.value || ''), mask: hasMask };
-                }""", digits)
-        except Exception:
-            r = None
-        if r and r.get("ok"):
-            w.progress("eligibility", "run",
-                       f"gsm={digits} ok via=mask-setvalue (mask={bool(r.get('mask'))})")
-            return
+        # شخّص الحقل أولاً: ما هو maxlength؟ هل الأرقام فقط مسموحة؟
+        info = w.page.evaluate("""() => {
+          const el = document.querySelector('#txtGsmNo');
+          if (!el) return null;
+          const cs = getComputedStyle(el);
+          return {
+            maxlength: el.maxLength, pattern: el.getAttribute('pattern') || '',
+            placeholder: el.getAttribute('placeholder') || '',
+            type: el.getAttribute('type') || '',
+            inputmode: el.getAttribute('inputmode') || '',
+            kenumeric: el.getAttribute('data-val-regex') || el.getAttribute('data-val-number') || '',
+            label: (el.closest('div,td,th,p')||{}).textContent?.trim().slice(0,80) || '',
+            staticPrefix: (el.previousElementSibling && el.previousElementSibling.textContent || '').trim().slice(0,20),
+          };
+        }""") or {}
+        w.progress("eligibility", "run", f"gsm field info {json.dumps(info, ensure_ascii=False)}")
+        # تجريد الشكل الحاسم: يجرّب 8 أرقام ثم الصيغة الكاملة — القرار من الحقل نفسه
+        def try_set(val):
+            w.page.evaluate("""(val) => {
+              const el = document.querySelector('#txtGsmNo');
+              if (!el) return;
+              const d = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+              if (d && d.set) d.set.call(el, String(val)); else el.value = String(val);
+              for (const t of ['keydown', 'keypress', 'keyup', 'input', 'change', 'blur']) {
+                el.dispatchEvent(new Event(t, { bubbles: true, cancelable: true }));
+              }
+            }""", val)
+            return w.page.evaluate("""() => {
+              const el = document.querySelector('#txtGsmNo');
+              if (!el) return { ok: false };
+              const v = String(el.value || '');
+              let valid = null;
+              try { valid = el.checkValidity ? el.checkValidity() : null; } catch (e) { valid = null; }
+              return { ok: v === val, val: v, html5Valid: valid };
+            }""")
+
+        r = try_set(digits)          # 8 أرقام — الشكل الأكثر احتمالاً
         w.progress("eligibility", "run",
-                   f"gsm={digits} mask-setvalue failed val={((r or {}).get('val'))!r} — caret fallback")
-        # احتياط: مؤشر حقيقي عند أول خانة + كتابة رقم-رقم
-        try:
-            el.click()
-            w.page.evaluate(
-                "(pos) => { const el = document.querySelector('#txtGsmNo');"
-                " if (el) { el.focus(); try { el.setSelectionRange(pos, pos); } catch (e) {} } }",
-                4)
-            w.page.keyboard.type(digits, delay=55)
-            val = w.page.evaluate(JS_GSM_VALUE) or ""
-            if val == full:
-                w.progress("eligibility", "run", f"gsm={digits} ok via=caret")
-                return
-        except Exception:
-            val = ""
+                   f"gsm try=8digits field={json.dumps(r, ensure_ascii=False)}")
+        if r and r.get("ok") and r.get("html5Valid") is not False:
+            return
+        r = try_set(full)            # الصيغة الكاملة 968-xxxxxxxx
+        w.progress("eligibility", "run",
+                   f"gsm try=prefix field={json.dumps(r, ensure_ascii=False)}")
+        if r and r.get("ok") and r.get("html5Valid") is not False:
+            return
+        # احتياط أخير خام: الصيغة الكاملة (وفي الحقل ذو 8 أرقام فقط سيُقبل أي صيغة لاحقاً)
         w.set_value(el, full)
         val = w.page.evaluate(JS_GSM_VALUE) or ""
         w.progress("eligibility", "run",
-                   f"gsm={digits} {'ok via=raw' if val == full else f'MISMATCH field={val}'}")
+                   f"gsm={digits} final-raw field={val}")
 
     def _wait_speciality(self, w):
         state = w.page.evaluate(JS_SPECIALITY_OK)
