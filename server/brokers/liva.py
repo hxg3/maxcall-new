@@ -11,9 +11,9 @@
 #   → #txtGsmNo (قناع 968-) → انتظار امتلاء #txtSpeciality → Printmember → PDF.
 #
 # ملاحظات تصميمية:
-# • النبضة (keepalive) لا تلمس بوابة المزوّد أبداً (تسجيل الدخول يتطلب
-#   كابتشا — محاولة آلية بلا موظف تخاطر بقفل الحساب)؛ تجدد جلسة VPN فقط،
-#   وبحد أقصى مرة واحدة كل ساعة.
+# • النبضة (keepalive): تحقق eligibility برقم التأمين داخل MemberDetails نفسها
+#   (نفس فكرة MedNet — لا طباعة/إيصال/طلب، الصفحة لا تُغادر ولا تُعاد تحميلها)؛
+#   تجديد VPN بحد أقصى مرة/ساعة عند غياب الجلسة؛ كابتشا البوابة لا تُطلب أبداً.
 # • بعد أي نجاح، الصفحة تبقى كما هي — عند الطلب التالي تُعاد قراءة الحالة
 #   من DOM (نفس مبدأ الإضافة: لا أعلام "تم النقر").
 # • إلغاء الموظف (إجابة فارغة) يُجهض المهمة برسالة واضحة.
@@ -487,6 +487,7 @@ class Liva(Backend):
             else:
                 w.page.keyboard.press("Enter")
             w.progress("submitted", "ok", f"member={memberNo}")
+            save_last_good_member(self.id, memberNo)   # لتغذية النبضة حتى لو فشلت اللاحقة
             ok = w.wait_for(
                 "() => document.querySelectorAll('ul.ui-autocomplete li.ui-menu-item').length > 0 ||"
                 " !!document.querySelector('input.ui-autocomplete-input')",
@@ -505,29 +506,84 @@ class Liva(Backend):
             raise BackendError(f"print_button_not_found | {self._state_label(w)}")
         return {"member": memberNo}
 
-    # ---------- keepalive: VPN فقط ----------
+    # ---------- keepalive: eligibility re-check في نفس الصفحة ----------
+    keepalive_without_member = True   # الصفحة تحمل رقم العضوية — لا حاجة لتخزينه مسبقاً
+
+    def _eligibility_probe(self, w, member):
+        """تحقق eligibility برقم التأمين داخل MemberDetails نفسها —
+        لا طباعة، لا إيصال، لا طلب — نفس فكرة نبضة MedNet حرفياً.
+        بلا مغادرة للصفحة وبلا إعادة تحميل."""
+        memberNo = str(member or "").strip()
+        inp = None
+        door = time.monotonic() + 8
+        while time.monotonic() < door and not inp:
+            inp = self._find(w, JS_MEMBER)
+            if not inp:
+                time.sleep(0.5)
+        if not inp:
+            return False
+        cur = ""
+        try:
+            cur = (inp.evaluate("el => el.value") or "").strip()
+        except Exception:
+            pass
+        if memberNo:
+            if cur != memberNo:
+                w.set_value(inp, memberNo)
+        elif cur:
+            memberNo = cur
+        btn = self._find(w, JS_SEARCH_BTN)
+        if btn:
+            w.click(btn)
+        else:
+            w.page.keyboard.press("Enter")
+        w.progress("keepalive", "ok", f"eligibility re-check member={memberNo or '(current)'}")
+        # إرسال HTTP يعيد نشاط جلسة البوابة — لا حاجة لقراءة النتيجة
+        time.sleep(2.0)
+        return True
+
     def _keepalive(self, w, member):
         creds = creds_for(self.id)
         try:
-            url = w.page.url or ""
-            if "nlicgulf.com" not in url:
+            if "nlicgulf.com" not in (w.page.url or ""):
                 w.page.goto(creds.get("url") or (HOST + "/remote/login?lang=en"),
                             wait_until="domcontentloaded", timeout=30000)
-            state = self._state(w)
-            if state == "vpn-login":
-                if time.time() - self._vpn_login_at > 3600:
-                    self._do_vpn_login(w, creds)
-                    self._vpn_login_at = time.time()
-                    w.progress("login", "ok", "vpn re-login (keepalive)")
-                else:
-                    w.progress("navigate", "run", "vpn login page — re-login throttled")
-            else:
+
+            # حلقة حالات محدودة — نفس مبدأ run() لكن بلا كابتشا أبداً
+            for _ in range(8):
+                url = w.page.url or ""
+                state = self._state(w)
+                if "MemberDetails" in url or state == "member":
+                    # الحالة المثالية: نفس الصفحة — لا نخرج أبداً
+                    ok = self._eligibility_probe(w, member)
+                    return {"member": member,
+                            "result": "liva_keepalive_ok" if ok else "liva_keepalive_probe_failed"}
+                if state == "portal-home":
+                    self._open_member_details(w)
+                    ok = self._eligibility_probe(w, member)
+                    return {"member": member,
+                            "result": "liva_keepalive_ok" if ok else "liva_keepalive_probe_failed"}
+                if state == "provider-card":
+                    self._open_provider(w)
+                    continue
+                if state == "vpn-login":
+                    if time.time() - self._vpn_login_at > 3600:
+                        self._do_vpn_login(w, creds)
+                        self._vpn_login_at = time.time()
+                        w.progress("login", "ok", "vpn re-login (keepalive)")
+                    else:
+                        return {"member": member, "result": "liva_keepalive_vpn_throttled"}
+                    continue
                 if state == "provider-login":
-                    w.progress("navigate", "ok",
-                               "VPN ok — portal re-auth (captcha) deferred to next real job")
-                else:
-                    w.progress("navigate", "ok", f"session warm ({state})")
-            return {"member": member, "result": "liva_keepalive_ok"}
+                    # كابتشا — تُترك للمهمة الحقيقية
+                    w.progress("navigate", "run",
+                               "portal re-auth (captcha) deferred to next real job")
+                    return {"member": member,
+                            "result": "liva_keepalive_portal_auth_required"}
+                # مجهول — غالباً Angular بين الصفحات — انتظر ثم أعد الفحص
+                w.progress("navigate", "run", "keepalive: unknown — waiting render")
+                w.sleep(2.0)
+            return {"member": member, "result": "liva_keepalive_state_loop"}
         except Exception as e:
             w.progress("navigate", "run", f"keepalive skipped: {str(e)[:80]}")
             return {"member": member, "result": "liva_keepalive_skipped"}

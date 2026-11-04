@@ -290,7 +290,8 @@ class InsurerWorker(threading.Thread):
             if not HAS_PW:
                 continue
             member = last_good_member(self.insurer)
-            if not member:
+            if not member and not getattr(self.backend,
+                                          "keepalive_without_member", False):
                 continue
             if self.last_activity and time.time() - self.last_activity < HEARTBEAT_WINDOW_S:
                 continue
