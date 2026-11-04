@@ -4,7 +4,7 @@
 #   1) https://online.nlicgulf.com:12443/remote/login?lang=en  (VPN: user/pass — بلا كابتشا)
 #   2) لوحة البوابة: بطاقة "Provider" → تفتح بوابة المزوّد (نتبعها بنفس التبويب)
 #   3) بوابة المزوّد: نفس البيانات + كابتشا صورة (#CaptchaInputText)
-#      → الصورة تُعرض على صفحة المشفى (his-assist) — الموظف يكتب الرمز خلال 15 ث
+#      → الصورة تُعرض على صفحة المشفى (his-assist) — الموظف يكتب الرمز خلال 90 ث
 #   4) "Member Eligiblity & Online Claim Form" → MemberDetails
 #   5) #txtMemberId + #btnSearch → الطبيب (jQuery UI — تطابق مع HIS،
 #      وإن لم يوجد تطابق تُرفع قائمة اختيار للموظف عبر نفس قناة الكابتشا)
@@ -18,8 +18,11 @@
 #   من DOM (نفس مبدأ الإضافة: لا أعلام "تم النقر").
 # • إلغاء الموظف (إجابة فارغة) يُجهض المهمة برسالة واضحة.
 
+import json
+import os
 import re
 import time
+from pathlib import Path
 
 from .base import Backend, BackendError, NeedsCaptcha, NeedsChoice
 from .base import creds_for, save_last_good_member
@@ -71,6 +74,50 @@ JS_PRINT_BTN = f"""() => {{ {_MJS}
              .find(el => okEl(el) && /print\\s+(online\\s+)?claim/i.test((el.textContent || el.value || ''))) || null;
 }}"""
 
+JS_ALREADY_PRINTED = """() => {
+  const ok = el => el.getClientRects().length > 0;
+  return [...document.querySelectorAll('body *')]
+      .filter(el => ok(el) && /already printed/i.test(el.textContent || '') && el.children.length < 4)
+      .length;
+}"""
+
+JS_DISMISS_ALERT = """() => {
+  const ok = el => el.getClientRects().length > 0 && !el.disabled;
+  const alerts = [...document.querySelectorAll('body *')]
+      .filter(el => ok(el) && /already printed/i.test(el.textContent || ''));
+  if (!alerts.length) return 'none';
+  // ابحث عن زر موافق/إغلاق داخل أي من آباء التنبيه (أحدثها أولاً)
+  for (const a of alerts) {
+    let node = a;
+    for (let depth = 0; node && depth < 6; depth++, node = node.parentElement) {
+      const btn = [...node.querySelectorAll('button, a, input[type=button], input[type=submit]')]
+          .find(el => ok(el) && /^\\s*(ok|yes|close|dismiss|حسناً|موافق)\\s*$/i.test(el.textContent || el.value || ''));
+      if (btn) { btn.click(); return 'clicked'; }
+    }
+  }
+  return 'no-button';
+}"""
+
+JS_REPRINT_BTN = """() => {
+  const ok = el => el.getClientRects().length > 0 && !el.disabled;
+  return [...document.querySelectorAll('button, a, input[type=button], input[type=submit]')]
+      .find(el => ok(el) && /reprint\\s+(online\\s+)?claim/i.test((el.textContent || el.value || ''))) || null;
+}"""
+
+JS_REPRINT_ROWS = """() => {
+  const ok = el => el.getClientRects().length > 0;
+  const claimRe = /\\d{4}-\\d{4}-\\d{4,}/;
+  const out = [];
+  for (const tr of document.querySelectorAll('tr')) {
+    if (!ok(tr)) continue;
+    const cells = [...tr.cells].map(td => (td.textContent || '').trim().replace(/\\s+/g, ' '));
+    const joined = cells.join(' | ');
+    const m = joined.match(claimRe);
+    if (m) out.push({ claim: m[0], cells });
+  }
+  return out;
+}"""
+
 JS_MEMBER_LINK = """() => {
   const links = [...document.querySelectorAll('a')];
   return links.find(a => /member\\s*eligib/i.test(a.textContent || '') ||
@@ -114,36 +161,129 @@ def _clean_doctor(s):
     return re.sub(r"\s+", " ", s).strip()
 
 
-def _word_score(a, b):
-    if a == b:
-        return 1
-    return 0.5 if (b.startswith(a) or a.startswith(b)) else 0
+def _fuzzy(a, b):
+    """نسبة تشابه difflib (0..1) بين رمزين."""
+    import difflib
+    return difflib.SequenceMatcher(None, a, b).ratio()
+
+
+# ---------- ذاكرة مطابقات الأطباء (HIS → NLI) ----------
+# تُملأ تلقائياً عند كل اختيار ناجح (تلقائي أو من الموظف)، وتُزرع أولياً
+# بالمطابقات الموثقة يدوياً. تُقرأ قبل أي حساب ضبابي — صفر تكلفة، صفر خطأ.
+DOCTOR_ALIASES_FILE = "/var/lib/maxcall-broker/doctor_aliases.json"
+_DOCTOR_ALIAS_LOCK = None  # ضئيل داخل خيط العامل الواحد؛ لا حاجة لقفل إضافي
+_DOCTOR_ALIAS_CACHE: dict[str, str] = {}
+
+
+def _alias_key(name):
+    return _norm_name(name)
+
+
+def load_doctor_aliases():
+    try:
+        if _DOCTOR_ALIAS_CACHE:
+            return _DOCTOR_ALIAS_CACHE
+        raw = Path(DOCTOR_ALIASES_FILE).read_text(encoding="utf-8")
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            _DOCTOR_ALIAS_CACHE.update({_alias_key(k): str(v) for k, v in data.items() if k and v})
+    except Exception:
+        pass
+    return _DOCTOR_ALIAS_CACHE
+
+
+def save_doctor_alias(his_name, liva_name):
+    """زرع/تحديث مطابقة — تُستدعى بعد كل اختيار ناجح."""
+    try:
+        key = _alias_key(his_name)
+        val = str(liva_name or "").strip()
+        if not key or not val:
+            return
+        aliases = load_doctor_aliases()
+        if aliases.get(key) == val:
+            return
+        aliases[key] = val
+        p = Path(DOCTOR_ALIASES_FILE)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".tmp")
+        tmp.write_text(json.dumps(aliases, ensure_ascii=False, indent=1), encoding="utf-8")
+        os.replace(tmp, p)
+        try:
+            os.chmod(p, 0o600)
+        except OSError:
+            pass
+    except Exception:
+        pass  # الذاكرة تحسين اختياري — لا تكسر التدفق أبداً
+
+
+def _doctor_alias_lookup(wanted):
+    aliases = load_doctor_aliases()
+    return aliases.get(_alias_key(wanted)) if aliases else None
+
+
+def _query_variants(type_text):
+    """بدائل الاستعلام لـ jQuery UI: الاسم الكامل ثم رموز مميزة قصيرة.
+    يلتقط حالة الاختلاف الإملائي (SELVAGANESAN ↔ SELVAGANESH) لأن البادئة المشتركة تتطابق."""
+    out = [type_text]
+    toks = [t for t in type_text.split() if len(t) >= 4]
+    for t in toks:
+        out.append(t[:6])        # SELVAG
+        out.append(t[:4])        # SELV
+    # الرموز من الأطول للأقصر
+    seen, final = set(), []
+    for v in out:
+        v = v.strip()
+        if v and v not in seen:
+            seen.add(v)
+            final.append(v)
+    return final
 
 
 def _match_doctor(items, wanted):
     w = _norm_name(wanted)
-    best, best_score = None, 0
+    if not w:
+        return None
+    # 1) ذاكرة المطابقات المعتمدة
+    alias = _doctor_alias_lookup(wanted)
+    if alias:
+        hit = next((it for it in items if _norm_name(it) == _norm_name(alias)), None)
+        if hit:
+            return hit
+    # 2) تطابق كامل / احتواء
+    best, best_score = None, 0.0
+    runner_up = 0.0
     for it in items:
         n = _norm_name(it)
         if not n:
             continue
         if n == w:
-            score = 100
-        elif w and (n in w or w in n):
-            score = 80
+            score = 100.0
+        elif n in w or w in n:
+            score = 88.0
         else:
             a, b = w.split(), n.split()
-            weighted = 0.0
+            tok_scores = []
             for x in a:
-                for y in b:
-                    sc = _word_score(x, y)
-                    if sc:
-                        weighted += sc
-                        break
-            score = round((weighted / len(a)) * 70) if a else 0
+                tok_scores.append(max(_fuzzy(x, y) for y in b) if b else 0.0)
+            # الوزن بطول الرمز — الرمز الطويل يحمل الهوية (SELVAGANESAN ≫ K)
+            weights = [len(x) for x in a]
+            score = (sum(s * w for s, w in zip(tok_scores, weights))
+                     / sum(weights)) * 80.0 if weights else 0.0
+            # تطابق تام لرمز واحد على الأقل يرفع الثقة
+            if any(s >= 0.99 for s in tok_scores):
+                score += 12.0
         if score > best_score:
-            best, best_score = it, score
-    return best if best_score >= 50 else None
+            runner_up, best, best_score = best_score, it, score
+        elif score > runner_up:
+            runner_up = score
+    if best is None:
+        return None
+    # قرار: واضح (أو متفوق بفارق مريح) ⇒ تلقائي؛ وإلا مرر للموظف
+    if best_score >= 62.0 and (best_score - runner_up) >= 15.0:
+        return best
+    if best_score >= 80.0:
+        return best
+    return None
 
 
 class Liva(Backend):
@@ -376,7 +516,10 @@ class Liva(Backend):
 
         inp = None
         items: list[str] = []
-        for variant in ([type_text, type_text[:3]] if type_text else [""]):
+        variants = _query_variants(type_text) if type_text else []
+        if choice and choice not in variants:
+            variants.insert(0, choice)
+        for variant in variants:
             inp = self._type_into_doctor(w, variant)
             if inp is not None:
                 items = self._doctor_items(w)
@@ -394,6 +537,8 @@ class Liva(Backend):
                 hint=(f"اسم الطبيب في HIS: {wanted}" if wanted else
                       "لا يوجد اسم طبيب في سجل HIS"),
             )
+        if wanted:
+            save_doctor_alias(wanted, target)   # ذاكرة المطابقات — لا نطلبها ثانية
         # انقر العنصر المطابق في القائمة
         clicked = w.page.evaluate(
             """(want) => {
@@ -461,6 +606,171 @@ class Liva(Backend):
         if not ok:
             raise BackendError("speciality_autofill_missing")
         w.progress("eligibility", "run", "speciality filled")
+
+    # ---------- Fallback: مطبوع مسبقاً → Reprint ----------
+    def _already_printed_visible(self, w):
+        try:
+            return int(w.page.evaluate(JS_ALREADY_PRINTED) or 0) > 0
+        except Exception:
+            return False
+
+    def _dismiss_already_printed(self, w):
+        try:
+            outcome = w.page.evaluate(JS_DISMISS_ALERT)
+        except Exception:
+            outcome = "error"
+        if outcome in ("clicked", "none"):
+            return outcome == "clicked"
+        # احتياط: Escape
+        try:
+            w.page.keyboard.press("Escape")
+            time.sleep(0.5)
+            return not self._already_printed_visible(w)
+        except Exception:
+            return False
+
+    def _find_reprint_button(self, w):
+        try:
+            handle = w.page.evaluate_handle(JS_REPRINT_BTN).as_element()
+            return handle or w.q1("button.RePrintmember, .RePrintmember")
+        except Exception:
+            return w.q1("button.RePrintmember, .RePrintmember")
+
+    def _wait_reprint_rows(self, w, timeout_s=15):
+        door = time.monotonic() + timeout_s
+        while time.monotonic() < door:
+            try:
+                rows = w.page.evaluate(JS_REPRINT_ROWS) or []
+            except Exception:
+                rows = []
+            if rows:
+                return rows
+            time.sleep(0.4)
+        return []
+
+    @staticmethod
+    def _parse_row_date(cells):
+        """خلية التاريخ مثل 04-Nov-2026 → date؛ وإلا None."""
+        import datetime as _dt
+        for c in cells:
+            for fmt in ("%d-%b-%Y", "%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
+                try:
+                    return _dt.datetime.strptime(c.strip(), fmt).date()
+                except ValueError:
+                    continue
+        return None
+
+    def _pick_reprint_row(self, rows, doctor):
+        """فضّل الصف الذي يطابق الطبيب (fuzzy) ثم الأحدث تاريخاً."""
+        if not rows:
+            return None
+        want = _norm_name(doctor) if doctor else None
+
+        def doc_score(cells):
+            if not want:
+                return 1.0
+            joined = " ".join(cells)
+            scores = [_fuzzy(want, _norm_name(c)) for c in cells if c.strip()] or [0.0]
+            return max(scores)
+
+        scored = []
+        for r in rows:
+            ds = doc_score(r.get("cells") or [])
+            scored.append((r, ds, self._parse_row_date(r.get("cells") or [])))
+        with_doc = [s for s in scored if s[1] >= 0.55]
+        pool = with_doc or scored
+        dated = [s for s in pool if s[2] is not None]
+        if dated:
+            return max(dated, key=lambda s: s[2])[0]
+        return pool[0][0]
+
+    def _click_reprint_row(self, w, claim_no):
+        """انقر رقم الـclaim داخل الصف — عادة <a> أو <button>."""
+        try:
+            ok = w.page.evaluate(
+                """(want) => {
+                    const claimRe = new RegExp('^\\\\s*' + want.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&') + '\\\\s*$');
+                    const tr = [...document.querySelectorAll('tr')].find(tr =>
+                        claimRe.test((tr.textContent || '').trim()) ||
+                        (tr.textContent || '').includes(want));
+                    if (!tr) return false;
+                    const link = tr.querySelector('a, button, input[type=button]') ||
+                                 [...tr.children].find(td => (td.textContent || '').includes(want))
+                                    ?.querySelector('a, button');
+                    if (link) { link.click(); return true; }
+                    const cell = [...tr.children].find(td => (td.textContent || '').includes(want));
+                    if (cell) { cell.click(); return true; }
+                    return false;
+                }""", claim_no)
+            return bool(ok)
+        except Exception:
+            return False
+
+    def _report_hit_poll(self, w, timeout_s, stop_pred=None):
+        """انتظر ظهور نتيجة الطباعة (download / response / window.open).
+        stop_pred: دالة تُرجى إيقاف البحث مبكراً (مثلاً عند رسالة الخطأ)."""
+        w._report_hit = None
+        w.waiting_report = True
+        try:
+            w.page.evaluate("() => { window.__MCR_OPEN_URL = ''; window.__MCR_OPEN_AT = 0; }")
+        except Exception:
+            pass
+        door = time.monotonic() + timeout_s
+        try:
+            while time.monotonic() < door:
+                hit = w._report_hit
+                if hit is not None:
+                    return w._finish_hit(hit, False)
+                url = w._open_url()
+                if url:
+                    return w._finish_hit({"kind": "url", "url": url}, False)
+                if stop_pred and stop_pred(w):
+                    return {"ok": False, "error": "aborted_early"}
+                time.sleep(0.25)
+            return {"ok": False, "error": "report_not_captured"}
+        finally:
+            w.waiting_report = False
+
+    def _print_or_reprint(self, w, member, card):
+        """المسار الطبيعي (Print Online Claim Form) وإلا مسار Reprint تلقائياً
+        عند رسالة "Claim Form already printed"."""
+        btn = self._find(w, JS_PRINT_BTN)
+        if not btn:
+            raise BackendError(f"print_button_not_found | {self._state_label(w)}")
+        w.progress("print", "run")
+        w.click(btn)
+        r = self._report_hit_poll(w, 22, stop_pred=lambda _w: self._already_printed_visible(_w))
+        if r.get("ok"):
+            w.progress("print", "ok", f"url={str(r.get('url', ''))[:110]}")
+            return {"member": member, "pdf_bytes": r.get("bytes"),
+                    "pdf_url": r.get("url", "")}
+
+        if not self._already_printed_visible(w):
+            raise BackendError(f"print_failed | {r.get('error')}")
+        w.progress("print", "run", "already printed — auto fallback to Reprint")
+        if not self._dismiss_already_printed(w):
+            w.progress("print", "run", "could not dismiss already-printed dialog")
+
+        btn = self._find_reprint_button(w)
+        if not btn:
+            raise BackendError("reprint_button_not_found")
+        w.click(btn)
+        w.progress("print", "run", "reprint table opened")
+        rows = self._wait_reprint_rows(w, timeout_s=15)
+        if not rows:
+            raise BackendError("reprint_table_not_found")
+        chosen_doctor = str(((card or {}).get("visit") or {}).get("consultant") or "").strip()
+        row = self._pick_reprint_row(rows, chosen_doctor)
+        if not row:
+            raise BackendError("reprint_row_not_found")
+        w.progress("print", "run", f"reprint row {row.get('claim')}")
+        if not self._click_reprint_row(w, row.get("claim") or ""):
+            raise BackendError(f"reprint_row_click_failed | {row.get('claim')}")
+        r2 = self._report_hit_poll(w, timeout_s=25)
+        if not r2.get("ok"):
+            raise BackendError(f"reprint_failed | {r2.get('error')}")
+        return {"member": member, "pdf_bytes": r2.get("bytes"),
+                "pdf_url": r2.get("url", "")}
 
     def _do_member_page(self, w, member, card):
         memberNo = str(member or "").strip()
@@ -627,21 +937,12 @@ class Liva(Backend):
                 self._open_member_details(w)
                 continue
             if state == "member":
-                info = self._do_member_page(w, member, card)
+                self._do_member_page(w, member, card)
                 save_last_good_member(self.id, member)
                 w.progress("eligibility", "ok")
                 if kind == "keepalive":
                     return {"member": member, "result": "ok"}
-                w.progress("print", "run")
-                btn_finder = lambda: self._find(w, JS_PRINT_BTN)
-                r = w.capture_report(btn_finder,
-                                     timeout_s=min(40, max(5, w.remaining(kind))),
-                                     discard=False)
-                if not r.get("ok"):
-                    raise BackendError(f"print_failed | {r.get('error')}")
-                w.progress("print", "ok", f"url={str(r.get('url', ''))[:110]}")
-                return {"member": member, "pdf_bytes": r.get("bytes"),
-                        "pdf_url": r.get("url", "")}
+                return self._print_or_reprint(w, member, card)
             # مجهول → غالباً Angular ما زال يبني DOM — انتظر ثم أعد الفحص
             # (لا إعادة تحميل — كانت هي ما يقتل البوابة ويُغرق في حلقة)
             unknown_tries += 1
