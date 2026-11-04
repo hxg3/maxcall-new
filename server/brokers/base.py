@@ -1,0 +1,271 @@
+# قاعدة عامل الاستقبال — جلسة Playwright واحدة دائمة لكل تأمين.
+#
+# الفلسفة المنقولة من محوّلات الإضافة (نفس المبادئ المُثبتة):
+# • لا أعلام "تم النقر" — الحالة تُقرأ من الـDOM عند كل خطوة (idempotent)
+#   فإعادة المحاولة بعد أي تنقل تُكمل من حيث توقفت.
+# • لا انتظار ثابت — كل خطوة تنتظر إشارة الواقع (عنصر/استجابة/رسالة).
+# • تعبئة الحقول بجسم setNativeValue نفسه المُثبت على الموقع (مُعدّل القيمة
+#   الأصلي + حدثا input/change) — لا مخاطرة بمسار جديد غير مختبر.
+#
+# الجديد في عالم العامل:
+# • الأحداث أصلية (نقرة/كتابة حقيقية) — بلا محاكاة كائنات مزوّرة.
+# • التقدم يُرفع إلى المهمة الحالة عبر progress() حتى شاشة الموظف.
+# • أعطال الصفحة تُعالَج بإعادة إنشاء السياق عند الجولة التالية
+#   (بدل حلقة إعادة الإرسال في الإضافة — هنا العامل دائم فالجولة واحدة).
+
+import json
+import threading
+import time
+from pathlib import Path
+
+CREDS_FILE = Path("/etc/maxcall-insurers.json")
+STATE_DIR = Path("/var/lib/maxcall-broker")
+
+_creds_lock = threading.Lock()
+_creds_cache = {"mtime": None, "at": 0.0, "data": {}}
+
+
+def load_creds():
+    """بيانات الدخول المتغيرة — قراءة حية عند كل محاولة (اللوحة تُحدّث
+    الملف دون إعادة تشغيل الخدمة). كاش 5 ثوانٍ كحد أقصى."""
+    with _creds_lock:
+        try:
+            mtime = CREDS_FILE.stat().st_mtime
+        except OSError:
+            mtime = None
+        fresh = (mtime != _creds_cache["mtime"]) or (time.time() - _creds_cache["at"] > 5)
+        if fresh:
+            try:
+                _creds_cache["data"] = json.loads(CREDS_FILE.read_text(encoding="utf-8"))
+            except Exception:
+                _creds_cache["data"] = {}
+            _creds_cache["mtime"] = mtime
+            _creds_cache["at"] = time.time()
+        return _creds_cache["data"]
+
+
+def creds_for(insurer):
+    d = load_creds().get(insurer) or {}
+    return {"user": d.get("user", ""), "pass": d.get("pass", ""), "url": d.get("url", "")}
+
+
+def last_good_member(insurer):
+    p = STATE_DIR / "heartbeat.json"
+    try:
+        return (json.loads(p.read_text(encoding="utf-8"))).get(insurer, "")
+    except Exception:
+        return ""
+
+
+def save_last_good_member(insurer, member):
+    p = STATE_DIR / "heartbeat.json"
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+        if member:
+            data[insurer] = member
+        tmp = p.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(p)
+    except Exception:
+        pass
+
+
+class NeedsCaptcha(Exception):
+    """الدخول يحتاج تحققًا بشريًا — الصورة تُرفع لشاشة الموظف عبر المهمة."""
+
+    def __init__(self, image_b64):
+        super().__init__("captcha_required")
+        self.image_b64 = image_b64
+
+
+class BackendError(Exception):
+    pass
+
+
+class Backend:
+    """واجهة خلف التأمين: دورة عمل واحدة، الحالة من الـDOM دائماً."""
+
+    id = ""
+
+    def run(self, w, kind="doc", member=None, card=None):
+        """ملء/تحقق/طباعة — يعيد قاموس النتيجة أو يرفع BackendError/NeedsCaptcha."""
+        raise NotImplementedError
+
+    @staticmethod
+    def report_matches(url):
+        return False
+
+
+class Worker:
+    """بيئة واحدة دائمة (سياق + تبويب) تخدم كل مهام تأمين واحد — بلا
+    نافذة/تبويب إضافي لكل طلب. البوب-أب عند الطباعة يُلتَق دائماً إلى
+    مستمع الاستجابات، ويُغلق بعد الالتقاط أو يُهمَل في وضع discard."""
+
+    JOB_DEADLINE_S = 150.0
+    KEEPALIVE_DEADLINE_S = 90.0
+
+    def __init__(self, insurer, backend, playwright, log):
+        self.insurer = insurer
+        self.backend = backend
+        self.pw = playwright
+        self.log = log
+        self.ctx = None
+        self.page = None
+        self.needs_context = False
+        self.current_job = None
+        self._report_hit = None    # أول استجابة مطابقة للنمط أثناء انتظارها
+        self.waiting_report = False
+        self.suppress_popups = False
+        self._started_at = 0.0
+
+    # ---------------- إدارة السياق ----------------
+    def ensure_context(self):
+        """سياق دائم يُبنى مرة واحدة; إن كُسر (أعطال/مغادرة) يُعاد."""
+        if self.ctx and not self.needs_context:
+            return
+        if self.ctx:
+            try:
+                self.ctx.close()
+            except Exception:
+                pass
+            self.ctx = None
+        profile = STATE_DIR / f"profiles/{self.insurer}"
+        profile.mkdir(parents=True, exist_ok=True)
+        self.ctx = self.pw.chromium.launch_persistent_context(
+            str(profile),
+            headless=True,
+            args=[
+                "--disable-gpu",
+                "--disable-dev-shm-usage",
+                "--no-first-run",
+                "--disable-first-run-ui",
+                "--disable-features=Translate,BackForwardCache",
+            ],
+        )
+        self.page = self.ctx.pages[0] if self.ctx.pages else self.ctx.new_page()
+        self.page.set_default_timeout(30000)
+        self._hook(self.page)
+        self.ctx.on("page", self._on_popup)
+        self.needs_context = False
+        self.log(f"[{self.insurer}] context ready profile={profile}")
+
+    def _on_popup(self, page):
+        try:
+            if self.suppress_popups:
+                page.close()
+                return
+            page.set_default_timeout(30000)
+            self._hook(page)
+            self.log(f"[{self.insurer}] popup attached {page.url[:80]}")
+        except Exception:
+            pass
+
+    def _hook(self, page):
+        page.on("response", self._on_response)
+
+    def _on_response(self, resp):
+        try:
+            if not self.waiting_report or self._report_hit is not None:
+                return
+            url = resp.url or ""
+            if self.backend.report_matches(url):
+                self._report_hit = resp
+        except Exception:
+            pass
+
+    # ---------------- مساعدات قياس (منقولة حرفياً من الإضافة) ----------------
+    def q1(self, sel):
+        try:
+            return self.page.query_selector(sel)
+        except Exception:
+            return None
+
+    def visible(self, handle):
+        if not handle:
+            return False
+        try:
+            return bool(handle.evaluate(
+                "el => !!el && el.getClientRects().length > 0 && !el.disabled && el.readOnly !== true"
+            ))
+        except Exception:
+            return False
+
+    def set_value(self, handle, value):
+        """نفس setNativeValue: حالة ملكية value الأصلي من HTMLInputElement
+        prototype + حدثا input/change فقاعياً — التوقيع المُثبت على ADF."""
+        handle.evaluate(
+            """(el, v) => {
+                const d = Object.getOwnPropertyDescriptor(
+                    window.HTMLInputElement.prototype, 'value');
+                if (d && d.set) d.set.call(el, String(v));
+                else el.value = String(v);
+                el.dispatchEvent(new Event('input', {bubbles: true}));
+                el.dispatchEvent(new Event('change', {bubbles: true}));
+            }""",
+            str(value),
+        )
+
+    def click(self, handle):
+        try:
+            handle.evaluate("el => el.click()")
+            return True
+        except Exception:
+            return False
+
+    def wait_for(self, js_pred, timeout_s=20, poll_s=0.3):
+        try:
+            self.page.wait_for_function(
+                js_pred, timeout=int(timeout_s * 1000), polling=int(poll_s * 1000)
+            )
+            return True
+        except Exception:
+            return False
+
+    def sleep(self, s=0.3):
+        time.sleep(s)
+
+    def remaining(self, kind="doc"):
+        limit = self.KEEPALIVE_DEADLINE_S if kind == "keepalive" else self.JOB_DEADLINE_S
+        return max(0.0, limit - (time.monotonic() - self._started_at))
+
+    # ---------------- التقدم والتقاط التقرير ----------------
+    def progress(self, step, status, detail=""):
+        job = self.current_job
+        if job:
+            job.add_stage(step, status, detail)
+        self.log(f"[{self.insurer}] {step}:{status} {detail}".strip())
+
+    def capture_report(self, find_control, timeout_s=25, discard=False):
+        """انقر زر الطباعة مرة (مع إعادة إيجاده إن أعاد ADF بناء الصف،
+        دون نقرات إضافية أثناء انتظار الاستجابة) ثم انتظر أول استجابة
+        تطابق نمط التقرير. discard=True: الاستجابة تُهمَل (مزامنة جلسة
+        MedNet المُثبتة) والبوب-أب يُغلق."""
+        import time
+
+        deadline = time.monotonic() + timeout_s
+        self._report_hit = None
+        self.waiting_report = True
+        self.suppress_popups = bool(discard)
+        clicked = False
+        try:
+            while time.monotonic() < deadline:
+                if not clicked:
+                    ctl = find_control()
+                    if ctl and not ctl.is_detached() and self.click(ctl):
+                        clicked = True
+                if self._report_hit is not None:
+                    resp = self._report_hit
+                    if discard:
+                        return {"ok": True, "url": resp.url, "bytes": None}
+                    return {"ok": True, "url": resp.url, "bytes": resp.body()}
+                time.sleep(0.25)
+            return {"ok": False,
+                    "error": "print_control_missing" if not clicked else "report_not_captured"}
+        finally:
+            self.waiting_report = False
+            self.suppress_popups = False
+            self._report_hit = None
