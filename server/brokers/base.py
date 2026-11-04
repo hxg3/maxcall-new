@@ -360,12 +360,19 @@ class Worker:
             data = self._fetch_pdf(url)
         else:
             data = self._report_bytes(hit)
+        if not data:
+            return {"ok": False, "url": url, "error": "pdf_fetch_empty"}
         return {"ok": True, "url": url, "bytes": data}
 
     def _fetch_pdf(self, url):
-        """جلب الرابط المعترض بنفس الكوكيز (جلسة واحدة) — لا نافذة، لا popup."""
+        """جلب الرابط المعترض بنفس الكوكيز (جلسة واحدة) — لا نافذة، لا popup.
+        نسبي ⇒ يُلحق على صفحة المصدر الحالية (ASP.NET يرمي نوافذ هذه التقارير نسبياً)."""
+        import urllib.parse
+        abs_url = url
+        if not abs_url.lower().startswith(("http://", "https://")):
+            abs_url = urllib.parse.urljoin(self.page.url or "", url)
         try:
-            resp = self.ctx.request.get(url, timeout=60000)
+            resp = self.ctx.request.get(abs_url, timeout=60000)
             ct = (resp.headers.get("content-type") or "").lower()
             if resp.status not in (200,):
                 self.log.info(f"[{self.insurer}] pdf fetch http_{resp.status} ct={ct}")
