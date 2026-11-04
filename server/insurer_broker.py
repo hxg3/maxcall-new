@@ -59,7 +59,7 @@ app = Flask(__name__)
 _jobs = {}
 _jobs_lock = threading.Lock()
 
-INSURERS = {"mednet": MedNet}   # liva/nextcare تُضاف بعد اختبار mednet
+INSURERS = {"mednet": MedNet, "nextcare": NextCare}
 
 
 def _uuid():
@@ -153,8 +153,9 @@ class InsurerWorker(threading.Thread):
 
     def finish(self, job, out):
         out = out or {}
-        if out.get("pdf_bytes"):
-            job["pdf_b64"] = base64.b64encode(out.pop("pdf_bytes")).decode("ascii")
+        pdf_bytes = out.pop("pdf_bytes", None)     # لا تُلبث raw bytes في result
+        if pdf_bytes:
+            job["pdf_b64"] = base64.b64encode(pdf_bytes).decode("ascii")
         job["result"] = out
         job["state"] = "done"
         self.log_job(job, "info", "done")

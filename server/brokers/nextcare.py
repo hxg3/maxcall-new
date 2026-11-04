@@ -7,6 +7,7 @@
 # (الملف يُنزّل مباشرة — نلتقطه عبر download في العامل بدل نافذة).
 
 import time
+import urllib.parse
 
 from .base import Backend, BackendError, save_last_good_member
 from .base import creds_for
@@ -88,46 +89,56 @@ class NextCare(Backend):
 
     # ---------- الدخول ----------
     def do_login(self, w, creds):
+        """المسار المُثبت عملياً: تعبئة الحقول ثم نقر زر الواجهة (#btnLogin) —
+        هذه الصفحة لا تُبقي إضافة login-خطوة في نفس الصفحة؛ الدخول ينشئ
+        جلسة ASPXAUTH ثم يحوّل للمقاصد الواردة (Inquiry2.aspx أولاً)."""
         w.progress("login", "run", "doLogin")
         user = self._find(w, "() => document.querySelector('#txtUserName')")
         passt = self._find(w, "() => document.querySelector('#txtPassword')")
-        if not user or not passt:
+        submit = self._find(w, "() => document.querySelector('#btnLogin')")
+        if not user or not passt or not submit:
             raise BackendError("login_fields_not_found")
         w.set_value(user, creds["user"])
         w.set_value(passt, creds["pass"])
-        token = w.page.evaluate(
-            "() => (document.querySelector('#token') || {}).value || ''")
-        # نفس ما يفعله موقعه: استدعاء دالته العالمية نفسها — الدخل يملأ يدوياً
-        # أفضل من التقاط رسائل AJAX؛ التحقق من النتيجة يُقرأ من الصفحة.
-        w.page.evaluate(
-            "([u, p, t]) => { try { window.Login2.Login(u, p, t, '1', () => {}); } catch (e) {} }",
-            [creds["user"], creds["pass"], token])
         try:
             v3 = self._find(w, "() => document.querySelector('#btnSlider1')")
             if v3 and self._safe_eval(w, "() => !!document.querySelector('#btnSlider1') && document.querySelector('#btnSlider1').offsetParent !== null"):
                 w.click(v3)
+                time.sleep(0.5)
         except Exception:
             pass
-        # انتطر النتيجة: إما ELIG أو lblerrLogin (حتى 25 ث)
-        door = time.monotonic() + 25
+        try:
+            with w.page.expect_navigation(wait_until="domcontentloaded",
+                                          timeout=30000):
+                w.click(submit)
+        except Exception:
+            pass
+        door = time.monotonic() + 30
+        logged = False
         while time.monotonic() < door:
             err = self._safe_eval(w, JS_LOGIN_ERR)
             if err:
                 w.progress("login", "error", str(err)[:120])
                 raise BackendError(f"login_failed: {err}")
-            if "eligibilitychecking" in (w.page.url or "").lower():
-                w.progress("login", "ok", "signed in")
-                return
-            if not self._safe_eval(w, JS_IS_LOGIN):
-                w.progress("login", "ok", "signed in")
-                return
+            url = (w.page.url or "").lower()
+            if "/login2.aspx" not in url:
+                logged = True
+                break
             time.sleep(0.5)
-        raise BackendError("login_timeout")
+        if not logged:
+            w.progress("login", "error", "login_timeout")
+            raise BackendError("login_timeout")
+        w.progress("login", "ok", "signed in")
+        return
 
     # ---------- الجلسة ----------
     def _open_eligibility(self, w):
         url = (w.page.url or "").lower()
-        if "eligibilitychecking" not in url:
+        try:
+            path = urllib.parse.urlparse(w.page.url or "").path.lower()
+        except Exception:
+            path = ""
+        if not path.endswith("/eligibilitychecking2.aspx"):
             w.progress("navigate", "run", "goto EligibilityChecking2")
             w.page.goto(ELIG_URL, wait_until="domcontentloaded", timeout=45000)
 
@@ -159,6 +170,7 @@ class NextCare(Backend):
 
         if self._safe_eval(w, JS_IS_LOGIN):
             self.do_login(w, creds)
+        w.progress("navigate", "run", f"pre_open url={(w.page.url or '')[-80:]}")
 
         self._open_eligibility(w)
 
