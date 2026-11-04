@@ -135,6 +135,7 @@ class Worker:
         self._already_printed = False
         self._wrong_captcha = False
         self._provider_submit_at = 0.0   # لحظة إرسال نموذج الكابتشا (فترة سماح)
+        self._captcha_verdict = None     # من استجابة ValidateUserWithCaptcha: ok/fail/None
 
     # ---------------- إدارة السياق ----------------
     def ensure_context(self):
@@ -222,6 +223,8 @@ class Worker:
         page.on("response", self._on_response)
         page.on("download", self._on_download)
         page.on("dialog", self._on_dialog)
+        page.on("console", self._on_console)
+        page.on("requestfailed", self._on_requestfailed)
 
     def _on_download(self, dl):
         try:
@@ -236,20 +239,54 @@ class Worker:
         except Exception:
             pass
 
+    # ---------------- أدوات تشخيص (تبقى في السيرفر) ----------------
+    def _on_console(self, msg):
+        try:
+            t = msg.type
+            if t in ("error", "warning"):
+                text = (msg.text or "").replace("\n", " ")[:160]
+                self.log.info(f"[{self.insurer}] console.{t}: {text}")
+        except Exception:
+            pass
+
+    def _on_requestfailed(self, req):
+        try:
+            self.log.info(f"[{self.insurer}] requestfailed: {req.method} {req.url[:110]}")
+        except Exception:
+            pass
+
     def _on_response(self, resp):
         try:
-            if not self.waiting_report or self._report_hit is not None:
-                return
             url = resp.url or ""
-            ct = (resp.headers.get("content-type") or "").lower()
-            interesting = ("pdf" in url.lower() or "application/pdf" in ct
+            host_ok = ("nlicgulf.com" in url) or ("health.livainsurance.om" in url)
+            interesting = ("pdf" in url.lower() or "application/pdf" in
+                           (resp.headers.get("content-type") or "").lower()
                            or "viewer" in url.lower() or "servlet" in url.lower()
                            or "print" in url.lower())
-            if interesting:
+            if host_ok:
+                # سجّل فقط الطلبات الموجهة لواجهة Liva — URL + status (بلا أجسام)
+                ct = (resp.headers.get("content-type") or "").split(";")[0]
+                self.log.info(f"[{self.insurer}] net {resp.status} {url[:120]}")
+                if "ValidateUserWithCaptcha" in url:
+                    try:
+                        body = (resp.body() or b"")[:180].decode("utf-8", "ignore")
+                        self.log.info(f"[{self.insurer}] captcha-check body={body}")
+                        low = body.lower()
+                        if any(k in low for k in ('"result":true', '"success":true', '"issuccess":true')):
+                            self._captcha_verdict = "ok"
+                        elif any(k in low for k in ('"result":false', '"success":false',
+                                                   '"issuccess":false',
+                                                   'wrong captcha', 'invalid')):
+                            self._captcha_verdict = "fail"
+                    except Exception:
+                        pass
+            elif interesting:
                 self.log.info(
-                    f"[{self.insurer}] report? {(ct or 'n/a').split(';')[0]} {url[:120]}")
-            if self.backend.report_matches(url) or "application/pdf" in ct:
-                self._report_hit = {"kind": "response", "url": url, "resp": resp}
+                    f"[{self.insurer}] report? {(resp.headers.get('content-type') or 'n/a').split(';')[0]} {url[:120]}")
+            if self.backend.report_matches(url) or "application/pdf" in (resp.headers.get("content-type") or "").lower():
+                if self.waiting_report and self._report_hit is None:
+                    self.log.info(f"[{self.insurer}] report response captured")
+                    self._report_hit = {"kind": "response", "url": url, "resp": resp}
         except Exception:
             pass
 
@@ -308,6 +345,19 @@ class Worker:
         except Exception:
             return False
 
+    def trusted_click(self, handle):
+        """نقرة CDP حقيقية بالإحداثيات — تُفعّل النوافذ المنبثقة والمعالجات
+        التي ترفض النقر الاصطناعي."""
+        try:
+            box = handle.bounding_box()
+            if not box or box.get("width", 0) <= 0 or box.get("height", 0) <= 0:
+                return False
+            self.page.mouse.click(box["x"] + box["width"] / 2,
+                                  box["y"] + box["height"] / 2)
+            return True
+        except Exception:
+            return False
+
     def wait_for(self, js_pred, timeout_s=20, poll_s=0.3):
         try:
             self.page.wait_for_function(
@@ -347,11 +397,12 @@ class Worker:
         try:
             # امنع التقاط عنوان "معلّق" من طباعة سابقة — الطباعة الجديدة
             # فقط تستحق أن تُرسل (هذا هو مصدر خطأ مستند المريض السابق)
-            try:
-                self.page.evaluate(
-                    "() => { window.__MCR_OPEN_URL = ''; window.__MCR_OPEN_AT = 0; }")
-            except Exception:
-                pass
+            for frame in [self.page, *self.page.frames]:
+                try:
+                    frame.evaluate(
+                        "() => { window.__MCR_OPEN_URL = ''; window.__MCR_OPEN_AT = 0; }")
+                except Exception:
+                    pass
             while time.monotonic() < deadline:
                 if not clicked:
                     ctl = find_control()
@@ -374,18 +425,20 @@ class Worker:
             self._report_hit = None
 
     def _open_url(self):
-        try:
-            url, at = self.page.evaluate(
-                """() => [String(window.__MCR_OPEN_URL || "").trim(),
-                          Number(window.__MCR_OPEN_AT || 0)]""")
+        for frame in [self.page, *self.page.frames]:
+            try:
+                url, at = frame.evaluate(
+                    """() => [String(window.__MCR_OPEN_URL || "").trim(),
+                              Number(window.__MCR_OPEN_AT || 0)]""")
+            except Exception:
+                continue
             if not url or url in ("", "about:blank"):
-                return None
+                continue
             if (time.time() * 1000) - at > 30000:
-                return None            # طباعة قديمة — تجاهل
+                continue            # طباعة قديمة — تجاهل
             self.log.info(f"[{self.insurer}] window.open intercepted {url[:120]}")
             return url
-        except Exception:
-            return None
+        return None
 
     def _finish_hit(self, hit, discard):
         url = hit.get("url", "")

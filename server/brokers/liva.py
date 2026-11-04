@@ -396,7 +396,8 @@ class Liva(Backend):
             w.page.evaluate("() => { window.__MCR_OPEN_URL = ''; window.__MCR_OPEN_AT = 0; }")
         except Exception:
             pass
-        w.click(el)
+        if not w.trusted_click(el):
+            w.click(el)
         # انتظر الرابط المعترَض ثم انتقل إليه بنفس التبويب
         url = None
         door = time.monotonic() + 6
@@ -717,24 +718,16 @@ class Liva(Backend):
         return pool[0][0]
 
     def _click_reprint_row(self, w, claim_no):
-        """انقر رقم الـclaim داخل الصف — عادة <a> أو <button>."""
+        """انقر رقم الـclaim داخل الصف بنقرة CDP موثوقة (قد يفتح popup)."""
         try:
-            ok = w.page.evaluate(
-                """(want) => {
-                    const claimRe = new RegExp('^\\\\s*' + want.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&') + '\\\\s*$');
-                    const tr = [...document.querySelectorAll('tr')].find(tr =>
-                        claimRe.test((tr.textContent || '').trim()) ||
-                        (tr.textContent || '').includes(want));
-                    if (!tr) return false;
-                    const link = tr.querySelector('a, button, input[type=button]') ||
-                                 [...tr.children].find(td => (td.textContent || '').includes(want))
-                                    ?.querySelector('a, button');
-                    if (link) { link.click(); return true; }
-                    const cell = [...tr.children].find(td => (td.textContent || '').includes(want));
-                    if (cell) { cell.click(); return true; }
-                    return false;
-                }""", claim_no)
-            return bool(ok)
+            row = w.page.locator("tr", has_text=claim_no).first
+            if row.count() == 0:
+                row = w.page.locator(f"text={claim_no}").first
+            if row.count() == 0:
+                return False
+            link = row.locator("a, button, input[type=button]").first
+            handle = (link if link.count() > 0 else row).element_handle()
+            return bool(handle and w.trusted_click(handle))
         except Exception:
             return False
 
@@ -743,10 +736,11 @@ class Liva(Backend):
         stop_pred: دالة تُرجى إيقاف البحث مبكراً (مثلاً عند رسالة الخطأ)."""
         w._report_hit = None
         w.waiting_report = True
-        try:
-            w.page.evaluate("() => { window.__MCR_OPEN_URL = ''; window.__MCR_OPEN_AT = 0; }")
-        except Exception:
-            pass
+        for frame in [w.page, *w.page.frames]:
+            try:
+                frame.evaluate("() => { window.__MCR_OPEN_URL = ''; window.__MCR_OPEN_AT = 0; }")
+            except Exception:
+                pass
         door = time.monotonic() + timeout_s
         try:
             while time.monotonic() < door:
@@ -763,24 +757,49 @@ class Liva(Backend):
         finally:
             w.waiting_report = False
 
+    # ---------- أدوات تشخيص تفصيلية للطباعة (تبقى في السيرفر) ----------
+    def _dump_print_candidates(self, w):
+        try:
+            return w.page.evaluate("""() => {
+                const vis = el => el.getClientRects().length > 0;
+                const pick = el => ({tag: el.tagName, id: el.id || '',
+                    cls: String(el.className || '').slice(0, 60),
+                    disabled: !!el.disabled, visible: vis(el),
+                    text: (el.textContent || el.value || '').trim().slice(0, 60)});
+                return [...document.querySelectorAll('button, input[type=button], input[type=submit], a.btn, a')]
+                    .filter(el => /print/i.test((el.textContent || el.value || el.getAttribute('value') || '')))
+                    .map(pick);
+            }""") or []
+        except Exception:
+            return [{"err": "dump_failed"}]
+
     def _print_or_reprint(self, w, member, card):
         """المسار الطبيعي (Print Online Claim Form) وإلا مسار Reprint تلقائياً
         عند رسالة "Claim Form already printed"."""
-        # انتظر الزر ظاهراً ومفعّلاً — النقر على المعطّل/المخفي صامت تماماً
-        ready = w.wait_for(
-            """() => { const b = document.querySelector('button.Printmember');
-                      return !!b && b.getClientRects().length > 0 && !b.disabled; }""",
-            timeout_s=20, poll_s=0.5)
-        if not ready:
+        # لا ننتظر زمناً اعتباطياً ثم نفشل — نسجل بالضبط ما هو موجود
+        cands = self._dump_print_candidates(w)
+        w.progress("print", "run", f"candidates={json.dumps(cands, ensure_ascii=False)[:400]}")
+        btn = None
+        door = time.monotonic() + 30
+        while time.monotonic() < door:
+            el = self._find(w, JS_PRINT_BTN)
+            if el:
+                try:
+                    if el.evaluate("b => !!b && b.getClientRects().length > 0 && !b.disabled"):
+                        btn = el
+                        break
+                except Exception:
+                    pass
+            time.sleep(0.4)
+        if not btn:
+            btn2 = self._find(w, JS_PRINT_BTN)
             state = self._state_label(w)
-            info = w.page.evaluate(
-                "() => { const b = document.querySelector('button.Printmember');"
-                " return b ? ('disabled=' + b.disabled + ' visible=' + (b.getClientRects().length > 0)) : 'ABSENT'; }")
-            raise BackendError(f"print_button_not_ready | {info} | {state}")
-        btn = self._find(w, JS_PRINT_BTN)
+            info = ("found" if btn2 else "absent") + f" | {self._dump_print_candidates(w)}"
+            raise BackendError(f"print_button_not_ready | {info[:300]} | {state}")
         w._already_printed = False
-        w.progress("print", "run")
-        w.click(btn)
+        w.progress("print", "run", "clicking Print (trusted mouse)…")
+        if not w.trusted_click(btn):
+            w.click(btn)          # احتياط بالنقرة الاصطناعية
         r = self._report_hit_poll(w, 22, stop_pred=lambda _w: _w._already_printed
                                                      or self._already_printed_visible(_w))
         if r.get("ok"):
@@ -789,6 +808,15 @@ class Liva(Backend):
                     "pdf_url": r.get("url", "")}
 
         if not (w._already_printed or self._already_printed_visible(w)):
+            # سجل كامل للحالة عند الفشل — لن نخمن
+            try:
+                open_u = w.page.evaluate(
+                    "() => String(window.__MCR_OPEN_URL||'')")[:60]
+            except Exception:
+                open_u = "?"
+            w.progress("print", "error",
+                       f"not captured. url={(w.page.url or '')[-80:]} "
+                       f"open_url={open_u} diag={self._dump_print_candidates(w)}")
             raise BackendError(f"print_failed | {r.get('error')}")
         w.progress("print", "run", "already printed — auto fallback to Reprint")
         if not self._dismiss_already_printed(w):
@@ -797,7 +825,8 @@ class Liva(Backend):
         btn = self._find_reprint_button(w)
         if not btn:
             raise BackendError("reprint_button_not_found")
-        w.click(btn)
+        if not w.trusted_click(btn):
+            w.click(btn)
         w.progress("print", "run", "reprint table opened")
         rows = self._wait_reprint_rows(w, timeout_s=15)
         if not rows:
@@ -975,17 +1004,23 @@ class Liva(Backend):
                 self._open_provider(w)
                 continue
             if state == "provider-login":
-                # أثناء الانتقال بعد إرسال تسجيل الدخول يبقى حقل الكابتشا
-                # في DOM لحظات — لا نطلب كابتشا ثانية؛ ننتظر التنقل الفعلي
-                if w._provider_submit_at and (time.time() - w._provider_submit_at) < 25:
-                    ok = w.wait_for("() => !document.querySelector('#CaptchaInputText')",
-                                    timeout_s=15, poll_s=0.5)
-                    if ok:
-                        continue
-                    # ما زلنا داخل النموذج بعد 15 ث — إما كابتشا خاطئة (ظهر
-                    # alert) أو خادم بطيء — نرفع كابتشا جديدة بصورة محدّثة
+                # لا مهلة اعتباطية: ننتظر حدثاً حقيقياً — مغادرة النموذج
+                # (نجاح) أو بقاء النموذج (كابتشا خاطئة ستُظهر alert يُسجَّل
+                # الآن في السجل). نكمل فقط حين يختفي حقل الكابتشا.
+                recent = (w._provider_submit_at and
+                          (time.time() - w._provider_submit_at) < 120)
+                if recent:
+                    door = time.monotonic() + 75
+                    while time.monotonic() < door:
+                        if not w.q1("#CaptchaInputText"):
+                            break
+                        if w._captcha_verdict == "fail" or w._wrong_captcha:
+                            break
+                        time.sleep(0.4)
+                    if not w.q1("#CaptchaInputText"):
+                        continue          # دخل المزوّد — أكمل التدفق
                     w.progress("login", "run",
-                               "captcha rejected or portal slow — fresh captcha issued")
+                               "captcha rejected — fresh captcha issued")
                 raise self._captcha_needs_human(w) or BackendError("captcha_unavailable")
             if state == "portal-home":
                 self._open_member_details(w)
