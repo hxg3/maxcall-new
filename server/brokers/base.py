@@ -138,6 +138,7 @@ class Worker:
         self.ctx = self.pw.chromium.launch_persistent_context(
             str(profile),
             headless=True,
+            accept_downloads=True,
             args=[
                 "--disable-gpu",
                 "--disable-dev-shm-usage",
@@ -146,12 +147,26 @@ class Worker:
                 "--disable-features=Translate,BackForwardCache",
             ],
         )
+        # اعترض window.open على كل الإطارات قبل أي سكربت موقعي —
+        # ADF تطلق الطباعة عبر window.open وتنقذ الوسيطة؛ نعترضها
+        # بدل الاعتماد على سلوك النافذة (لا تظهر فعلاً في headless)
+        self.ctx.add_init_script("""
+        (() => {
+          if (window.__mcrOpenHook) return;
+          window.__mcrOpenHook = true;
+          window.open = function (u) {
+            try { if (u) window.__MCR_OPEN_URL = String(u); } catch (e) {}
+            return { focus() {}, close() {}, self: window,
+                     location: { href: String(u || '') } };
+          };
+        })();
+        """)
         self.page = self.ctx.pages[0] if self.ctx.pages else self.ctx.new_page()
         self.page.set_default_timeout(30000)
         self._hook(self.page)
         self.ctx.on("page", self._on_popup)
         self.needs_context = False
-        self.log(f"[{self.insurer}] context ready profile={profile}")
+        self.log.info(f"[{self.insurer}] context ready profile={profile}")
 
     def _on_popup(self, page):
         try:
@@ -160,24 +175,61 @@ class Worker:
                 return
             page.set_default_timeout(30000)
             self._hook(page)
-            self.log(f"[{self.insurer}] popup attached {page.url[:80]}")
+            self.log.info(f"[{self.insurer}] popup attached {page.url[:80]}")
         except Exception:
             pass
 
     def _hook(self, page):
         page.on("response", self._on_response)
+        page.on("download", self._on_download)
+
+    def _on_download(self, dl):
+        try:
+            if not self.waiting_report or self._report_hit is not None:
+                return
+            url = dl.url or ""
+            if self.backend.report_matches(url):
+                self._report_hit = {"kind": "download", "url": url, "dl": dl}
+                self.log.info(f"[{self.insurer}] report download {url[:120]}")
+            else:
+                self.log.info(f"[{self.insurer}] download (ignored) {url[:110]}")
+        except Exception:
+            pass
 
     def _on_response(self, resp):
         try:
             if not self.waiting_report or self._report_hit is not None:
                 return
             url = resp.url or ""
-            if self.backend.report_matches(url):
-                self._report_hit = resp
+            ct = (resp.headers.get("content-type") or "").lower()
+            interesting = ("pdf" in url.lower() or "application/pdf" in ct
+                           or "viewer" in url.lower() or "servlet" in url.lower()
+                           or "print" in url.lower())
+            if interesting:
+                self.log.info(
+                    f"[{self.insurer}] report? {(ct or 'n/a').split(';')[0]} {url[:120]}")
+            if self.backend.report_matches(url) or "application/pdf" in ct:
+                self._report_hit = {"kind": "response", "url": url, "resp": resp}
         except Exception:
             pass
 
     # ---------------- مساعدات قياس (منقولة حرفياً من الإضافة) ----------------
+    @staticmethod
+    def _report_bytes(hit):
+        """أكمل التقاط التقرير لتصبير: نوع response (body مباشرة) أو
+        نوع download (المسار المؤقت بعد الاكتمال)."""
+        try:
+            if hit.get("kind") == "response":
+                return hit["resp"].body()
+            dl = hit.get("dl")
+            if not dl:
+                return b""
+            path = dl.path()
+            from pathlib import Path as _P
+            return _P(path).read_bytes() if path else b""
+        except Exception:
+            return b""
+
     def q1(self, sel):
         try:
             return self.page.query_selector(sel)
@@ -237,13 +289,14 @@ class Worker:
         job = self.current_job
         if job:
             job.add_stage(step, status, detail)
-        self.log(f"[{self.insurer}] {step}:{status} {detail}".strip())
+        self.log.info(f"[{self.insurer}] {step}:{status} {detail}".strip())
 
     def capture_report(self, find_control, timeout_s=25, discard=False):
         """انقر زر الطباعة مرة (مع إعادة إيجاده إن أعاد ADF بناء الصف،
-        دون نقرات إضافية أثناء انتظار الاستجابة) ثم انتظر أول استجابة
-        تطابق نمط التقرير. discard=True: الاستجابة تُهمَل (مزامنة جلسة
-        MedNet المُثبتة) والبوب-أب يُغلق."""
+        دون نقرات إضافية أثناء انتظار الاستجابة) ثم التقط أي:
+        (أ) window.open — نفترضها ونطلبها بالجلسات أنفسها؛
+        (ب) download — تُقرأ من المسار المؤقت؛
+        (ج) HTTP response — body مباشرة. discard=True: تُهمَل وبوب-أب يُغلق."""
         import time
 
         deadline = time.monotonic() + timeout_s
@@ -255,13 +308,16 @@ class Worker:
             while time.monotonic() < deadline:
                 if not clicked:
                     ctl = find_control()
-                    if ctl and not ctl.is_detached() and self.click(ctl):
+                    if ctl and self.click(ctl):
                         clicked = True
                 if self._report_hit is not None:
-                    resp = self._report_hit
-                    if discard:
-                        return {"ok": True, "url": resp.url, "bytes": None}
-                    return {"ok": True, "url": resp.url, "bytes": resp.body()}
+                    hit = self._report_hit
+                    return self._finish_hit(hit, discard)
+                # (أ) interception side: window.open argument from the page
+                url = self._open_url()
+                if url:
+                    self._report_hit = {"kind": "url", "url": url}
+                    return self._finish_hit(self._report_hit, discard)
                 time.sleep(0.25)
             return {"ok": False,
                     "error": "print_control_missing" if not clicked else "report_not_captured"}
@@ -269,3 +325,43 @@ class Worker:
             self.waiting_report = False
             self.suppress_popups = False
             self._report_hit = None
+
+    def _open_url(self):
+        try:
+            url = self.page.evaluate("() => (window.__MCR_OPEN_URL || \"\").trim()")
+            if url and url not in ("", "about:blank"):
+                self.log.info(f"[{self.insurer}] window.open intercepted {url[:120]}")
+                return url
+        except Exception:
+            pass
+        return None
+
+    def _finish_hit(self, hit, discard):
+        url = hit.get("url", "")
+        if discard:
+            return {"ok": True, "url": url, "bytes": None}
+        if hit.get("kind") == "url":
+            data = self._fetch_pdf(url)
+        else:
+            data = self._report_bytes(hit)
+        return {"ok": True, "url": url, "bytes": data}
+
+    def _fetch_pdf(self, url):
+        """جلب الرابط المعترض بنفس الكوكيز (جلسة واحدة) — لا نافذة، لا popup."""
+        try:
+            resp = self.ctx.request.get(url, timeout=60000)
+            ct = (resp.headers.get("content-type") or "").lower()
+            if resp.status not in (200,):
+                self.log.info(f"[{self.insurer}] pdf fetch http_{resp.status} ct={ct}")
+                if resp.status in (405, 302, 301):
+                    resp = self.ctx.request.get(url, timeout=60000,
+                                                headers={"Accept": "application/pdf,*/*"},
+                                                max_redirects=5)
+            ok = 200 <= int(resp.status or 0) < 300
+            size = len(resp.body() or b"")
+            self.log.info(
+                f"[{self.insurer}] pdf fetch http_{resp.status} ct={(resp.headers.get('content-type') or '').split(';')[0]} size={size}")
+            return resp.body() if ok else b""
+        except Exception as e:
+            self.log.info(f"[{self.insurer}] pdf fetch failed {str(e)[:120]}")
+            return b""

@@ -34,6 +34,7 @@ from brokers.base import (
     BackendError, NeedsCaptcha, last_good_member, STATE_DIR,
 )
 from brokers.mednet import MedNet
+from brokers.nextcare import NextCare
 
 try:
     from playwright.sync_api import sync_playwright
@@ -142,7 +143,9 @@ class InsurerWorker(threading.Thread):
             self.fail(job, str(e) or "backend_error")
         except Exception as e:
             self.worker.needs_context = True
-            self.fail(job, "unexpected_error", backend_detail=str(e)[:220])
+            import traceback
+            self.fail(job, "unexpected_error",
+                      backend_detail=f"{type(e).__name__}: {e}\n{traceback.format_exc()[-600:]}")
         finally:
             self.worker.current_job = None
             self.running_job_id = None
@@ -208,7 +211,9 @@ class InsurerWorker(threading.Thread):
             self.fail(job, str(e) or "backend_error")
         except Exception as e:
             self.worker.needs_context = True
-            self.fail(job, "unexpected_error", backend_detail=str(e)[:220])
+            import traceback
+            self.fail(job, "unexpected_error",
+                      backend_detail=f"{type(e).__name__}: {e}\n{traceback.format_exc()[-600:]}")
 
     def on_captcha_answer(self, token, text):
         with self.cap_lock:
@@ -308,6 +313,7 @@ def _job_view(j, include_pdf=False):
     out = {
         "id": j["id"], "insurer": j["insurer"], "kind": j.get("kind", "doc"),
         "state": j["state"], "error": j.get("error", ""),
+        "backendDetail": j.get("backendDetail", ""),
         "stages": j.get("stages", [])[-12:],
         "queuePos": 0, "result": j.get("result") or {},
     }

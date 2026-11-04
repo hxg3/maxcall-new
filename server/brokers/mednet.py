@@ -164,15 +164,27 @@ class MedNet(Backend):
         except Exception:
             return None
 
+    def _safe_eval(self, w, js):
+        try:
+            return w.page.evaluate(js)
+        except Exception:
+            return None
+
     def _adf_idle(self, w, timeout_s=15):
-        """نفس adfIdle: انزوال درع ADF (نهاية جولة الطلب) ثم 300ms نجاعة."""
+        """نفس adfIdle: انزوال درع ADF (نهاية جولة الطلب) ثم 300ms نجاعة.
+        تقييمات أثناء التنقل تُتجاهل (تُعاد المحاولة لاحقاً)."""
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
-            if not w.page.evaluate(JS_MASKING):
+            try:
+                masked = w.page.evaluate(JS_MASKING)
+            except Exception:
+                time.sleep(0.2)
+                continue
+            if not masked:
                 time.sleep(0.3)
                 return True
             time.sleep(0.2)
-        return not w.page.evaluate(JS_MASKING)
+        return True
 
     def _member_value(self, w):
         inp = self._find(w, JS_MEMBER_INPUT)
@@ -197,9 +209,23 @@ class MedNet(Backend):
         if not submit:
             w.progress("login", "error", "submit_not_found")
             raise BackendError("submit_not_found")
-        w.click(submit)
+        # حيث يبدأ النقر تنقل الصفحة — انتظرها (لا error إن كان تحديثاً جزئياً)
+        try:
+            with w.page.expect_navigation(wait_until="domcontentloaded",
+                                          timeout=30000):
+                w.click(submit)
+        except Exception:
+            pass
         self._adf_idle(w, 25)
-        if w.page.evaluate(JS_IS_LOGIN):
+        # لا تحكم قبل استقرار التنفيذ (تقييمات أثناء التنقل تفشل)
+        login_gone = False
+        for _ in range(30):
+            res = self._safe_eval(w, JS_IS_LOGIN)
+            if res is False:
+                login_gone = True
+                break
+            time.sleep(0.5)
+        if not login_gone:
             w.progress("login", "error", "login_rejected")
             raise BackendError("login_failed")
         w.progress("login", "ok")
@@ -211,18 +237,19 @@ class MedNet(Backend):
         door = time.monotonic() + timeout_s
         round_seen = False
         while time.monotonic() < door:
-            if w.page.evaluate(JS_ELIG_NUMBER):
+            if self._safe_eval(w, JS_ELIG_NUMBER):
                 return "ok"
-            notice = w.page.evaluate(JS_INVALID_NOTICE)
+            notice = self._safe_eval(w, JS_INVALID_NOTICE)
             if notice and notice != prev_notice:
                 return "invalid"
-            if w.page.evaluate(JS_MASKING):
+            masking = self._safe_eval(w, JS_MASKING)
+            if masking:
                 round_seen = True
             elif round_seen:
                 time.sleep(0.3)
-                return "ok" if w.page.evaluate(JS_ELIG_NUMBER) else "invalid"
+                return "ok" if self._safe_eval(w, JS_ELIG_NUMBER) else "invalid"
             time.sleep(0.25)
-        return "ok" if w.page.evaluate(JS_ELIG_NUMBER) else "timeout"
+        return "ok" if self._safe_eval(w, JS_ELIG_NUMBER) else "timeout"
 
     def state(self, w):
         try:
@@ -254,21 +281,29 @@ class MedNet(Backend):
         # الوصول: الجلسة تبدأ صفحة الدخول إن كنا الإخلاص أول مرة
         if "mednetapprovals.com" not in (w.page.url or ""):
             w.progress("navigate", "run", f"goto {creds['url'][:60]}")
-            w.page.goto(creds["url"], wait_until="domcontentloaded", timeout=45)
+            w.page.goto(creds["url"], wait_until="domcontentloaded", timeout=45000)
 
         # 1) تسجيل الدخول
-        if w.page.evaluate(JS_IS_LOGIN):
+        if self._safe_eval(w, JS_IS_LOGIN):
             self.do_login(w, creds)
 
-        # 2) شاشة البحث: موجودة فعلاً، أو انتقل إليها (نفس ترتيب الأصل)
+        # 2) شاشة البحث — مع إعادة محاولة للملاحة أثناء ظهور اللوحة (ADF قد يشحن بتراخ)
         inp, val = self._member_value(w)
         if not inp:
-            nav = self._find(w, JS_NAV_LINK)
-            if nav:
-                w.progress("navigate", "run", "click Member Eligibility")
-                w.click(nav)
-            inp = self._wait_find(
-                w, JS_MEMBER_INPUT, min(25, max(3, w.remaining(kind))))
+            nav_clicked = False
+            door = time.monotonic() + min(30, max(5, w.remaining(kind)))
+            while time.monotonic() < door and not inp:
+                inp = self._find(w, JS_MEMBER_INPUT)
+                if inp:
+                    break
+                if not nav_clicked:
+                    nav = self._find(w, JS_NAV_LINK)
+                    if nav:
+                        w.progress("navigate", "run", "click Member Eligibility")
+                        if w.click(nav):
+                            nav_clicked = True
+                            time.sleep(2)
+                time.sleep(0.4)
         if not inp:
             raise BackendError(f"member_screen_not_found | {self.state(w)}")
 
@@ -286,7 +321,7 @@ class MedNet(Backend):
 
         # 5) دورة التحقق + إعادة المزامنة (طباعة مهملة) — MAX_ATTEMPTS=8
         MAX_ATTEMPTS = 8
-        notice = w.page.evaluate(JS_INVALID_NOTICE)
+        notice = self._safe_eval(w, JS_INVALID_NOTICE)
         elig_no = None
         for attempt in range(1, MAX_ATTEMPTS + 1):
             field, fval = self._member_value(w)
@@ -306,12 +341,12 @@ class MedNet(Backend):
                 timeout_s=min(45, max(5, w.remaining(kind))),
                 prev_notice=notice,
             )
-            notice = w.page.evaluate(JS_INVALID_NOTICE)
+            notice = self._safe_eval(w, JS_INVALID_NOTICE)
             w.progress("eligibility",
                        "ok" if verdict == "ok" else "run",
                        f"verdict={verdict} attempt={attempt}")
             if verdict == "ok":
-                elig_no = w.page.evaluate(JS_ELIG_NUMBER)
+                elig_no = self._safe_eval(w, JS_ELIG_NUMBER)
                 break
             if verdict == "timeout":
                 break
@@ -319,7 +354,7 @@ class MedNet(Backend):
             w.progress("eligibility", "run", "reset=print_discard")
             w.capture_report(lambda: self._find(w, JS_PRINT_CTL),
                              timeout_s=12, discard=True)
-            notice = w.page.evaluate(JS_INVALID_NOTICE)
+            notice = self._safe_eval(w, JS_INVALID_NOTICE)
 
         if not elig_no:
             raise BackendError(f"eligibility_result_missing | {self.state(w)}")

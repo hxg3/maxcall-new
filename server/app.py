@@ -15,8 +15,10 @@ import csv
 import io as _io
 import wave as _wave
 import contextlib as _ctx
+
+import his_broker
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_file, send_from_directory, abort
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -77,6 +79,124 @@ def _client_ip():
     return request.remote_addr or "unknown"
 
 
+# ---------------------------------------------------------------------------
+# feedback tables (maxcall_dashboard) — idempotent, safe to re-run
+# ---------------------------------------------------------------------------
+
+_FEEDBACK_TABLES_SQL = [
+    """CREATE TABLE IF NOT EXISTS maxcall_dashboard.feedback_tasks (
+      id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      phone         VARCHAR(20)  NOT NULL,
+      pat_id        VARCHAR(30)  NULL,
+      visit_doc_no  VARCHAR(30)  NULL,
+      visit_date    DATE         NULL,
+      patient_name  VARCHAR(150) NULL,
+      doctor        VARCHAR(120) NULL,
+      payer         VARCHAR(120) NULL,
+      employer      VARCHAR(120) NULL,
+      service       VARCHAR(150) NULL,
+      visit_amount  DECIMAL(12,3) NULL,
+      pat_age        VARCHAR(12) NULL,
+      pat_sex        VARCHAR(4)  NULL,
+      pat_nationality VARCHAR(64) NULL,
+      pat_payer_code VARCHAR(16) NULL,
+      source        VARCHAR(16)  NOT NULL DEFAULT 'HIS',
+      rule_tag      VARCHAR(48)  NULL,
+      status        VARCHAR(24)  NOT NULL DEFAULT 'pending',
+      priority      TINYINT      NOT NULL DEFAULT 2,
+      attempts      INT          NOT NULL DEFAULT 0,
+      max_attempts  INT          NOT NULL DEFAULT 3,
+      next_attempt_at DATETIME   NULL,
+      assigned_to   VARCHAR(64)  NULL,
+      locked_at     DATETIME     NULL,
+      outcome       VARCHAR(24)  NULL,
+      created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uq_task_identity (source, visit_doc_no, phone),
+      KEY idx_status_next (status, next_attempt_at),
+      KEY idx_phone (phone),
+      KEY idx_pat (pat_id),
+      KEY idx_visit_date (visit_date)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
+    """CREATE TABLE IF NOT EXISTS maxcall_dashboard.feedback_responses (
+      id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      task_id       BIGINT UNSIGNED NOT NULL,
+      phone         VARCHAR(20) NOT NULL,
+      agent         VARCHAR(64) NOT NULL,
+      outcome       VARCHAR(24) NOT NULL,
+      score         TINYINT     NULL,
+      categories    VARCHAR(255) NULL,
+      comment       TEXT        NULL,
+      duration_sec  INT         NULL,
+      feedback_at   DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      KEY idx_task (task_id),
+      KEY idx_agent (agent),
+      KEY idx_feedback_at (feedback_at),
+      KEY idx_outcome (outcome)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
+    """CREATE TABLE IF NOT EXISTS maxcall_dashboard.feedback_config (
+      cfg_key   VARCHAR(64) NOT NULL,
+      cfg_value VARCHAR(255) NOT NULL,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (cfg_key)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
+]
+
+
+def _ensure_feedback_tables():
+    """Create feedback tables if missing. Safe to call on every startup."""
+    for sql in _FEEDBACK_TABLES_SQL:
+        db(sql, database=DASH_DB, fetch=False)
+
+    # موجودات قد أُنشئت قبل إضافة أعمدة التغذية السريعة — أضفها إن غابت
+    cols = {r["column_name"] for r in db(
+        "SELECT column_name AS column_name FROM information_schema.columns "
+        "WHERE table_schema=%s AND table_name='feedback_tasks'", (DASH_DB,), database=DASH_DB,
+    ) or []}
+    wanted = {
+        "pat_age": "VARCHAR(12) NULL",
+        "pat_sex": "VARCHAR(4) NULL",
+        "pat_nationality": "VARCHAR(64) NULL",
+        "pat_payer_code": "VARCHAR(16) NULL",
+    }
+    for col, ddl in wanted.items():
+        if col not in cols:
+            db(f"ALTER TABLE maxcall_dashboard.feedback_tasks ADD COLUMN {col} {ddl}",
+               database=DASH_DB, fetch=False)
+
+    #seed defaults if empty
+    defaults = {
+        "hours_back": "2",            # ساعاتrettrospective من لحظة إنشاء المهمة
+        "max_attempts": "3",
+        "backoff_days": "1,3,7",      # مهلة إعادة المحاولة بعد "لم يجب" (بالأيام)
+        "min_amount": "0",
+        "payer_filter": "",
+        "doctor_filter": "",
+        "exclude_repeat_visits": "0",
+        "repeat_visit_threshold": "7",
+        "enabled": "1",
+    }
+    for key, val in defaults.items():
+        existing = db(
+            "SELECT cfg_key FROM maxcall_dashboard.feedback_config WHERE cfg_key=%s",
+            (key,), database=DASH_DB,
+        )
+        if not existing:
+            db(
+                "INSERT INTO maxcall_dashboard.feedback_config (cfg_key, cfg_value) VALUES (%s, %s)",
+                (key, val), database=DASH_DB, fetch=False,
+            )
+
+
+def _cfg(key):
+    """قراءة قيمة إعداد من جدول feedback_config."""
+    r = db("SELECT cfg_value FROM maxcall_dashboard.feedback_config WHERE cfg_key=%s",
+           (key,), database=DASH_DB)
+    return r[0]["cfg_value"] if r else None
+
+
 def require_login(f):
     @wraps(f)
     def w(*a, **kw):
@@ -123,6 +243,32 @@ def _session_user(u):
         "role": u.get("role"),
         "display_name": u.get("display_name"),
     }
+
+
+def _verify_agent_credentials(username, password):
+    """Shared credential check: a MaxCall extension device or a dashboard user.
+
+    Used by /api/agent/login and by the HIS API (Basic auth) — the popup client
+    holds the same credentials it proved at agent login, so a separate login
+    mechanism is never invented here.
+    """
+    username = (username or "").strip()[:64]
+    password = (password or "").strip()[:128]
+    if not username or not password:
+        return None
+    r = db(
+        "SELECT e.extension, e.name, d.secret FROM ombutel.ombu_extensions e "
+        "JOIN ombutel.ombu_devices d ON d.extension_id=e.extension_id "
+        "WHERE (e.name=%s OR e.extension=%s) AND d.secret=%s",
+        (username, username, password),
+        database="ombutel",
+    )
+    if r:
+        return {"kind": "agent", "extension": str(r[0]["extension"]), "name": r[0]["name"]}
+    r2 = _verify_dashboard_user(username, password)
+    if r2:
+        return {"kind": "dashboard", "username": r2.get("username"), "name": r2.get("display_name")}
+    return None
 
 
 def _like_esc(s):
@@ -209,22 +355,15 @@ def agent_login():
     pw = str(data.get("password", "")).strip()[:128]
     if not u or not pw:
         return jsonify({"error": "Invalid credentials"}), 401
-    r = db(
-        "SELECT e.extension, e.name, d.secret FROM ombutel.ombu_extensions e "
-        "JOIN ombutel.ombu_devices d ON d.extension_id=e.extension_id "
-        "WHERE (e.name=%s OR e.extension=%s) AND d.secret=%s",
-        (u, u, pw),
-        database="ombutel",
-    )
-    if not r:
-        r2 = _verify_dashboard_user(u, pw)
-        if r2:
-            host = request.headers.get("Host", "maxcall.local").split(":")[0]
-            ext = r2["username"] if (r2.get("username") or "").isdigit() else "101"
-            return jsonify({"ok": True, "extension": ext, "name": r2.get("display_name"), "sip_server": host})
+    user = _verify_agent_credentials(u, pw)
+    if not user:
         return jsonify({"error": "Invalid credentials"}), 401
     host = request.headers.get("Host", "maxcall.local").split(":")[0]
-    return jsonify({"ok": True, "extension": r[0]["extension"], "name": r[0]["name"], "sip_server": host})
+    if user["kind"] == "agent":
+        return jsonify({"ok": True, "extension": user["extension"], "name": user["name"], "sip_server": host})
+    ext = user.get("username") if (user.get("username") or "").isdigit() else "101"
+    name = user.get("name")
+    return jsonify({"ok": True, "extension": ext, "name": name if isinstance(name, str) else None, "sip_server": host})
 
 
 @app.route("/logout")
@@ -681,6 +820,83 @@ def get_caller(phone):
         c.setdefault("relation", "patient")
         return jsonify(c)
     return jsonify({"phone": phone, "name": "", "notes": ""})
+
+
+def _require_his_api(f):
+    """حماية مسارات HIS: جلسة المستخدم (dashboard) أو بيانات الموظف (Basic auth).
+
+    نفس فحص require_login — لا فحص موازي — ولا نُرسل WWW-Authenticate حتى لا
+    يظهر أي نافذة كلمة مرور في عميل C++ (يرسل الترويسة بنفسه قبل الطلب).
+    """
+    @wraps(f)
+    def w(*a, **kw):
+        if "user" in session:
+            return f(*a, **kw)
+        auth = request.authorization
+        if (auth and auth.type == "basic"
+                and _verify_agent_credentials(auth.username or "", auth.password or "")):
+            return f(*a, **kw)
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+    return w
+
+
+@app.route("/api/his/caller/<phone>")
+@_require_his_api
+def his_caller(phone):
+    """Patient card from the hospital WebHIS — read-only, fixed operations only."""
+    if _hit("his:" + _client_ip(), 30, 60):
+        return jsonify({"ok": False, "reason": "rate_limited"}), 429
+    by = (request.args.get("by") or "phone").strip().lower()
+    if by not in ("phone", "name", "id"):
+        by = "phone"
+    q = (request.args.get("q") or "").strip()
+    pat_id = (request.args.get("pat_id") or "").strip()
+    if not re.fullmatch(r"\d{1,10}", pat_id):
+        pat_id = None
+    return jsonify(his_broker.caller_response(phone, by=by, q=q, pat_id=pat_id))
+
+
+@app.route("/api/his/patient/<pat_id>")
+@_require_his_api
+def his_patient(pat_id):
+    """بطاقة تأمين مريض واحدة لموظف الاستقبال (Chrome extension) — قراءة فقط.
+
+    نفس حماية /api/his/caller بالضبط (جلسة أو Basic auth لموظف) ونفس
+    rate-limit، لكن الإدخال رقم ملف المريض مباشرة لأن الـextension يعرفه
+    من صفحة التسجيل. الاستجابة allow-list محددة من his_broker.insurance_card.
+    """
+    if _hit("his:" + _client_ip(), 30, 60):
+        return jsonify({"ok": False, "reason": "rate_limited"}), 429
+    if not re.fullmatch(r"\d{1,10}", pat_id or ""):
+        return jsonify({"ok": False, "reason": "bad_pat_id"}), 400
+    return jsonify(his_broker.insurance_card(pat_id))
+
+
+# ---------------------------------------------------------------------------
+# Chrome extension self-hosted updates (CRX + update manifest)
+# ---------------------------------------------------------------------------
+
+EXT_MIRROR = pathlib.Path("/opt/maxcall-dashboard/ext-mirror")
+
+
+@app.route("/ext/updates.xml")
+def ext_updates_xml():
+    return send_from_directory(EXT_MIRROR, "updates.xml", mimetype="text/xml")
+
+
+@app.route("/ext/<path:fname>")
+def ext_file(fname):
+    # لا جلب أي شيء خارج المجلد المخصص
+    if "/" in fname or ".." in fname or not re.fullmatch(r"[\w.\-]+", fname):
+        abort(404)
+    return send_from_directory(EXT_MIRROR, fname)
+
+
+@app.route("/ext/forms/<path:fname>")
+def ext_form(fname):
+    if "/" in fname or ".." in fname or not re.fullmatch(r"[\w.\-]+", fname):
+        abort(404)
+    return send_from_directory(EXT_MIRROR / "forms", fname)
 
 
 @app.route("/api/callers", methods=["POST"])
@@ -1551,5 +1767,556 @@ def update_mirror(name):
     )
 
 
+# ===========================================================================
+# FEEDBACK QUEUE API — MaxCall "تاسك" (Circular Feedback Tasks)
+# ===========================================================================
+
+_PHONE_RE_STRICT = re.compile(r"^\d{7,15}$")
+
+
+def _hydrate_people(rows, cap=8):
+    """إثراء الصفوف ببيانات المريض (العمر/الجنس/الجنسية/رمز الدافع) عند غيابها.
+
+    محدودة بـ `cap` مريض لكل نداء كي لا تثقّل أول جولة؛ ما تبقى يُكتمل تلقائياً
+    في الطلبات التالية — الحقول تُخزَّن في DB فلا يتكرر نداء HIS لنفس المريض.
+    """
+    try:
+        todo = [r for r in rows if not r.get("pat_age") and r.get("pat_id")][:max(0, int(cap))]
+        for r in todo:
+            s = his_broker.patient_summary(r.get("pat_id"))
+            if not s:
+                continue
+            db(
+                "UPDATE maxcall_dashboard.feedback_tasks SET pat_age=%s, pat_sex=%s, "
+                "pat_nationality=%s, pat_payer_code=%s WHERE id=%s",
+                (s.get("age") or None, s.get("sex") or None, s.get("nationality") or None,
+                 s.get("payer_code") or None, r["id"]), database=DASH_DB, fetch=False,
+            )
+            r.update({"pat_age": s.get("age"), "pat_sex": s.get("sex"),
+                      "pat_nationality": s.get("nationality"), "pat_payer_code": s.get("payer_code")})
+    except Exception:
+        pass
+
+
+@app.route("/api/feedback/queue", methods=["GET"])
+@_require_his_api
+def feedback_queue():
+    """قائمة المهام النشطة المستحقة للموظف (pending + no_answer المستحقة الآن)."""
+    if _hit("feedback:queue:" + _client_ip(), 60, 60):
+        return jsonify({"ok": False, "error": "rate_limited"}), 429
+    try:
+        limit = max(1, min(int(request.args.get("limit", 50)), 200))
+    except Exception:
+        limit = 50
+    status = request.args.get("status", "")
+    doctor = request.args.get("doctor", "").strip()
+    payer = request.args.get("payer", "").strip()
+
+    # المهام المستحقة: pending أو no_answer — وكلاهما لا يظهر قبل موعده
+    # (next_attempt_at)، فالمدة الثابتة بعد الزيارة مُطبَّقة فعلاً.
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    scheduled = request.args.get("include_scheduled", "").strip().lower() in ("1", "true", "yes")
+    if scheduled:
+        # معاينة ما هو مجدول لاحقاً (للمشرفين) — تُستعمل في فحص CI الآلي.
+        where = ["status IN ('pending','no_answer')"]
+        params = []
+    else:
+        where = ["status IN ('pending','no_answer') AND next_attempt_at IS NOT NULL AND next_attempt_at<=%s"]
+        params = [now]
+    if status:
+        where.append("status=%s"); params.append(status)
+    if doctor:
+        where.append("doctor LIKE %s"); params.append(f"%{doctor}%")
+    if payer:
+        where.append("payer LIKE %s"); params.append(f"%{payer}%")
+    # المهام المقفلة لأكثر من 15 دقيقة تعود pending تلقائياً
+    db(
+        "UPDATE maxcall_dashboard.feedback_tasks SET status='pending', assigned_to=NULL, locked_at=NULL "
+        "WHERE status='in_progress' AND locked_at IS NOT NULL AND locked_at<DATE_SUB(%s, INTERVAL 15 MINUTE)",
+        (now,), database=DASH_DB, fetch=False,
+    )
+    rows = db(
+        f"SELECT id, phone, pat_id, visit_doc_no, visit_date, patient_name, doctor, payer, employer, "
+        f"visit_amount, source, rule_tag, status, priority, attempts, max_attempts, next_attempt_at, "
+        f"assigned_to, locked_at, outcome, created_at, updated_at, "
+        f"pat_age, pat_sex, pat_nationality, pat_payer_code "
+        f"FROM maxcall_dashboard.feedback_tasks WHERE {' AND '.join(where)} "
+        f"ORDER BY priority ASC, next_attempt_at ASC, created_at ASC LIMIT %s",
+        tuple(params) + (limit,), database=DASH_DB,
+    ) or []
+    # تنسيق التواريخ للنقل عبر JSON + تنظيف أسماء قائد من إصدار قديم + إثراء
+    for r in rows:
+        r["patient_name"] = his_broker.norm_name(r.get("patient_name"))
+        for k in ("visit_date", "next_attempt_at", "created_at", "updated_at"):
+            v = r.get(k)
+            if hasattr(v, "isoformat"):
+                r[k] = v.isoformat()
+            elif v is not None:
+                r[k] = str(v)
+    _hydrate_people(rows)
+    return jsonify({"ok": True, "data": rows, "count": len(rows), "v": 1})
+
+
+@app.route("/api/feedback/my", methods=["GET"])
+@_require_his_api
+def feedback_my():
+    """مهام الموظف قيد العمل (in_progress المسندة إليه) — بعد الاتصال قبل تسجيل النتيجة."""
+    if _hit("feedback:my:" + _client_ip(), 60, 60):
+        return jsonify({"ok": False, "error": "rate_limited"}), 429
+    auth = request.authorization
+    agent = (auth.username if (auth and auth.type == "basic") else "") or ""
+    if not agent:
+        return jsonify({"ok": True, "data": [], "count": 0, "v": 1})
+    rows = db(
+        f"SELECT id, phone, pat_id, visit_doc_no, visit_date, patient_name, doctor, payer, employer, "
+        f"visit_amount, source, rule_tag, status, priority, attempts, max_attempts, next_attempt_at, "
+        f"assigned_to, locked_at, outcome, created_at, updated_at, "
+        f"pat_age, pat_sex, pat_nationality, pat_payer_code "
+        f"FROM maxcall_dashboard.feedback_tasks WHERE status='in_progress' AND assigned_to=%s "
+        f"ORDER BY locked_at DESC LIMIT 100",
+        (agent,), database=DASH_DB,
+    ) or []
+    for r in rows:
+        r["patient_name"] = his_broker.norm_name(r.get("patient_name"))
+        for k in ("visit_date", "next_attempt_at", "created_at", "updated_at", "locked_at"):
+            v = r.get(k)
+            if hasattr(v, "isoformat"):
+                r[k] = v.isoformat()
+            elif v is not None:
+                r[k] = str(v)
+    _hydrate_people(rows)
+    return jsonify({"ok": True, "data": rows, "count": len(rows), "v": 1})
+
+
+@app.route("/api/feedback/task/<int:task_id>/claim", methods=["POST"])
+@_require_his_api
+def feedback_claim(task_id):
+    """الموظف يدّعي مهمة ⇒ فيبروغress، يُسنَد إليه، ويُغلق القفل 15 دقيقة."""
+    if _hit("feedback:claim:" + _client_ip(), 60, 60):
+        return jsonify({"ok": False, "error": "rate_limited"}), 429
+    auth = request.authorization
+    agent = (auth.username if (auth and auth.type == "basic") else "") or "unknown"
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # فقط المهام التي حان موعدها يمكن ادعاءها.
+    # ملاحظة: db() مع fetch=False يُرجع None دائماً (نجاح أو خطأ)، فالتحقق
+    # يكون بإعادة قراءة الصف ومقارنة القفل — لا بقيمة الإرجاع.
+    db(
+        "UPDATE maxcall_dashboard.feedback_tasks SET status='in_progress', assigned_to=%s, locked_at=%s "
+        "WHERE id=%s AND status IN ('pending','no_answer') "
+        "AND (next_attempt_at IS NULL OR next_attempt_at<=%s)",
+        (agent, now, task_id, now), database=DASH_DB, fetch=False,
+    )
+    row = db("SELECT id,status,assigned_to,locked_at FROM maxcall_dashboard.feedback_tasks WHERE id=%s",
+             (task_id,), database=DASH_DB)
+    if not row:
+        return jsonify({"ok": False, "error": "task_not_found"}), 404
+    if row[0]["status"] != "in_progress" or row[0]["assigned_to"] != agent:
+        # ادعاها موظف آخر أو انتهت مهلتها — لا تُسلَم مرتين.
+        return jsonify({"ok": False, "error": "task_not_available"}), 409
+    return jsonify({"ok": True, "task": {"id": task_id, "status": "in_progress", "assigned_to": agent}})
+
+
+@app.route("/api/feedback/task/<int:task_id>/respond", methods=["POST"])
+@_require_his_api
+def feedback_respond(task_id):
+    """تسجيل استجابة على المهمة وتحديث حالتها (done / no_answer / skipped / closed)."""
+    if _hit("feedback:respond:" + _client_ip(), 60, 60):
+        return jsonify({"ok": False, "error": "rate_limited"}), 429
+    data = request.get_json(force=True, silent=True) or {}
+    auth = request.authorization
+    agent = (auth.username if (auth and auth.type == "basic") else "") or "unknown"
+    outcome = str(data.get("outcome", "")).strip().lower()
+    score = data.get("score", None)
+    categories = data.get("categories", "")
+    comment = str(data.get("comment", "")).strip()
+    duration_sec = data.get("duration_sec", None)
+
+    valid_outcomes = {"done", "no_answer", "refused", "wrong_number", "callback_later", "not_applicable"}
+    if outcome not in valid_outcomes:
+        return jsonify({"ok": False, "error": "invalid_outcome"}), 400
+
+    # جلب المهمة الحالية
+    rows = db("SELECT id,status,attempts,max_attempts,phone FROM maxcall_dashboard.feedback_tasks WHERE id=%s",
+              (task_id,), database=DASH_DB)
+    if not rows:
+        return jsonify({"ok": False, "error": "task_not_found"}), 404
+    task = rows[0]
+    attempts = int(task["attempts"] or 0)
+    max_attempts = int(task["max_attempts"] or 3)
+    phone = task["phone"] or ""
+
+    # حفظ الاستجابة (append-only، لا تُحذف أبداً)
+    db(
+        "INSERT INTO maxcall_dashboard.feedback_responses (task_id, phone, agent, outcome, score, categories, comment, duration_sec) "
+        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+        (task_id, phone, agent, outcome, score, categories, comment, duration_sec),
+        database=DASH_DB, fetch=False,
+    )
+
+    # تحديد الحالة الجديدة
+    new_status = task["status"]
+    next_attempt = None
+    if outcome == "done":
+        new_status = "done"
+    elif outcome in ("refused", "wrong_number", "not_applicable"):
+        new_status = "skipped"
+    elif outcome == "callback_later":
+        new_status = "pending"
+        # الموظف يحدد الموعد عبر next_attempt_at إن أُرسل
+        nxt = data.get("next_attempt_at", "")
+        if nxt:
+            next_attempt = nxt
+    elif outcome == "no_answer":
+        attempts += 1
+        if attempts >= max_attempts:
+            new_status = "closed"  # استُنفدت المحاولات، لا تعود
+        else:
+            new_status = "no_answer"
+            # backoff متدرج: attempting-1 يُستخدم كمؤشر في قائمة backoff
+            backoff = [int(x) for x in str(_cfg("backoff_days") or "1,3,7").split(",") if x.strip().isdigit()]
+            idx = min(attempts - 1, len(backoff) - 1) if backoff else 0
+            days = backoff[idx] if backoff else 1
+            from datetime import timedelta
+            next_attempt = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+
+    db(
+        "UPDATE maxcall_dashboard.feedback_tasks SET status=%s, attempts=%s, outcome=%s, "
+        "next_attempt_at=%s, locked_at=NULL, assigned_to=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=%s",
+        (new_status, attempts, outcome, next_attempt, task_id), database=DASH_DB, fetch=False,
+    )
+    return jsonify({"ok": True, "task": {"id": task_id, "status": new_status, "attempts": attempts}})
+
+
+@app.route("/api/feedback/task/<int:task_id>/skip", methods=["POST"])
+@_require_his_api
+def feedback_skip(task_id):
+    """تخطي مهمة مع سبب ⇒ status='skipped' ولا تعود."""
+    if _hit("feedback:skip:" + _client_ip(), 60, 60):
+        return jsonify({"ok": False, "error": "rate_limited"}), 429
+    data = request.get_json(force=True, silent=True) or {}
+    auth = request.authorization
+    agent = (auth.username if (auth and auth.type == "basic") else "") or "unknown"
+    reason = str(data.get("reason", "")).strip()
+    rows = db("SELECT phone FROM maxcall_dashboard.feedback_tasks WHERE id=%s", (task_id,), database=DASH_DB)
+    if not rows:
+        return jsonify({"ok": False, "error": "task_not_found"}), 404
+    db(
+        "INSERT INTO maxcall_dashboard.feedback_responses (task_id, phone, agent, outcome, comment) "
+        "VALUES (%s,%s,%s,'skipped',%s)",
+        (task_id, rows[0]["phone"], agent, reason), database=DASH_DB, fetch=False,
+    )
+    db("UPDATE maxcall_dashboard.feedback_tasks SET status='skipped', locked_at=NULL, assigned_to=NULL, outcome='skipped' WHERE id=%s",
+       (task_id,), database=DASH_DB, fetch=False)
+    return jsonify({"ok": True, "task": {"id": task_id, "status": "skipped"}})
+
+
+@app.route("/api/feedback/task/<int:task_id>/release", methods=["POST"])
+@_require_his_api
+def feedback_release(task_id):
+    """تحرير القفل على مهمة (إغلاق النافذة دون إنهاء) ⇒ تعود pending."""
+    if _hit("feedback:release:" + _client_ip(), 60, 60):
+        return jsonify({"ok": False, "error": "rate_limited"}), 429
+    db("UPDATE maxcall_dashboard.feedback_tasks SET status='pending', locked_at=NULL, assigned_to=NULL WHERE id=%s AND status='in_progress'",
+       (task_id,), database=DASH_DB, fetch=False)
+    return jsonify({"ok": True})
+
+
+# ---------- dashboard endpoints ( require_login ) ----------
+
+@app.route("/api/feedback/tasks", methods=["GET"])
+@require_login
+def feedback_tasks():
+    """جدول كل المهام مع فلاتر وتصفيح (لل dashboard)."""
+    try:
+        limit = max(1, min(int(request.args.get("limit", 50)), 500))
+        offset = max(0, int(request.args.get("offset", 0)))
+    except Exception:
+        limit, offset = 50, 0
+    status = request.args.get("status", "").strip()
+    doctor = request.args.get("doctor", "").strip()
+    payer = request.args.get("payer", "").strip()
+    q = request.args.get("q", "").strip()
+    days = request.args.get("days", "").strip()
+
+    where = []
+    params = []
+    if status:
+        where.append("status=%s"); params.append(status)
+    if doctor:
+        where.append("doctor LIKE %s"); params.append(f"%{doctor}%")
+    if payer:
+        where.append("payer LIKE %s"); params.append(f"%{payer}%")
+    if q:
+        where.append("(patient_name LIKE %s OR phone LIKE %s OR visit_doc_no LIKE %s)")
+        params += [f"%{q}%", f"%{q}%", f"%{q}%"]
+    if days and days.isdigit():
+        where.append("visit_date >= DATE_SUB(CURDATE(), INTERVAL %s DAY)"); params.append(int(days))
+
+    where_sql = " AND ".join(where) if where else "1=1"
+    rows = db(
+        f"SELECT id, phone, pat_id, visit_doc_no, visit_date, patient_name, doctor, payer, employer, "
+        f"visit_amount, status, priority, attempts, max_attempts, next_attempt_at, assigned_to, outcome, "
+        f"created_at, updated_at FROM maxcall_dashboard.feedback_tasks WHERE {where_sql} "
+        f"ORDER BY created_at DESC LIMIT %s OFFSET %s",
+        tuple(params) + (limit, offset), database=DASH_DB,
+    ) or []
+    total = db(f"SELECT COUNT(*) as c FROM maxcall_dashboard.feedback_tasks WHERE {where_sql}",
+               tuple(params), database=DASH_DB)[0]["c"]
+    for r in rows:
+        for k in ("visit_date", "next_attempt_at", "created_at", "updated_at"):
+            v = r.get(k)
+            if hasattr(v, "isoformat"):
+                r[k] = v.isoformat()
+            elif v is not None:
+                r[k] = str(v)
+    return jsonify({"ok": True, "data": rows, "total": total, "limit": limit, "offset": offset, "v": 1})
+
+
+@app.route("/api/feedback/responses", methods=["GET"])
+@require_login
+def feedback_responses():
+    """سجل التغذية الراجعة المسجّلة."""
+    try:
+        limit = max(1, min(int(request.args.get("limit", 50)), 500))
+        offset = max(0, int(request.args.get("offset", 0)))
+    except Exception:
+        limit, offset = 50, 0
+    days = request.args.get("days", "").strip()
+    agent = request.args.get("agent", "").strip()
+    outcome = request.args.get("outcome", "").strip()
+
+    where = []
+    params = []
+    if days and days.isdigit():
+        where.append("feedback_at >= DATE_SUB(CURDATE(), INTERVAL %s DAY)"); params.append(int(days))
+    if agent:
+        where.append("agent=%s"); params.append(agent)
+    if outcome:
+        where.append("outcome=%s"); params.append(outcome)
+    where_sql = " AND ".join(where) if where else "1=1"
+    rows = db(
+        f"SELECT id, task_id, phone, agent, outcome, score, categories, comment, duration_sec, feedback_at "
+        f"FROM maxcall_dashboard.feedback_responses WHERE {where_sql} "
+        f"ORDER BY feedback_at DESC LIMIT %s OFFSET %s",
+        tuple(params) + (limit, offset), database=DASH_DB,
+    ) or []
+    total = db(f"SELECT COUNT(*) as c FROM maxcall_dashboard.feedback_responses WHERE {where_sql}",
+               tuple(params), database=DASH_DB)[0]["c"]
+    for r in rows:
+        v = r.get("feedback_at")
+        if hasattr(v, "isoformat"):
+            r["feedback_at"] = v.isoformat()
+        elif v is not None:
+            r["feedback_at"] = str(v)
+    return jsonify({"ok": True, "data": rows, "total": total, "limit": limit, "offset": offset, "v": 1})
+
+
+@app.route("/api/feedback/summary", methods=["GET"])
+@require_login
+def feedback_summary():
+    """إحصاءات التغذية الراجعة."""
+    days = request.args.get("days", "").strip()
+    where = ""
+    params = ()
+    if days and days.isdigit():
+        where = "WHERE visit_date >= DATE_SUB(CURDATE(), INTERVAL %s DAY)"
+        params = (int(days),)
+    total = db(f"SELECT COUNT(*) as c FROM maxcall_dashboard.feedback_tasks {where}", params, database=DASH_DB)[0]["c"]
+    done = db(f"SELECT COUNT(*) as c FROM maxcall_dashboard.feedback_tasks {where} AND status='done'", params, database=DASH_DB)[0]["c"]
+    no_answer = db(f"SELECT COUNT(*) as c FROM maxcall_dashboard.feedback_tasks {where} AND status='no_answer'", params, database=DASH_DB)[0]["c"]
+    closed = db(f"SELECT COUNT(*) as c FROM maxcall_dashboard.feedback_tasks {where} AND status='closed'", params, database=DASH_DB)[0]["c"]
+    skipped = db(f"SELECT COUNT(*) as c FROM maxcall_dashboard.feedback_tasks {where} AND status='skipped'", params, database=DASH_DB)[0]["c"]
+    pending = db(f"SELECT COUNT(*) as c FROM maxcall_dashboard.feedback_tasks {where} AND status='pending'", params, database=DASH_DB)[0]["c"]
+    in_progress = db(f"SELECT COUNT(*) as c FROM maxcall_dashboard.feedback_tasks {where} AND status='in_progress'", params, database=DASH_DB)[0]["c"]
+    avg_score = db(
+        f"SELECT AVG(score) as a FROM maxcall_dashboard.feedback_responses r "
+        f"JOIN maxcall_dashboard.feedback_tasks t ON r.task_id=t.id {where}",
+        params, database=DASH_DB,
+    )[0]["a"]
+    by_doctor = db(
+        f"SELECT doctor as name, COUNT(*) as c FROM maxcall_dashboard.feedback_tasks {where} GROUP BY doctor ORDER BY c DESC LIMIT 10",
+        params, database=DASH_DB,
+    ) or []
+    by_payer = db(
+        f"SELECT payer as name, COUNT(*) as c FROM maxcall_dashboard.feedback_tasks {where} GROUP BY payer ORDER BY c DESC LIMIT 10",
+        params, database=DASH_DB,
+    ) or []
+    return jsonify({
+        "ok": True, "v": 1,
+        "total": total, "done": done, "no_answer": no_answer, "closed": closed,
+        "skipped": skipped, "pending": pending, "in_progress": in_progress,
+        "avg_score": round(float(avg_score), 2) if avg_score is not None else None,
+        "by_doctor": [{"name": r["name"] or "غير محدد", "c": r["c"]} for r in by_doctor],
+        "by_payer": [{"name": r["name"] or "غير محدد", "c": r["c"]} for r in by_payer],
+    })
+
+
+@app.route("/api/feedback/export", methods=["GET"])
+@require_login
+def feedback_export():
+    """تصدير المهام إلى CSV."""
+    import csv, io
+    days = request.args.get("days", "").strip()
+    where = ""
+    params = ()
+    if days and days.isdigit():
+        where = "WHERE visit_date >= DATE_SUB(CURDATE(), INTERVAL %s DAY)"
+        params = (int(days),)
+    rows = db(
+        f"SELECT visit_date, patient_name, phone, doctor, payer, visit_amount, status, attempts, outcome, created_at "
+        f"FROM maxcall_dashboard.feedback_tasks {where} ORDER BY created_at DESC",
+        params, database=DASH_DB,
+    ) or []
+    buf = io.StringIO()
+    wcsv = csv.writer(buf)
+    wcsv.writerow(["تاريخ الزيارة", "اسم المريض", "الهاتف", "الطبيب", "الجهة الدافعة", "المبلغ", "الحالة", "المحاولات", "النتيجة", "تاريخ الإنشاء"])
+    for r in rows:
+        wcsv.writerow([r.get("visit_date"), r.get("patient_name") or "", r.get("phone") or "",
+                       r.get("doctor") or "", r.get("payer") or "", r.get("visit_amount") or "",
+                       r.get("status"), r.get("attempts"), r.get("outcome") or "", r.get("created_at")])
+    out = buf.getvalue()
+    return app.response_class(out, mimetype="text/csv",
+                              headers={"Content-Disposition": "attachment; filename=feedback_tasks.csv"})
+
+
+@app.route("/api/feedback/generate", methods=["POST"])
+@_require_his_api
+def feedback_generate():
+    """تشغيل التجهيز: جلب زيارات HIS وإنشاء مهام جديدة (idempotent).
+
+    تقبل جلسة الداشبورد (زر التوليد) أو Basic auth (مهمة cron على السيرفر) —
+    حتى يعمل التوليد التلقائي بلا تدخل يدوي.
+    """
+    if _hit("feedback:generate:" + _client_ip(), 5, 300):
+        return jsonify({"ok": False, "error": "rate_limited"}), 429
+    try:
+        hours_back = int(str(_cfg("hours_back") or "2"))
+    except Exception:
+        hours_back = 2
+    if hours_back < 0:
+        hours_back = 0
+    # نافذة المسح = المدة + ساعة هامش، حتى نلتقط الزيارات التي انتظرت دورها
+    # (المفتاح الفريد يضمن عدم التكرار).
+    from datetime import timedelta, timezone
+    to = datetime.now(timezone.utc)
+    from_dt = to - timedelta(hours=hours_back + 1)
+    from_iso = from_dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    to_iso = to.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+    try:
+        rows = his_broker.visit_rows(from_iso, to_iso)
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"his_error: {e}"}), 502
+
+    min_amount = float(str(_cfg("min_amount") or "0"))
+    payer_filter = [p.strip() for p in str(_cfg("payer_filter") or "").split(",") if p.strip()]
+    doctor_filter = [d.strip() for d in str(_cfg("doctor_filter") or "").split(",") if d.strip()]
+    phone_re = re.compile(r"^\d{7,15}$")
+
+    created = 0
+    skipped_existing = 0
+    skipped_invalid = 0
+    skipped_active = 0
+    # حماية من الاتصال المتكرر بنفس الشخص: إن كان للمريض مهمة نشطة
+    # (pending/no_answer/in_progress) فمهما كانت الزيارة الجديدة — لا مهمة ثانية.
+    active_phones = {r["phone"] for r in db(
+        "SELECT DISTINCT phone FROM maxcall_dashboard.feedback_tasks "
+        "WHERE status IN ('pending','no_answer','in_progress')", database=DASH_DB) or []}
+    for row in rows:
+        phone = re.sub(r"\D", "", str(row.get("phone") or ""))
+        if not phone_re.fullmatch(phone):
+            skipped_invalid += 1
+            continue
+        if phone in active_phones:
+            skipped_active += 1
+            continue
+        visit_date = row.get("visit_date")
+        if visit_date:
+            try:
+                vd = datetime.strptime(str(visit_date)[:10], "%Y-%m-%d").date()
+                if vd < from_dt.date():
+                    skipped_invalid += 1
+                    continue
+            except Exception:
+                pass
+        if min_amount and row.get("amount") is not None:
+            try:
+                if float(row.get("amount") or 0) < min_amount:
+                    skipped_invalid += 1
+                    continue
+            except Exception:
+                pass
+        if payer_filter and row.get("payer") and row.get("payer") not in payer_filter:
+            skipped_invalid += 1
+            continue
+        if doctor_filter and row.get("doctor") and row.get("doctor") not in doctor_filter:
+            skipped_invalid += 1
+            continue
+        # exclude repeat visits
+        if str(_cfg("exclude_repeat_visits") or "0") == "1":
+            threshold = int(str(_cfg("repeat_visit_threshold") or "7"))
+            cnt = db(
+                "SELECT COUNT(*) as c FROM maxcall_dashboard.feedback_tasks WHERE pat_id=%s AND visit_date>=DATE_SUB(%s, INTERVAL %s DAY)",
+                (row.get("pat_id"), str(visit_date)[:10] if visit_date else datetime.now().date(), threshold),
+                database=DASH_DB,
+            )[0]["c"]
+            if cnt > 0:
+                skipped_existing += 1
+                continue
+        try:
+            # بيانات سريعة (عمر/جنس/جنسية/رمز الدافع) لحظة الإنشاء —
+            # وإن عجز HIS عنها فهي تُهيَّأ لاحقاً عند العرض (_hydrate_people).
+            try:
+                s = his_broker.patient_summary(row.get("pat_id"))
+            except Exception:
+                s = {}
+            db(
+                "INSERT IGNORE INTO maxcall_dashboard.feedback_tasks "
+                "(phone, pat_id, visit_doc_no, visit_date, patient_name, doctor, payer, employer, service, visit_amount, "
+                "pat_age, pat_sex, pat_nationality, pat_payer_code, source, rule_tag, status, next_attempt_at) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'HIS','PATREG','pending',%s)",
+                (phone, row.get("pat_id"), row.get("doc_no"), visit_date,
+                 row.get("patient_name"), row.get("doctor"), row.get("payer"),
+                 row.get("employer"), row.get("service"), row.get("amount"),
+                 s.get("age") or None, s.get("sex") or None, s.get("nationality") or None, s.get("payer_code") or None,
+                 (datetime.now() + timedelta(hours=hours_back)).strftime("%Y-%m-%d %H:%M:%S")),
+                database=DASH_DB, fetch=False,
+            )
+            created += 1
+            active_phones.add(phone)
+        except Exception:
+            skipped_existing += 1
+    return jsonify({"ok": True, "v": 1, "created": created, "skipped_existing": skipped_existing,
+                    "skipped_active": skipped_active, "skipped_invalid": skipped_invalid,
+                    "scanned": len(rows)})
+
+
+@app.route("/api/feedback/config", methods=["GET"])
+@require_login
+def feedback_config_get():
+    rows = db("SELECT cfg_key, cfg_value FROM maxcall_dashboard.feedback_config ORDER BY cfg_key", database=DASH_DB) or []
+    return jsonify({"ok": True, "v": 1, "data": {r["cfg_key"]: r["cfg_value"] for r in rows}})
+
+
+@app.route("/api/feedback/config", methods=["POST"])
+@require_login
+def feedback_config_set():
+    data = request.get_json(force=True, silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"ok": False, "error": "invalid_body"}), 400
+    for k, v in data.items():
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(k)):
+            continue
+        db("INSERT INTO maxcall_dashboard.feedback_config (cfg_key, cfg_value) VALUES (%s,%s) "
+           "ON DUPLICATE KEY UPDATE cfg_value=VALUES(cfg_value), updated_at=CURRENT_TIMESTAMP",
+           (str(k), str(v)), database=DASH_DB, fetch=False)
+    return jsonify({"ok": True, "v": 1})
+
+
+# الخدمة تعمل تحت gunicorn فيظهر __main__ من الأساس — الترحيل يضمن تنفيذه
+# عند الاستيراد (idempotent: إنشاء إن غاب + إضافة أعمدة التغذية إن نقصت).
+_ensure_feedback_tables()
+
 if __name__ == "__main__":
+    _ensure_feedback_tables()
     app.run(host="0.0.0.0", port=3001, debug=False)
