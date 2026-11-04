@@ -8,6 +8,7 @@
 
 import time
 import urllib.parse
+import re as _re
 
 from .base import Backend, BackendError, save_last_good_member
 from .base import creds_for
@@ -65,14 +66,20 @@ JS_LOGIN_ERR = """() => {
 }"""
 
 
+_PAT = _re.compile(
+    r"ReportsViewer\.aspx|extensionParameter=pdf|\.pdf(\?|$)|rpt[A-Za-z]*\.rpt",
+    _re.I,
+)
+
 class NextCare(Backend):
     id = "nextcare"
     report_capture = "download"          # الملف ينزل مباشرة — لا نافذة
-    REPORT_EXT_RE = r"\.pdf(\?|$)|download|="
+    REPORT_EXT_RE = r"\.pdf(\?|$)|^="
 
     # ---------- أدوات ----------
     def report_matches(self, url):
-        return bool(url)
+        url = url or ""
+        return bool(_PAT.search(url))
 
     def _find(self, w, js):
         try:
@@ -172,8 +179,30 @@ class NextCare(Backend):
         if self._safe_eval(w, JS_IS_LOGIN):
             self.do_login(w, creds)
 
-        # صفحة نظيفة دائماً — نفس السلوك الذي عمل بنجاح في 0.9.17
-        self._open_eligibility(w)
+        # تسريع آمن: إن كنا على صفحة استعلام جاهزة تماماً (جلسة صالحة +
+        # خانة فارغة + قائمة Type موجودة) أعد استخدام الصفحة — وإلا Goto
+        def _page_is_fresh_eligibility():
+            url = (w.page.url or "").lower()
+            if "/eligibilitychecking2.aspx" not in url:
+                return False
+            el = self._find(w, JS_MEMBER)
+            if not el:
+                return False
+            try:
+                if str(el.evaluate("el => el.value") or "").strip() != "":
+                    return False
+                # قائمة Type يجب أن تكون موجودة (ولو فارغة) — وإلا الصفحة لم
+                # تكتمل بناءً (ASP.NET قد يعيد بناء DOM أولاً)
+                if not self._find(w, JS_TYPE_SELECT):
+                    return False
+                return True
+            except Exception:
+                return False
+
+        if _page_is_fresh_eligibility():
+            w.progress("navigate", "run", "eligibility already fresh — reuse")
+        else:
+            self._open_eligibility(w)
 
         # رقم العضوية
         inp = self._find(w, JS_MEMBER)
