@@ -171,8 +171,8 @@ class NextCare(Backend):
 
         if self._safe_eval(w, JS_IS_LOGIN):
             self.do_login(w, creds)
-        w.progress("navigate", "run", f"pre_open url={(w.page.url or '')[-80:]}")
 
+        # صفحة نظيفة دائماً — نفس السلوك الذي عمل بنجاح في 0.9.17
         self._open_eligibility(w)
 
         # رقم العضوية
@@ -242,6 +242,7 @@ class NextCare(Backend):
         save_last_good_member(self.id, member)
         w.progress("eligibility", "ok")
         if kind == "keepalive":
+            # الصفحة تُعاد تحميلها نظيفة عند الطلب القادم
             return {"member": member, "result": "ok"}
 
         # الطباعة — التنزيل يُلتقط عبر download في العامل
@@ -252,5 +253,6 @@ class NextCare(Backend):
         if not r.get("ok"):
             raise BackendError(f"print_failed | {r.get('error')}")
         w.progress("print", "ok", f"url={str(r.get('url', ''))[:110]}")
+        # صفحة الاستعلام تُعاد تحميلها نظيفة عند الطلب القادم
         return {"member": member, "pdf_bytes": r.get("bytes"),
                 "pdf_url": r.get("url", "")}
