@@ -50,6 +50,51 @@ JS_STATE = f"""() => {{ {_MJS}
   return 'unknown';
 }}"""
 
+JS_DIAG_DEEP = """() => {
+  const vis = el => el.getClientRects().length > 0;
+  const out = {};
+  const btn = document.querySelector('button.Printmember');
+  out.printBtn = btn ? {
+    outer: btn.outerHTML.slice(0, 300),
+    attrs: Object.fromEntries([...btn.attributes].map(a => [a.name, a.value])),
+    disabled: btn.disabled, type: btn.type, isConnected: btn.isConnected,
+  } : null;
+  out.printLike = [...document.querySelectorAll('button, a, input[type=button], input[type=submit]')]
+      .filter(el => /print/i.test(el.textContent || el.value || ''))
+      .map(el => ({tag: el.tagName, cls: el.className, id: el.id || '',
+                   disabled: !!el.disabled,
+                   outer: el.outerHTML.slice(0, 160)}));
+  out.forms = [...document.forms].map(f => ({id: f.id, action: f.action, method: f.method}));
+  const el = document.querySelector('#txtGsmNo');
+  out.phone = el ? {outer: el.outerHTML.slice(0, 300), value: el.value,
+                    attrs: Object.fromEntries([...el.attributes].map(a => [a.name, a.value]))} : null;
+  out.specialityVal = (document.querySelector('#txtSpeciality') || {}).value || '';
+  out.ko = typeof window.ko === 'undefined' ? 'none' : 'present';
+  try {
+    if (window.ko && btn) {
+      const data = (window.ko.dataFor ? window.ko.dataFor(btn) : null)
+                 || (window.ko.contextFor ? window.ko.contextFor(btn).$data : null);
+      if (data) {
+        out.koKeys = Object.keys(data);
+        const sample = {};
+        for (const k of Object.keys(data)) {
+          try {
+            const v = (window.ko.isObservable && window.ko.isObservable(data[k])) ? data[k]() : data[k];
+            sample[k] = (v && typeof v === 'object')
+              ? '(' + ((v.constructor || {}).name || 'object') + ')' : v;
+          } catch (e) { sample[k] = '<err>'; }
+        }
+        out.koModel = sample;
+      }
+    }
+  } catch (e) { out.koErr = String(e); }
+  // عناصر تحمل onclick مربوط بـprint/claim
+  out.onclicks = [...document.querySelectorAll('[onclick]')]
+      .map(el => ({tag: el.tagName, id: el.id || '', onclick: (el.getAttribute('onclick') || '').slice(0, 120)}))
+      .filter(x => /print|claim/i.test(x.onclick));
+  return out;
+}"""
+
 JS_MEMBER = f"""() => {{ {_MJS}
   const el = document.querySelector('#txtMemberId');
   return okEl(el) ? el : null;
@@ -424,24 +469,41 @@ class Liva(Backend):
         raise BackendError(f"provider_open_failed | {self._state_label(w)}")
 
     # ---------- كابتشا بوابة المزوّد ----------
+    @staticmethod
+    def _captcha_jpeg_bytes(w):
+        el = w.q1("#CaptchaImage")
+        if el:
+            try:
+                return w.page.locator("#CaptchaImage").screenshot(type="jpeg", timeout=3000)
+            except Exception:
+                return None
+        # احتياط: التقط أي صورة ظاهرة
+        try:
+            return w.page.screenshot(type="jpeg", quality=70)
+        except Exception:
+            return None
+
     def _captcha_needs_human(self, w):
         if not w.q1("#CaptchaInputText"):
             return None
-        try:
-            shot = w.page.locator("#CaptchaImage").screenshot(type="jpeg", timeout=5000)
-            import base64
-            if shot:
-                w.progress("captcha", "run", "captcha shown to operator")
-                return NeedsCaptcha(base64.b64encode(shot).decode("ascii"))
-        except Exception:
-            pass
-        # احتياط: التقاط أي صورة ظاهرة داخل النموذج
-        try:
-            shot = w.page.screenshot(type="jpeg", quality=70)
-            import base64
+        import base64
+        shot = self._captcha_jpeg_bytes(w)
+        if shot:
+            w.progress("captcha", "run", "captcha shown to operator")
             return NeedsCaptcha(base64.b64encode(shot).decode("ascii"))
+        raise BackendError("captcha_image_failed")
+
+    def fresh_captcha_image(self, w):
+        """صورة الكابتشا الحالية من DOM — تُستدعى دورياً من وسيط الانتظار
+        للإبقاء على الصورة طازجة دائماً (البوابة تجدد الكابتشا كل دقيقة)."""
+        import base64
+        try:
+            if not w.q1("#CaptchaInputText"):
+                return None
+            shot = self._captcha_jpeg_bytes(w)
+            return base64.b64encode(shot).decode("ascii") if shot else None
         except Exception:
-            raise BackendError("captcha_image_failed")
+            return None
 
     def _submit_provider_login(self, w, answer):
         ok = self._type_native(w, "#CaptchaInputText", answer)
@@ -1030,6 +1092,14 @@ class Liva(Backend):
                 w.progress("eligibility", "ok")
                 if kind == "keepalive":
                     return {"member": member, "result": "ok"}
+                if kind == "diag":
+                    # تشخيص عميق بدل الطباعة — القراءة فقط، لا يُنشأ شيء
+                    try:
+                        dump = w.page.evaluate(JS_DIAG_DEEP) or {}
+                    except Exception as e:
+                        dump = {"eval_error": str(e)[:200]}
+                    dump["url"] = w.page.url
+                    return {"member": member, "diag": dump}
                 return self._print_or_reprint(w, member, card)
             # مجهول → غالباً Angular ما زال يبني DOM — انتظر ثم أعد الفحص
             # (لا إعادة تحميل — كانت هي ما يقتل البوابة ويُغرق في حلقة)

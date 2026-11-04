@@ -45,7 +45,7 @@ except Exception:  # pragma: no cover
 
 
 BROKER_PORT = 3011
-CAPTCHA_LEASE_S = 90.0       # مهلة كافية لإنسان يقرأ الكابتشا
+CAPTCHA_LEASE_S = 30.0      # مهلة عادلة — المستخدم يقرأ الكابتشا بسرعة
 CHOICE_LEASE_S = 75.0        # مهلة اختيار عنصر من قائمة (طبيب) — أطول للقراءة
 CAPTCHA_TOTAL_S = 300.0      # الحد الكلي — خمس دقائق مهلة عادلة
 HEARTBEAT_WINDOW_S = 240.0   # نافذة نبض 4 دقائق
@@ -195,11 +195,24 @@ class InsurerWorker(threading.Thread):
         job["captcha_type"] = prompt.get("type", "captcha")
         job.add_stage("captcha", "run", "بانتظار التحقق البشري")
         deadline = time.monotonic() + CAPTCHA_TOTAL_S
+        fresh = getattr(self.backend, "fresh_captcha_image", None)
+        last_refresh = 0.0
         answer = None
         while time.monotonic() < deadline:
             if self.cap is None:
                 break  # مسح خارجي (أمان)
-            answer = self.cap["answer"] if self.cap["event"].wait(3) else None
+            # حدّث صورة الكابتشا من DOM كل ~2 ثانية — البوابة تجددها
+            # كل دقيقة؛ الاحتفاظ بصورة قديمة = إجابة تُرفض دائماً
+            now = time.monotonic()
+            if fresh and now - last_refresh > 2.0:
+                last_refresh = now
+                try:
+                    img = fresh(self.worker)
+                    if img:
+                        self.cap["img"] = img
+                except Exception:
+                    pass
+            answer = self.cap["answer"] if self.cap["event"].wait(2) else None
             if answer is not None:
                 break
         with self.cap_lock:
@@ -271,7 +284,7 @@ class InsurerWorker(threading.Thread):
             cap["until"] = time.time() + lease
             out = {"token": cap["token"],
                    "type": prompt.get("type", "captcha"),
-                   "img_b64": prompt.get("img_b64", ""),
+                   "img_b64": cap.get("img", ""),      # الصورة الطازجة من DOM
                    "lease": lease}
             if prompt.get("type") == "choice":
                 out["options"] = prompt.get("options") or []
