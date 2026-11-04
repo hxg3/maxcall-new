@@ -779,8 +779,8 @@ async function runBrokerInsurer(insurerId, card, serviceType) {
     return { ok: false, reason: "broker_rejected" };
   }
 
-  let captchaShown = false;
-  const deadline = Date.now() + 240000;
+  let lastCaptchaToken = null;   // آخر رمز عُرضت له النافذة (يعاد عند كل lease جديد)
+  const deadline = Date.now() + 330000;
   while (Date.now() < deadline) {
     await sleep(1400);
     let s;
@@ -797,11 +797,12 @@ async function runBrokerInsurer(insurerId, card, serviceType) {
         detail: last.detail || "",
       });
     }
-    if (s.state === "captcha" && s.captcha && !s.captcha.busy && !captchaShown
-        && (s.captcha.img_b64 || (s.captcha.options || []).length)) {
-      captchaShown = true;
-      brokerCaptchaClaims.set(jobId, { token: s.captcha.token, type: s.captcha.type || "captcha" });
-      await openBrokerCaptchaAsk(jobId, s.captcha, insurerId);
+    const cap = s.captcha;
+    if (s.state === "captcha" && cap && !cap.busy && (cap.img_b64 || (cap.options || []).length)
+        && cap.token && cap.token !== lastCaptchaToken) {
+      lastCaptchaToken = cap.token;      // رمز جديد = نافذة جديدة (بعد انتهاء السابقة بلا إجابة)
+      brokerCaptchaClaims.set(jobId, { token: cap.token, type: cap.type || "captcha" });
+      await openBrokerCaptchaAsk(jobId, cap, insurerId);
     }
     if (s.state === "done") {
       return await finishBrokerPrint(jobId, insurerId);

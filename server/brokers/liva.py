@@ -539,7 +539,14 @@ class Liva(Backend):
             w.page.keyboard.press("Enter")
         w.progress("keepalive", "ok", f"eligibility re-check member={memberNo or '(current)'}")
         # إرسال HTTP يعيد نشاط جلسة البوابة — لا حاجة لقراءة النتيجة
-        time.sleep(2.0)
+        time.sleep(3.0)
+        # كشف صريح لموت جلسة البوابة بدل نجاح صامت
+        try:
+            if w.q1("#CaptchaInputText") or "/remote/login" in (w.page.url or ""):
+                w.progress("keepalive", "ok", "portal session lost (captcha wall) — deferred to real job")
+                return False
+        except Exception:
+            pass
         return True
 
     def _keepalive(self, w, member):

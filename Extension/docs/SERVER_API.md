@@ -98,7 +98,7 @@ def _lan_only():
 | `GET /api/insurer/health` | حالة العمال (alive/busy/queue/sessionWarm/captchaPending· للتأمين) — `mednet` · `nextcare` · `liva` |
 | `POST /api/insurer/job` | body: `{insurer:"mednet"\|"nextcare"\|"liva", member:"919492"\|"B624...", card:{...}}` → `{ok, jobId, queuePos}` |
 | `GET /api/insurer/job/<id>` | `{state, stages[], queuePos, result}` — `?pdf=1` يضيف `pdf_b64` عند `state=done`؛ عند `state=captcha` ينقل `captcha:{type,img_b64\|options,title?,hint?,lease,token}` |
-| `POST /api/insurer/job/<id>/answer` | body `{token, text}` لإجابة التحقق البشري — كابتشا (عقد 15 ث) أو اختيار من قائمة (عقد 75 ث) — تنقّل تلقائي بين الأجهزة؛ أول إجابة تُقبل والبقية مرفوضة؛ إجابة فارغة = إلغاء المهمة |
+| `POST /api/insurer/job/<id>/answer` | body `{token, text}` لإجابة التحقق البشري — كابتشا (عقد 90 ث) أو اختيار من قائمة (عقد 75 ث) — تنقّل تلقائي بين الأجهزة؛ أول إجابة تُقبل والبقية مرفوضة؛ إجابة فارغة = إلغاء المهمة |
 
 **انشرت Liva عبر الوسيط (0.9.21):** بوابة FortiGate SSL-VPN على السيرفر (الجلسة الدافئة في النبضة — مركبة بدل تحميل من الصفر)، ثم بوابة المزوّد Angular (نفس بيانات الدخول + كابتشا تُعرض على شاشة الموظف — مطلوبة عند كل دخول للبوابة)، ثم صفحة العضوية: Search → اختيار الطبيب (مطابقة مع اسم HIS؛ إن تعذر تظهر قائمة اختيار للموظف بمهلة 75 ث) → الهاتف `968-` → امتلاء الاختصاص → طباعة PDF في HIS.
 **النبضة (keepalive) لـ Liva:** تحقق eligibility برقم التأمين **داخل صفحة MemberDetails نفسها** كل 4 دقائق (لا طباعة، لا إيصال، لا مغادرة للصفحة ولا إعادة تحميل) — نفس آلية MedNet/NextCare. لا تقوم البوابة بالتحقق إن كانت جلسة بوابة المزوّد منتهية (تتطلب كابتشا — تُترك للمهمة الحقيقية)؛ VPN يُجدد تلقائياً بحد أقصى دخول واحد في الساعة.
