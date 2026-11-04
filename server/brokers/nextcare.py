@@ -133,14 +133,15 @@ class NextCare(Backend):
 
     # ---------- الجلسة ----------
     def _open_eligibility(self, w):
-        url = (w.page.url or "").lower()
-        try:
-            path = urllib.parse.urlparse(w.page.url or "").path.lower()
-        except Exception:
-            path = ""
-        if not path.endswith("/eligibilitychecking2.aspx"):
-            w.progress("navigate", "run", "goto EligibilityChecking2")
-            w.page.goto(ELIG_URL, wait_until="domcontentloaded", timeout=45000)
+        """دائما: اعادة تحميل صفحة الاستعلام كاملة عند طلب جديد — لا تبقَ على
+        حالة النتيجة السابقة (خانة العضوية لا تظهر بعد أول نتيجة/طباعة)."""
+        w.progress("navigate", "run", "goto EligibilityChecking2")
+        w.page.goto(ELIG_URL, wait_until="domcontentloaded", timeout=45000)
+        # انتظر ظهور حقل العضوية — الصفحة البيضاء/حالة النتيجة ليست صالحة
+        door = time.monotonic() + 25
+        while time.monotonic() < door and not self._find(w, JS_MEMBER):
+            time.sleep(0.4)
+        return
 
     def _wait_print_btn(self, w, timeout_s):
         door = time.monotonic() + timeout_s
