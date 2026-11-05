@@ -314,7 +314,7 @@ def _match_doctor(items, wanted):
         if hit:
             return hit
     # 2) تطابق كامل / احتواء
-    best, best_score = None, 0.0
+    best, best_score, best_tok = None, 0.0, None
     runner_up = 0.0
     for it in items:
         n = _norm_name(it)
@@ -322,8 +322,10 @@ def _match_doctor(items, wanted):
             continue
         if n == w:
             score = 100.0
+            tok_scores = None
         elif n in w or w in n:
             score = 88.0
+            tok_scores = None
         else:
             a, b = w.split(), n.split()
             tok_scores = []
@@ -337,11 +339,17 @@ def _match_doctor(items, wanted):
             if any(s >= 0.99 for s in tok_scores):
                 score += 12.0
         if score > best_score:
-            runner_up, best, best_score = best_score, it, score
+            runner_up, best, best_score, best_tok = best_score, it, score, tok_scores
         elif score > runner_up:
             runner_up = score
     if best is None:
         return None
+    # حارس الهوية: الاختيار معتمد على رمز واحد مطابق تماماً بينما باقي
+    # الرموز ضعيفة (<0.75) — العلاقة حينها قائمة على رمز شائع (ABDUL,
+    # SREEDHAR, SREE…) وليست هوية موثوقة ⇒ مرّر للموظف بدل الاختيار الخطأ
+    if best_tok and len(best_tok) >= 2:
+        if any(s >= 0.99 for s in best_tok) and any(s < 0.75 for s in best_tok):
+            return None
     # قرار: واضح (أو متفوق بفارق مريح) ⇒ تلقائي؛ وإلا مرر للموظف
     if best_score >= 62.0 and (best_score - runner_up) >= 15.0:
         return best
