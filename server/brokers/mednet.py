@@ -15,6 +15,7 @@
 import time
 
 from .base import Backend, BackendError, save_last_good_member, creds_for
+from .base import session_event, last_good_member
 
 
 def _REPORT_RE():
@@ -65,6 +66,17 @@ JS_NAV_LINK = f"""() => {{ {_MJS}
   if (byId && okEl(byId) &&
       /main|online|eligib|member|home|next|start/i.test(controlText(byId))) return byId;
   return null;
+}}"""
+
+# موسّع — عندما تنتهي الجلسة يعيد ADF رسم الصفحة ببنية مختلفة
+# (العناصر قد تكون button/span/role=menuitem بلا نص exact)
+JS_BROAD_ELIG_NAV = f"""() => {{ {_MJS}
+  const els = [...document.querySelectorAll(
+    'a, button, [role="menuitem"], [role="button"], li, span')].filter(okEl);
+  const byText = els.find((e) =>
+    /member\\s*eligib|eligib.*member|check\\s*eligib|eligib/i.test(controlText(e))
+    && /eligib/i.test(controlText(e)));
+  return byText || null;
 }}"""
 
 JS_CHECK_BTN = f"""() => {{ {_MJS}
@@ -152,6 +164,10 @@ JS_STATE = f"""() => {{ {_MJS}
 
 class MedNet(Backend):
     id = "mednet"
+
+    def __init__(self):
+        self._dead_since = None
+        self._last_ok_at = 0.0
 
     def report_matches(self, url):
         return bool(_REPORT_RE().search(url or ""))
@@ -273,48 +289,104 @@ class MedNet(Backend):
         return None
 
     # ---------- التدفق ----------
-    def run(self, w, kind="doc", member=None, card=None):
-        w._started_at = time.monotonic()
-        creds = creds_for(self.id)
-        if not creds.get("url"):
-            raise BackendError("no_site_url")
-
-        member = (member or ((card or {}).get("insurance", {}).get("card_no")
-                             or "")).strip()
-        if not member:
-            raise BackendError("member_empty")
-
-        # الوصول: الجلسة تبدأ صفحة الدخول إن كنا الإخلاص أول مرة
+    # ---------- الاستعادة الكاملة التلقائية — الجاهزية الدائمة ----------
+    def _goto_and_login(self, w, creds):
         if "mednetapprovals.com" not in (w.page.url or ""):
             w.progress("navigate", "run", f"goto {creds['url'][:60]}")
             w.page.goto(creds["url"], wait_until="domcontentloaded", timeout=45000)
-
-        # 1) تسجيل الدخول
         if self._safe_eval(w, JS_IS_LOGIN):
             self.do_login(w, creds)
 
-        # 2) شاشة البحث — مع إعادة محاولة للملاحة أثناء ظهور اللوحة (ADF قد يشحن بتراخ)
-        inp, val = self._member_value(w)
-        if not inp:
-            nav_clicked = False
-            door = time.monotonic() + min(30, max(5, w.remaining(kind)))
-            while time.monotonic() < door and not inp:
-                inp = self._find(w, JS_MEMBER_INPUT)
-                if inp:
-                    break
-                if not nav_clicked:
-                    nav = self._find(w, JS_NAV_LINK)
-                    if nav:
-                        w.progress("navigate", "run", "click Member Eligibility")
-                        if w.click(nav):
-                            nav_clicked = True
-                            time.sleep(2)
-                time.sleep(0.4)
-        if not inp:
-            raise BackendError(f"member_screen_not_found | {self.state(w)}")
+    def _note_death(self, w, reason):
+        if self._dead_since is not None:
+            return                     # سجّل الموت مرة واحدة لكل فترة
+        now = time.time()
+        self._dead_since = now
+        session_event(self.id, "dead", reason,
+                      last_ok_ago_s=round(now - self._last_ok_at, 0)
+                      if self._last_ok_at else None,
+                      url=(w.page.url or "")[:120])
 
+    def _note_ready(self, w):
+        now = time.time()
+        first = (self._last_ok_at == 0.0)
+        self._last_ok_at = now
+        if self._dead_since is not None:
+            dead_for = round(now - self._dead_since, 1)
+            session_event(self.id, "restored", f"after {dead_for}s dead",
+                          dead_for_s=dead_for)
+            self._dead_since = None
+        elif first:
+            session_event(self.id, "ready",
+                          "session alive (first verified after boot)")
+
+    def _input_val(self, inp):
+        try:
+            return str(inp.evaluate("el => el.value") or "").strip()
+        except Exception:
+            return ""
+
+    def _ensure_member_screen(self, w, creds, kind):
+        """من أي حالة إلى شاشة البحث: ملاحة → موسّع → بناء بارد."""
+        inp, val = self._member_value(w)
+        if inp:
+            return inp, val
+        door = time.monotonic() + min(30, max(5, w.remaining(kind)))
+        clicked = False
+        while time.monotonic() < door and not inp:
+            inp = self._find(w, JS_MEMBER_INPUT)
+            if inp:
+                break
+            if not clicked:
+                nav = self._find(w, JS_NAV_LINK)
+                if nav:
+                    w.progress("navigate", "run", "click Member Eligibility")
+                    if w.click(nav):
+                        clicked = True
+                        time.sleep(2)
+            time.sleep(0.4)
+        if inp:
+            return inp, self._input_val(inp)
+        # موسّع — بنى JSF غير مألوفة عندما تموت الجلسة (الصفحة تُعاد برسم مختلف)
+        door = time.monotonic() + 15
+        while time.monotonic() < door and not inp:
+            nav = self._find(w, JS_BROAD_ELIG_NAV)
+            if not nav:
+                time.sleep(0.5)
+                continue
+            w.progress("navigate", "run", "broad nav: eligibility/member link")
+            w.click(nav)
+            time.sleep(2.0)
+            inp = self._find(w, JS_MEMBER_INPUT)
+        if inp:
+            return inp, self._input_val(inp)
+        # بناء بارد — متصفح جديد من الصفر (نفس حالة "صباح جديد" المضمونة)
+        session_event(self.id, "restore_cold",
+                      f"member screen unreachable — rebuilding browser | url={(w.page.url or '')[-80:]}")
+        w.needs_context = True
+        w.ensure_context()
+        self._goto_and_login(w, creds)
+        inp, val = self._member_value(w)
+        if inp:
+            return inp, val
+        door = time.monotonic() + 25
+        while time.monotonic() < door and not inp:
+            inp = self._find(w, JS_MEMBER_INPUT)
+            if inp:
+                break
+            nav = self._find(w, JS_NAV_LINK) or self._find(w, JS_BROAD_ELIG_NAV)
+            if nav:
+                w.click(nav)
+                time.sleep(2.0)
+            time.sleep(0.4)
+        if inp:
+            return inp, self._input_val(inp)
+        raise BackendError(f"member_screen_not_found | {self.state(w)[:120]}")
+
+    def _check_member(self, w, inp, member, kind):
+        """رقم العضوية + دورة التحقق (الخطوات 3-5) — يخدم الطلب والنبض معاً."""
         # 3) رقم العضوية — لا نعيد الكتابة إن كانت قيمتها هي
-        if val != member:
+        if self._input_val(inp) != member:
             w.progress("eligibility", "run", f"enter member={member}")
             inp.evaluate("el => el.focus()")
             w.set_value(inp, member)
@@ -371,9 +443,62 @@ class MedNet(Backend):
 
         save_last_good_member(self.id, member)
         w.progress("eligibility", "ok", f"eligibility_no={elig_no}")
+        return elig_no
 
+    def _keepalive(self, w, member, creds):
+        member = str(member or "").strip() or last_good_member(self.id)
+        # سجّل موت الجلسة لحظة اكتشافها (مرة واحدة لكل فترة) —
+        # حتى لو استعدناها في نفس النبضة نرى الزوج موت←استعادة في التحليلات
+        if not self._member_value(w)[0]:
+            self._note_death(w, "member screen missing — session not ready")
+        try:
+            self._goto_and_login(w, creds)
+            inp, _ = self._ensure_member_screen(w, creds, "keepalive")
+        except Exception as e:
+            self._note_death(w, f"restore: {str(e)[:80]}")
+            session_event(self.id, "restore_failed", str(e)[:150])
+            return {"member": member, "result": "mednet_keepalive_restore_failed"}
+        if not member:
+            # لا يوجد رقم محفوظ بعد — الجاهزية على شاشة البحث تكفي للحظة
+            session_event(self.id, "restored", "readiness restored (no member yet)",
+                          dead_for_s=round(time.time() - self._dead_since, 1)
+                          if self._dead_since else None)
+            self._last_ok_at = time.time()
+            self._dead_since = None
+            return {"member": member, "result": "mednet_keepalive_ready"}
+        try:
+            elig_no = self._check_member(w, inp, member, "keepalive")
+            self._note_ready(w)
+            return {"member": member, "eligibility_no": elig_no,
+                    "result": "mednet_keepalive_ok"}
+        except Exception as e:
+            self._note_death(w, f"probe: {str(e)[:80]}")
+            session_event(self.id, "restore_failed", str(e)[:150])
+            return {"member": member,
+                    "result": "mednet_keepalive_probe_failed"}
+
+    def run(self, w, kind="doc", member=None, card=None):
+        w._started_at = time.monotonic()
+        creds = creds_for(self.id)
+        if not creds.get("url"):
+            raise BackendError("no_site_url")
+
+        member = (member or ((card or {}).get("insurance", {}).get("card_no")
+                             or "")).strip()
         if kind == "keepalive":
-            return {"member": member, "eligibility_no": elig_no}
+            # النبضة تدير استعادتها كاملة — بلا رقم عضوية أيضاً (الجاهزية أولاً)
+            return self._keepalive(w, member, creds)
+        if not member:
+            raise BackendError("member_empty")
+
+        self._goto_and_login(w, creds)
+
+        # 2) شاشة البحث — مع استعادة كاملة (ملاحة ← موسّع ← بناء بارد)
+        inp, val = self._ensure_member_screen(w, creds, kind)
+
+        # 3-5) رقم العضوية + دورة التحقق — مشتركة مع النبضة
+        elig_no = self._check_member(w, inp, member, kind)
+        self._note_ready(w)
 
         # 6) زر الطباعة (ظاهر الآن — النتيجة جاهزة)
         print_ctl = self._wait_find(

@@ -82,6 +82,169 @@ class NeedsCaptcha(Exception):
         self.image_b64 = image_b64
 
 
+class AuthLocked(Exception):
+    """قفل كامل لتأمين واحد: رفض صريح ببيانات الدخول (كلمة المرور)
+    أو رسالة القفل "Too many bad login attempts".
+    لا تُجرى أي محاولة جديدة حتى تتغير بيانات الاعتماد في
+    /etc/maxcall-insurers.json (تغيير كلمة المرور يفتح القفل تلقائياً)."""
+
+    def __init__(self, reason):
+        super().__init__(str(reason))
+        self.reason = str(reason)
+
+
+# ---------- سجل الأحداث الجنائي للجلسات + القفل ----------
+SESSION_EVENTS_FILE = STATE_DIR / "session-events.jsonl"
+AUTHLOCK_FILE = STATE_DIR / "authlock.json"
+_LOCK_EVENTS = ("lock", "unlock")
+
+# كاش في الذاكرة — يقرأ /health منه، ويُهيأ من السجل JSONL عند الإقلاع
+_session_cache: dict[str, dict] = {}
+
+
+def session_event(insurer, event, detail="", **fields):
+    """سطر JSONL واحد لكل تبدل حالة — المصدر الوحيد لكل إحصائيات الجلسة."""
+    rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+           "epoch": round(time.time(), 3),
+           "insurer": insurer, "event": event,
+           **({"detail": str(detail)[:300]} if detail else {}),
+           **fields}
+    try:
+        import json as _json
+        p = SESSION_EVENTS_FILE
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with p.open("a", encoding="utf-8") as f:
+            f.write(_json.dumps(rec, ensure_ascii=False) + "\n")
+        # تدوير عند تجاوز 2MB — لا نترك الملف يتضخم بلا نهاية
+        try:
+            if p.stat().st_size > 2 * 1024 * 1024:
+                p.replace(p.with_suffix(p.suffix + ".1"))
+        except OSError:
+            pass
+    except Exception:
+        pass  # السجل تشخيصي — لا يكسر أي تدفق أبداً
+    session_event_cache_apply(rec)
+    return rec
+
+
+def session_event_cache_apply(rec):
+    try:
+        insurer = rec.get("insurer")
+        if not insurer:
+            return
+        c = _session_cache.setdefault(insurer, {})
+        ev = rec.get("event")
+        c["lastEvent"] = ev
+        c["lastEventAt"] = rec.get("epoch")
+        if ev == "ready":
+            c["lastOk"] = rec.get("epoch")
+        elif ev == "dead":
+            c["lastDead"] = rec.get("epoch")
+        elif ev in ("restored", "restored_cold"):
+            c["lastRestore"] = rec.get("epoch")
+            c["restoresTotal"] = int(c.get("restoresTotal", 0)) + 1
+            c["lastOk"] = rec.get("epoch")
+        elif ev == "lock":
+            c["locked"] = True
+            c["lockReason"] = rec.get("detail") or ""
+            c["lockAt"] = rec.get("epoch")
+        elif ev == "unlock":
+            c["locked"] = False
+            c["lockReason"] = None
+    except Exception:
+        pass
+
+
+def session_cache_view(insurer):
+    c = dict(_session_cache.get(insurer, {}))
+    if c.get("locked") is None:
+        c["locked"] = bool(auth_locked(insurer))
+    return c
+
+
+def _creds_stamp():
+    """بصمة ملف الاعتمادات — تغيير كلمة المرور يغيرها ⇒ فتح القفل."""
+    try:
+        import hashlib
+        data = CREDS_FILE.read_bytes()
+        return f"{CREDS_FILE.stat().st_mtime_ns}:{hashlib.sha1(data).hexdigest()}"
+    except OSError:
+        return "missing"
+
+
+def _read_locks():
+    try:
+        return json.loads(AUTHLOCK_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _write_locks(d):
+    try:
+        AUTHLOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = AUTHLOCK_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(d, ensure_ascii=False, indent=1),
+                       encoding="utf-8")
+        tmp.replace(AUTHLOCK_FILE)
+    except Exception:
+        pass
+
+
+def auth_locked(insurer):
+    """هل التأمين مقفل؟ ويفتح تلقائياً إذا تغيرت بيانات الاعتماد."""
+    locks = _read_locks()
+    d = locks.get(insurer)
+    if not d:
+        return False
+    if d.get("stamp") != _creds_stamp():
+        # كلمة المرور تغيرت — افتح القفل واستأنف
+        try:
+            del locks[insurer]
+            _write_locks(locks)
+        except Exception:
+            pass
+        session_event(insurer, "unlock", "creds changed — lock auto-cleared")
+        return False
+    return True
+
+
+def auth_lock_reason(insurer):
+    d = _read_locks().get(insurer) or {}
+    return str(d.get("reason") or "") if auth_locked(insurer) else ""
+
+
+def set_auth_lock(insurer, reason):
+    stamp = _creds_stamp()
+    locks = _read_locks()
+    locks[insurer] = {"reason": str(reason)[:300], "stamp": stamp,
+                      "locked_at": round(time.time(), 3)}
+    _write_locks(locks)
+    c = _session_cache.setdefault(insurer, {})
+    c["locked"] = True
+    c["lockReason"] = str(reason)[:300]
+    c["lockAt"] = locks[insurer]["locked_at"]
+    session_event(insurer, "lock", str(reason)[:300])
+
+
+def _load_event_tail():
+    """هيئ كاش /health من آخر 400 سطر من السجل بعد إقلاع الخدمة."""
+    try:
+        p = SESSION_EVENTS_FILE
+        if not p.exists():
+            return
+        lines = p.read_text(encoding="utf-8", errors="ignore").splitlines()[-400:]
+        for line in lines:
+            try:
+                session_event_cache_apply(json.loads(line))
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+
+_load_event_tail()
+
+
 class NeedsChoice(Exception):
     """يحتاج الموظف أن يختار من قائمة (مثلاً: اسم طبيب غير مطابق في HIS)."""
 

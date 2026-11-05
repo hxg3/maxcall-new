@@ -32,6 +32,7 @@ from flask import Flask, jsonify, request
 
 from brokers.base import (
     BackendError, NeedsCaptcha, NeedsChoice, last_good_member, STATE_DIR,
+    session_cache_view, auth_locked, auth_lock_reason, AuthLocked,
 )
 from brokers.mednet import MedNet
 from brokers.nextcare import NextCare
@@ -94,6 +95,7 @@ class InsurerWorker(threading.Thread):
         self.cap = None             # {img, token, until, answer, event}
         self.cap_lock = threading.Lock()
         self.stop = threading.Event()
+        self._locked_log_at = 0.0   # سجل القفل مرة كل 15 دقيقة كحد أقصى
 
     # ---------------- الطابور ----------------
     def push(self, job):
@@ -131,6 +133,13 @@ class InsurerWorker(threading.Thread):
         kind = job.get("kind") or "doc"
         job["state"] = "running"
         self.log_job(job, "info", f"start kind={kind}")
+        # القفل: كلمة المرور مرفوضة — لا متصفح، لا محاولة، فقط رفض نظيف
+        if auth_locked(self.insurer):
+            self.running_job_id = None
+            self.last_activity = time.time()
+            self.fail(job, "مقفل — كلمة مرور التأمين تُحدّث من لوحة التحكم ثم يعود كل شيء فوراً",
+                      backend_detail=f"auth_locked: {auth_lock_reason(self.insurer)}")
+            return
         try:
             self.worker.ensure_context()
             self.worker.current_job = job
@@ -152,6 +161,9 @@ class InsurerWorker(threading.Thread):
                  "lease": CHOICE_LEASE_S})
         except BackendError as e:
             self.fail(job, str(e) or "backend_error")
+        except AuthLocked as e:
+            self.fail(job, f"مقفل — {e}",
+                      backend_detail=f"auth_locked: {auth_lock_reason(self.insurer)}")
         except Exception as e:
             self.worker.needs_context = True
             import traceback
@@ -253,6 +265,9 @@ class InsurerWorker(threading.Thread):
                  "lease": CHOICE_LEASE_S})  # صورة جديدة — كرّر
         except BackendError as e:
             self.fail(job, str(e) or "backend_error")
+        except AuthLocked as e:
+            self.fail(job, f"مقفل — {e}",
+                      backend_detail=f"auth_locked: {auth_lock_reason(self.insurer)}")
         except Exception as e:
             self.worker.needs_context = True
             import traceback
@@ -301,6 +316,13 @@ class InsurerWorker(threading.Thread):
         while not self.stop.is_set():
             time.sleep(30)
             if not HAS_PW:
+                continue
+            if auth_locked(self.insurer):
+                # مقفل — لا متصفح، لا محاولة، لا نبض إطلاقاً حتى الاعتمادات تتغير
+                now = time.time()
+                if now - self._locked_log_at > 900:
+                    self._locked_log_at = now
+                    log.warning(f"[{self.insurer}] heartbeat skipped — auth lock active")
                 continue
             member = last_good_member(self.insurer)
             if not member and not getattr(self.backend,
@@ -437,6 +459,10 @@ def answer_captcha(jid):
 def health():
     out = {}
     for iid, w in workers.items():
+        view = session_cache_view(iid)
+        locked = auth_locked(iid)
+        age = (round(time.time() - view["lastOk"], 0)
+               if view.get("lastOk") else None)
         out[iid] = {
             "alive": w.is_alive(),
             "busy": bool(w.running_job_id),
@@ -444,6 +470,14 @@ def health():
             "lastActivity": round(w.last_activity) or None,
             "sessionWarm": bool(w.last_activity),
             "captchaPending": bool(w.cap),
+            "locked": locked,
+            "lockReason": (auth_lock_reason(iid) if locked else ""),
+            "lastOk": view.get("lastOk"),
+            "lastDead": view.get("lastDead"),
+            "lastRestore": view.get("lastRestore"),
+            "restoresTotal": view.get("restoresTotal", 0),
+            "sessionAgeS": age,
+            "lastEvent": view.get("lastEvent"),
         }
     return jsonify({"ok": True, **out})
 

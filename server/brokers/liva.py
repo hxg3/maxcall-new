@@ -23,10 +23,12 @@ import os
 import re
 import time
 import urllib.parse
+from collections import deque
 from pathlib import Path
 
 from .base import Backend, BackendError, NeedsCaptcha, NeedsChoice
-from .base import creds_for, save_last_good_member
+from .base import creds_for, save_last_good_member, last_good_member
+from .base import auth_locked, set_auth_lock, session_event, AuthLocked
 
 HOST = "https://online.nlicgulf.com:12443"
 _REPORT_PAT = re.compile(r"\.pdf|pdfdisplayservlet|ReportsViewer", re.I)
@@ -358,6 +360,20 @@ def _match_doctor(items, wanted):
     return None
 
 
+def _is_vpn_denied(url, body_text):
+    """رفض صريح من بوابة FortiGate: قفل "Too many bad login attempts"
+    أو أي بارامتر err= في رابط تسجيل الدخول (رفض كلمة المرور)."""
+    u = (url or "").lower()
+    if "err=sslvpn_login_permission_denied" in u:
+        return True
+    if "/remote/login" in u and "err=" in u:
+        return True     # أي رفض صريح من البوابة، ليس انتهاء مهلة شبكي
+    t = (body_text or "").lower()
+    if "too many bad login attempts" in t:
+        return True
+    return False
+
+
 class Liva(Backend):
     id = "liva"
     report_capture = "download"
@@ -366,6 +382,10 @@ class Liva(Backend):
     def __init__(self):
         self._choice_answer = None
         self._vpn_login_at = 0.0
+        self._portal_auths = deque()   # طوابع استعادة البوابة — حد 10/ساعة
+        self._cold_rebuilds = deque()  # طوابع البناء البارد — حد 4/ساعة
+        self._dead_since = None        # None = الجلسة حية آخر تحقق
+        self._last_ok_at = 0.0
 
     # ---------- التقاط ----------
     @staticmethod
@@ -444,6 +464,20 @@ class Liva(Backend):
                              !!document.querySelector('.condensed-card, .card-title, #CaptchaInputText, #txtMemberId')""",
                         timeout_s=30, poll_s=0.5)
         if not ok and not w.page.evaluate("() => !!document.querySelector('.condensed-card, .card-title')"):
+            # رفض صريح من FortiGate؟ — قفل فوري: لا محاولة أخرى إطلاقاً
+            # حتى تتغير كلمة المرور (حماية من القفل الكامل للبوابة)
+            url = w.page.url or ""
+            try:
+                body = w.page.evaluate(
+                    "() => document.body ? document.body.innerText : ''") or ""
+            except Exception:
+                body = ""
+            if _is_vpn_denied(url, body):
+                reason = ("sslvpn_permission_denied (Too many bad login attempts)"
+                          if "permission_denied" in url.lower()
+                          else "sslvpn_login_rejected (err=)").strip()
+                set_auth_lock(self.id, reason)
+                raise AuthLocked(reason)
             raise BackendError(f"vpn_login_timeout | {self._state_label(w)}")
         w.progress("login", "ok", "vpn")
 
@@ -1442,55 +1476,156 @@ class Liva(Backend):
             pass
         return True
 
+    # ---------- الاستعادة الكاملة التلقائية — الجاهزية الدائمة ----------
+    def _may_portal_auth(self):
+        """حد أقصى 10 استعادة بوابة/ساعة + فاصل 4 دقائق بين المحاولات —
+        يمنع أي عاصفة كابتشا حتى لو حدث خطأ منطقي."""
+        now = time.time()
+        while self._portal_auths and now - self._portal_auths[0] > 3600:
+            self._portal_auths.popleft()
+        if self._portal_auths and now - self._portal_auths[-1] < 240:
+            return False
+        if len(self._portal_auths) >= 10:
+            return False
+        self._portal_auths.append(now)
+        return True
+
+    def _may_cold_rebuild(self):
+        """حد أقصى 4 بناء بارد/ساعة + فاصل 10 دقائق."""
+        now = time.time()
+        while self._cold_rebuilds and now - self._cold_rebuilds[0] > 3600:
+            self._cold_rebuilds.popleft()
+        if self._cold_rebuilds and now - self._cold_rebuilds[-1] < 600:
+            return False
+        if len(self._cold_rebuilds) >= 4:
+            return False
+        self._cold_rebuilds.append(now)
+        return True
+
+    def _note_death(self, w, reason):
+        """سجّل موت الجلسة مرة واحدة لكل فترة (لا سطر كل 4.5 دقيقة)."""
+        if self._dead_since is not None:
+            return
+        now = time.time()
+        self._dead_since = now
+        session_event(self.id, "dead", reason,
+                      last_ok_ago_s=round(now - self._last_ok_at, 0)
+                      if self._last_ok_at else None,
+                      url=(w.page.url or "")[:120])
+
+    def _note_ready(self, w):
+        now = time.time()
+        first = (self._last_ok_at == 0.0)
+        self._last_ok_at = now
+        if self._dead_since is not None:
+            dead_for = round(now - self._dead_since, 1)
+            session_event(self.id, "restored", f"after {dead_for}s dead",
+                          dead_for_s=dead_for)
+            self._dead_since = None
+        elif first:
+            # أول تحقق بعد الإقلاع — تثبيت baseline لعمر الجلسة في التحليلات
+            session_event(self.id, "ready",
+                          "session alive (first verified after boot)")
+
+    def _pump_ready(self, w, creds, memberNo):
+        """قاد المتصفح من أي حالة إلى صفحة MemberDetails الجاهزة.
+        يرجع True بمجرد التأكد أن الصفحة حية (eligibility re-check نجاح).
+
+        حلقة idempotent — كل خطوة تقرأ الواقع من الـDOM، لا حالة محفوظة.
+        بلا إعادة تحميل إجبارية (كانت تقتل البوابة) — التنقل عبر الحالة فقط."""
+        # سجّل أن الجلسة ميتة لحظة اكتشافها (مرة واحدة لكل فترة) —
+        # هذا ما يعطينا حقلاً زمنياً واضحاً في التحليلات
+        state0 = self._state(w)
+        if state0 != "member" and "MemberDetails" not in (w.page.url or ""):
+            self._note_death(w, f"not_ready state={state0}")
+        if "nlicgulf.com" not in (w.page.url or ""):
+            w.page.goto(creds.get("url") or (HOST + "/remote/login?lang=en"),
+                        wait_until="domcontentloaded", timeout=45000)
+        probe_fails = 0
+        for _ in range(12):
+            url = w.page.url or ""
+            state = self._state(w)
+            if state == "member" or "MemberDetails" in url:
+                ok = self._eligibility_probe(w, memberNo)
+                if ok:
+                    return True
+                # البحث بجلسة ميتة يرحّل البوابة لصفحة الدخول —
+                # اقرأ الحالة جديدة بدل الهروب مباشرة للبناء البارد
+                probe_fails += 1
+                if probe_fails >= 3:
+                    return False
+                w.sleep(1.5)
+                continue
+            if state == "portal-home":
+                self._open_member_details(w)
+                continue
+            if state == "provider-card":
+                self._open_provider(w)
+                continue
+            if state == "provider-login":
+                if not self._may_portal_auth():
+                    w.progress("keepalive", "run",
+                               "portal re-auth rate-limited — سيُستأنف تلقائياً")
+                    return False
+                session_event(self.id, "restore_portal",
+                              "dead session — auto captcha re-auth")
+                if self._auto_solve_captcha(w):
+                    continue
+                w.progress("login", "run",
+                           "auto re-auth failed — ستُعاد المحاولة في النبضة القادمة")
+                return False
+            if state == "vpn-login":
+                self._do_vpn_login(w, creds)   # رفض صريح ⇒ AuthLocked ⇒ قفل كامل
+                self._vpn_login_at = time.time()
+                continue
+            # مجهول — Angular أو صفحة بين حالات — انتظر ثم أعد الفحص
+            w.progress("navigate", "run", "keepalive: unknown — waiting render")
+            w.sleep(2.0)
+        return False
+
     def _keepalive(self, w, member):
+        memberNo = str(member or "").strip() or last_good_member(self.id)
+        if auth_locked(self.id):
+            w.progress("keepalive", "run",
+                       "auth locked — لا محاولات إطلاقاً حتى تتغير كلمة المرور")
+            return {"member": member, "result": "liva_auth_locked"}
         creds = creds_for(self.id)
         try:
-            if "nlicgulf.com" not in (w.page.url or ""):
-                w.page.goto(creds.get("url") or (HOST + "/remote/login?lang=en"),
-                            wait_until="domcontentloaded", timeout=30000)
-
-            # حلقة حالات محدودة — نفس مبدأ run() لكن بلا كابتشا أبداً
-            for _ in range(8):
-                url = w.page.url or ""
-                state = self._state(w)
-                if "MemberDetails" in url or state == "member":
-                    # الحالة المثالية: نفس الصفحة — لا نخرج أبداً
-                    ok = self._eligibility_probe(w, member)
-                    return {"member": member,
-                            "result": "liva_keepalive_ok" if ok else "liva_keepalive_probe_failed"}
-                if state == "portal-home":
-                    self._open_member_details(w)
-                    ok = self._eligibility_probe(w, member)
-                    return {"member": member,
-                            "result": "liva_keepalive_ok" if ok else "liva_keepalive_probe_failed"}
-                if state == "provider-card":
-                    self._open_provider(w)
+            cold = False
+            for _ in range(2):
+                ok = self._pump_ready(w, creds, memberNo)
+                if ok:
+                    self._note_ready(w)
+                    return {"member": member, "result": "liva_keepalive_ok"}
+                if cold:
+                    break
+                # فشل — جرّب مرة واحدة بناء بارداً (متصفح جديد من الصفر):
+                # نفس مسار "صباح جديد" المضمون — يمحو أي حالة عالقة
+                if self._may_cold_rebuild():
+                    session_event(self.id, "restore_cold",
+                                  f"in-place restore failed | url={(w.page.url or '')[-80:]}")
+                    w.needs_context = True
+                    self._vpn_login_at = 0.0     # دخول واحد فوراً — ليس عاصفة
+                    w.ensure_context()
+                    cold = True
                     continue
-                if state == "vpn-login":
-                    if time.time() - self._vpn_login_at > 3600:
-                        self._do_vpn_login(w, creds)
-                        self._vpn_login_at = time.time()
-                        w.progress("login", "ok", "vpn re-login (keepalive)")
-                    else:
-                        return {"member": member, "result": "liva_keepalive_vpn_throttled"}
-                    continue
-                if state == "provider-login":
-                    # كابتشا — تُترك للمهمة الحقيقية
-                    w.progress("navigate", "run",
-                               "portal re-auth (captcha) deferred to next real job")
-                    return {"member": member,
-                            "result": "liva_keepalive_portal_auth_required"}
-                # مجهول — غالباً Angular بين الصفحات — انتظر ثم أعد الفحص
-                w.progress("navigate", "run", "keepalive: unknown — waiting render")
-                w.sleep(2.0)
-            return {"member": member, "result": "liva_keepalive_state_loop"}
+                break
+            self._note_death(w, "restore_failed")
+            return {"member": member, "result": "liva_keepalive_restore_failed"}
+        except AuthLocked as e:
+            self._note_death(w, f"auth locked: {str(e)[:80]}")
+            return {"member": member, "result": "liva_auth_locked"}
         except Exception as e:
+            self._note_death(w, f"error: {str(e)[:80]}")
             w.progress("navigate", "run", f"keepalive skipped: {str(e)[:80]}")
-            return {"member": member, "result": "liva_keepalive_skipped"}
+            session_event(self.id, "restore_failed", str(e)[:150])
+            return {"member": member, "result": "liva_keepalive_restore_failed"}
 
     # ---------- التدفق ----------
     def run(self, w, kind="doc", member=None, card=None):
         w._started_at = time.monotonic()
+        if kind != "keepalive" and auth_locked(self.id):
+            raise AuthLocked("liva auth locked — password stale?")
         creds = creds_for(self.id)
         member = (member or ((card or {}).get("insurance", {}) or {}).get("card_no")
                   or "").strip()
@@ -1558,7 +1693,9 @@ class Liva(Backend):
                 if kind == "diag2":
                     # تشخيص عميق للطباعة/Reprint — يكسر mechanisms بلا أثر جانبي
                     return self._diag_deep(w, member, card)
-                return self._print_or_reprint(w, member, card)
+                out = self._print_or_reprint(w, member, card)
+                self._note_ready(w)
+                return out
             # مجهول → غالباً Angular ما زال يبني DOM — انتظر ثم أعد الفحص
             # (لا إعادة تحميل — كانت هي ما يقتل البوابة ويُغرق في حلقة)
             unknown_tries += 1

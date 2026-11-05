@@ -11,6 +11,7 @@ import urllib.parse
 import re as _re
 
 from .base import Backend, BackendError, save_last_good_member
+from .base import session_event
 from .base import creds_for
 
 HOST = "https://pulse-uae.nextcarehealth.com"
@@ -75,6 +76,34 @@ class NextCare(Backend):
     id = "nextcare"
     report_capture = "download"          # الملف ينزل مباشرة — لا نافذة
     REPORT_EXT_RE = r"\.pdf(\?|$)|^="
+
+    def __init__(self):
+        self._dead_since = None
+        self._last_ok_at = 0.0
+
+    # ---------- تتبع الجلسة (قاتل المشاكل + التحليلات) ----------
+    def _note_ready(self, w):
+        now = time.time()
+        first = (self._last_ok_at == 0.0)
+        self._last_ok_at = now
+        if self._dead_since is not None:
+            dead_for = round(now - self._dead_since, 1)
+            session_event(self.id, "restored", f"after {dead_for}s dead",
+                          dead_for_s=dead_for)
+            self._dead_since = None
+        elif first:
+            session_event(self.id, "ready",
+                          "session alive (first verified after boot)")
+
+    def _note_death(self, w, reason):
+        if self._dead_since is not None:
+            return
+        now = time.time()
+        self._dead_since = now
+        session_event(self.id, "dead", reason,
+                      last_ok_ago_s=round(now - self._last_ok_at, 0)
+                      if self._last_ok_at else None,
+                      url=(w.page.url or "")[:120])
 
     # ---------- أدوات ----------
     def report_matches(self, url):
@@ -165,6 +194,23 @@ class NextCare(Backend):
         creds = creds_for(self.id)
         member = (member or ((card or {}).get("insurance", {}).get("card_no")
                              or "")).strip()
+        if kind == "keepalive" and not member:
+            # الجاهزية فقط — بلا تحقق (لا رقم محفوظ بعد): حمّل صفحة
+            # الاستعلام من جديد بجلسة حية، وعند الحاجة سجّل الدخول
+            try:
+                if "pulse-uae.nextcarehealth.com" not in (w.page.url or ""):
+                    w.page.goto(creds["url"], wait_until="domcontentloaded",
+                                timeout=45000)
+                if self._safe_eval(w, JS_IS_LOGIN):
+                    self._note_death(w, "session expired — login required")
+                    self.do_login(w, creds)
+                self._open_eligibility(w)
+                self._note_ready(w)
+                return {"member": member, "result": "nextcare_keepalive_ready"}
+            except Exception as e:
+                session_event(self.id, "restore_failed", str(e)[:150])
+                return {"member": member,
+                        "result": "nextcare_keepalive_restore_failed"}
         service_type = ((card or {}).get("insurance", {}).get("service_type")
                         or (card or {}).get("service_type")
                         or (card or {}).get("plan") or "Out-Patient").strip()
@@ -177,6 +223,7 @@ class NextCare(Backend):
                         timeout=45000)
 
         if self._safe_eval(w, JS_IS_LOGIN):
+            self._note_death(w, "session expired — login required")
             self.do_login(w, creds)
 
         # تسريع آمن: إن كنا على صفحة استعلام جاهزة تماماً (جلسة صالحة +
@@ -269,6 +316,7 @@ class NextCare(Backend):
             raise BackendError("print_button_not_found")
 
         save_last_good_member(self.id, member)
+        self._note_ready(w)
         w.progress("eligibility", "ok")
         if kind == "keepalive":
             # الصفحة تُعاد تحميلها نظيفة عند الطلب القادم
