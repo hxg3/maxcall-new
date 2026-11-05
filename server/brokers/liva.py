@@ -22,6 +22,7 @@ import json
 import os
 import re
 import time
+import urllib.parse
 from pathlib import Path
 
 from .base import Backend, BackendError, NeedsCaptcha, NeedsChoice
@@ -53,7 +54,24 @@ JS_STATE = f"""() => {{ {_MJS}
 JS_DIAG_DEEP = """() => {
   const vis = el => el.getClientRects().length > 0;
   const out = {};
+  out.allInputs = [...document.querySelectorAll('input, select, textarea')]
+      .map(el => ({tag: el.tagName, id: el.id || '', name: el.name || '',
+                   type: el.type || '', value: String(el.value || '').slice(0, 60),
+                   cls: String(el.className || '').slice(0, 40),
+                   placeholder: el.placeholder || '', maxLength: el.maxLength,
+                   readonly: el.readOnly, disabled: el.disabled,
+                   outer: el.outerHTML.slice(0, 160)}));
+  const chain = (el, n) => { const out = []; let cur = el;
+      for (let i = 0; i < n && cur; i++, cur = cur.parentElement)
+          out.push({tag: cur.tagName, cls: String(cur.className||'').slice(0,40),
+                    id: cur.id || ''}); return out; };
   const btn = document.querySelector('button.Printmember');
+  out.btnParents = btn ? chain(btn, 5) : null;
+  const spec = document.querySelector('#txtSpeciality');
+  out.specOuter = spec ? spec.outerHTML.slice(0, 220) : null;
+  out.specParents = spec ? chain(spec, 4) : null;
+  out.dropdownItems = [...document.querySelectorAll('ul.ui-autocomplete li.ui-menu-item')]
+      .filter(vis).map(li => (li.textContent || '').trim().slice(0, 60));
   out.printBtn = btn ? {
     outer: btn.outerHTML.slice(0, 300),
     attrs: Object.fromEntries([...btn.attributes].map(a => [a.name, a.value])),
@@ -131,12 +149,17 @@ JS_DISMISS_ALERT = """() => {
   const alerts = [...document.querySelectorAll('body *')]
       .filter(el => ok(el) && /already printed/i.test(el.textContent || ''));
   if (!alerts.length) return 'none';
-  // ابحث عن زر موافق/إغلاق داخل أي من آباء التنبيه (أحدثها أولاً)
+  // ابحث عن أي زر قابل للنقر داخل نفس التنبيه أو في آبائه
   for (const a of alerts) {
     let node = a;
-    for (let depth = 0; node && depth < 6; depth++, node = node.parentElement) {
-      const btn = [...node.querySelectorAll('button, a, input[type=button], input[type=submit]')]
-          .find(el => ok(el) && /^\\s*(ok|yes|close|dismiss|حسناً|موافق)\\s*$/i.test(el.textContent || el.value || ''));
+    for (let depth = 0; node && depth < 8; depth++, node = node.parentElement) {
+      const btns = [...node.querySelectorAll('button, a, input[type=button], input[type=submit]')]
+          .filter(el => ok(el));
+      // أول زر غير مرتبط بإلغاء (تجنب زر "لا" إن وجد)
+      const btn = btns.find(el => {
+        const t = (el.textContent || el.value || '').trim().toLowerCase();
+        return !/^(no|cancel|إلغاء|لا)$/i.test(t);
+      }) || btns[0];
       if (btn) { btn.click(); return 'clicked'; }
     }
   }
@@ -468,7 +491,82 @@ class Liva(Backend):
             return
         raise BackendError(f"provider_open_failed | {self._state_label(w)}")
 
+    # ---------- الحل الآلي للكابتشا (ddddocr) قبل إزعاج الموظف ----------
+    _OCR = None
+
+    @staticmethod
+    def _get_ocr():
+        """مكتبة OCR أوفلاين متخصصة بالكابتشا — تُهيأ مرة واحدة (تكلفة ~0.5 ث)."""
+        if Liva._OCR is None:
+            try:
+                import ddddocr
+                Liva._OCR = ddddocr.DdddOcr(show_ad=False)
+            except Exception:
+                Liva._OCR = False
+        return Liva._OCR or None
+
+    def _auto_solve_captcha(self, w, attempts=6):
+        """حاول حل كابتشا بوابة المزوّد آلياً (ddddocr) حتى `attempts` مرات.
+
+        كل محاولة فاشلة تُصدر كابتشا جديدة من الموقع ⇒ النص يتغير فعلياً.
+        الحل يجب أن ينتظر جاهزية صفحة الدخول (Angular يربط معالج النموذج
+        مبكراً قبل اكتمال البناء) — إرسال مبكر ⇒ النقرة تُفقد ⇒ فشل وهمي.
+        التحقق من النجاح: مغادرة صفحة الدخول نحو اللوحة، لا مجرد اختفاء
+        حقل الكابتشا (يختفي أثناء إعادة البناء حتى بعد الرفض!)."""
+        ocr = self._get_ocr()
+        if not ocr:
+            return False
+        # انتظار جاهزية صفحة الدخول بالكامل قبل أي تفاعل (النقرة تُفقد
+        # إن أُرسلت قبل أن يتشبث Angular بمعالج النموذج)
+        ready = w.wait_for("() => !!document.querySelector('#CaptchaInputText')",
+                           timeout_s=25, poll_s=0.5)
+        if not ready:
+            return False
+        time.sleep(2.5)
+        for i in range(attempts):
+            shot = self._captcha_jpeg_bytes(w)
+            if not shot:
+                return False
+            try:
+                ans = ocr.classification(shot) or ""
+            except Exception:
+                return False
+            ans = re.sub(r"[^A-Za-z]", "", str(ans or "")).upper()
+            if not ans:
+                continue
+            w.progress("captcha", "run", f"auto solve attempt={i+1} text={ans}")
+            try:
+                self._submit_provider_login(w, ans)
+            except BackendError as e:
+                w.progress("captcha", "run", f"auto submit error: {e}")
+                return False
+            ok = w.wait_for("() => /Dashboard/i.test(location.pathname)",
+                            timeout_s=25, poll_s=0.5)
+            if ok:
+                w.progress("captcha", "ok", "auto solve succeeded")
+                return True
+            w.progress("captcha", "run", "auto solve rejected — retry fresh captcha")
+            time.sleep(1.5)
+        return False
+
     # ---------- كابتشا بوابة المزوّد ----------
+    def _freeze_captcha(self, w):
+        """أوقف دوران الكابتشا التلقائي (كل 60 ثانية).
+
+        السبب: البوابة تستدعي DefaultCaptcha/Refresh كل دقيقة فتدوّر قيمة
+        الكابتشا في الخادم — فتصبح الصورة التي قرأها الموظف قديمة إن تأخّر
+        ⇒ رفض "Enter wrong captcha!". بتجميدها تبقى الصورة والقيمة ثابتتين
+        طوال مهلة التحقق ⇒ الموظف يأخذ راحته ولا يُرفض له شيء.
+        يُسجَّل مرة واحدة لكل سياق."""
+        try:
+            if getattr(w, "_captcha_frozen", False):
+                return
+            w.ctx.route("**/DefaultCaptcha/Refresh", lambda route: route.abort())
+            w._captcha_frozen = True
+            w.progress("captcha", "run", "captcha refresh frozen (stable code)")
+        except Exception:
+            pass
+
     @staticmethod
     def _captcha_jpeg_bytes(w):
         el = w.q1("#CaptchaImage")
@@ -547,8 +645,10 @@ class Liva(Backend):
             return []
 
     def _type_into_doctor(self, w, text):
-        """اكتب في كل حقل doctor candidate حتى تظهر قائمة jQuery UI —
-        يرجع عنصر الحقل المستخدم أو None."""
+        """اكتب في حقول الدكتور فقط حتى تظهر قائمة jQuery UI.
+        تستثنى الحقول التي ليست طبيب (sepeciality — يملأها البوابة تلقائياً)."""
+        NOT_DOCTOR = {"txtMemberId", "txtGsmNo", "CaptchaInputText", "txtSpeciality",
+                      "txtPatientId", "txtDateofAdmission", "txtSecurityToken"}
         loc = w.page.locator(
             'input.ui-autocomplete-input, input[role="combobox"],'
             ' input[id*="doctor" i], input[name*="doctor" i]')
@@ -556,6 +656,10 @@ class Liva(Backend):
             el = loc.nth(i)
             try:
                 if not el.is_visible():
+                    continue
+                el_id = el.get_attribute("id") or ""
+                el_name = el.get_attribute("name") or ""
+                if el_id in NOT_DOCTOR or el_name in NOT_DOCTOR:
                     continue
                 el.fill("")
                 el.press_sequentially(text, delay=40)
@@ -689,17 +793,26 @@ class Liva(Backend):
                    f"gsm={digits} final-raw field={val}")
 
     def _wait_speciality(self, w):
+        """البوابة تملأها تلقائياً بعد اختيار الطبيب (SP_DESCRIPTION + Data-spCode).
+        يجب أن تحمل الحقل القيمة والكود — شرط معالج الطباعة الصامت."""
         state = w.page.evaluate(JS_SPECIALITY_OK)
         if state == "absent":
             w.progress("eligibility", "run", "speciality field absent — skipped")
             return
         ok = w.wait_for(
-            "() => { const el = document.querySelector('#txtSpeciality');"
-            " return el && (el.value || '').trim().length > 0; }",
-            timeout_s=14, poll_s=0.4)
+            """() => { const el = document.querySelector('#txtSpeciality');
+                      return el && (el.value || '').trim() &&
+                             (el.getAttribute('Data-spCode') || '').trim(); }""",
+            timeout_s=20, poll_s=0.4)
+        info = w.page.evaluate(
+            """() => { const el = document.querySelector('#txtSpeciality');
+                      return { val: (el && el.value) || '',
+                               spCode: (el && el.getAttribute('Data-spCode')) || '' }; }""") or {}
+        w.progress("eligibility", "run",
+                   f"speciality=\"{info.get('val')}\" spCode={info.get('spCode') or '-'}")
         if not ok:
-            raise BackendError("speciality_autofill_missing")
-        w.progress("eligibility", "run", "speciality filled")
+            raise BackendError(
+                f"speciality_autofill_missing | val={str(info.get('val', ''))[:40]}")
 
     # ---------- Fallback: مطبوع مسبقاً → Reprint ----------
     def _already_printed_visible(self, w):
@@ -714,7 +827,7 @@ class Liva(Backend):
         except Exception:
             outcome = "error"
         if outcome in ("clicked", "none"):
-            return outcome == "clicked"
+            return True
         # احتياط: Escape
         try:
             w.page.keyboard.press("Escape")
@@ -724,13 +837,25 @@ class Liva(Backend):
             return False
 
     def _find_reprint_button(self, w):
+        """الزر له كلاس ListOfMem ونص "Reprint Online Claim Form" — ليس RePrintmember."""
         try:
             handle = w.page.evaluate_handle(JS_REPRINT_BTN).as_element()
-            return handle or w.q1("button.RePrintmember, .RePrintmember")
+            if handle:
+                return handle
         except Exception:
-            return w.q1("button.RePrintmember, .RePrintmember")
+            pass
+        try:
+            return w.page.evaluate_handle("""() => {
+              const ok = el => el.getClientRects().length > 0 && !el.disabled;
+              return [...document.querySelectorAll('button, a, input[type=button], input[type=submit]')]
+                  .find(el => ok(el) && /reprint\\s+(online\\s+)?claim/i.test((el.textContent || el.value || ''))) || null;
+            }""").as_element()
+        except Exception:
+            pass
+        # fallback by class ListOfMem
+        return w.q1("button.ListOfMem, .ListOfMem, button.Listofmem")
 
-    def _wait_reprint_rows(self, w, timeout_s=15):
+    def _wait_reprint_rows(self, w, timeout_s=30):
         door = time.monotonic() + timeout_s
         while time.monotonic() < door:
             try:
@@ -739,7 +864,7 @@ class Liva(Backend):
                 rows = []
             if rows:
                 return rows
-            time.sleep(0.4)
+            time.sleep(0.5)
         return []
 
     @staticmethod
@@ -781,13 +906,15 @@ class Liva(Backend):
     def _click_reprint_row(self, w, claim_no):
         """انقر رقم الـclaim داخل الصف بنقرة CDP موثوقة (قد يفتح popup)."""
         try:
-            row = w.page.locator("tr", has_text=claim_no).first
-            if row.count() == 0:
-                row = w.page.locator(f"text={claim_no}").first
-            if row.count() == 0:
+            # المعالج مركّز على td:first-child — انقر الخلية الأولى حصراً
+            cell = w.page.locator(f"#PreAprovals tbody tr:has-text('{claim_no}') td").first
+            if cell.count() == 0:
+                cell = w.page.locator(f"tr:has-text('{claim_no}') td").first
+            if cell.count() == 0:
                 return False
-            link = row.locator("a, button, input[type=button]").first
-            handle = (link if link.count() > 0 else row).element_handle()
+            handle = cell.element_handle()
+            if handle and w.click(handle):
+                return True
             return bool(handle and w.trusted_click(handle))
         except Exception:
             return False
@@ -837,6 +964,20 @@ class Liva(Backend):
     def _print_or_reprint(self, w, member, card):
         """المسار الطبيعي (Print Online Claim Form) وإلا مسار Reprint تلقائياً
         عند رسالة "Claim Form already printed"."""
+        # تصحيح اسم سمة boostrap: البوابة تقرأ data-DocCode (كبيرة) بينما HTML
+        # يحمل data-doccode (صغيرة) ⇒ DocNo = undefined ⇒ يتم تجاهلdoAjax بصمت
+        try:
+            w.page.evaluate("""() => {
+              const doc = document.querySelector('#txtDoctor');
+              if (doc) {
+                const code = doc.getAttribute('data-doccode');
+                if (code && !doc.getAttribute('data-DocCode'))
+                  doc.setAttribute('data-DocCode', code);
+              }
+            }""")
+        except Exception:
+            pass
+
         # لا ننتظر زمناً اعتباطياً ثم نفشل — نسجل بالضبط ما هو موجود
         cands = self._dump_print_candidates(w)
         w.progress("print", "run", f"candidates={json.dumps(cands, ensure_ascii=False)[:400]}")
@@ -858,39 +999,110 @@ class Liva(Backend):
             info = ("found" if btn2 else "absent") + f" | {self._dump_print_candidates(w)}"
             raise BackendError(f"print_button_not_ready | {info[:300]} | {state}")
         w._already_printed = False
-        w.progress("print", "run", "clicking Print (trusted mouse)…")
-        if not w.trusted_click(btn):
-            w.click(btn)          # احتياط بالنقرة الاصطناعية
-        r = self._report_hit_poll(w, 22, stop_pred=lambda _w: _w._already_printed
-                                                     or self._already_printed_visible(_w))
-        if r.get("ok"):
-            w.progress("print", "ok", f"url={str(r.get('url', ''))[:110]}")
-            return {"member": member, "pdf_bytes": r.get("bytes"),
-                    "pdf_url": r.get("url", "")}
+        w.progress("print", "run", "calling doAjax directly…")
+        # استدعاء doAjax مباشرة من سياق الصفحة (يتجاوز مشكلة النقر على الزر)
+        do_result = None
+        try:
+            do_result = w.page.evaluate("""() => {
+              const Memberobj = {};
+              Memberobj.Hospno = window.UserObj?.Name || '';
+              Memberobj.UserType = window.UserObj?.UserType || 'PROVIDER';
+              Memberobj.Speciality = $('#txtSpeciality').attr('Data-spCode');
+              Memberobj.DocNo = $('#txtDoctor').attr('data-DocCode');
+              Memberobj.Gm_MemberNo = $('#txtGsmNo').val();
+              Memberobj.PatientId = $('#txtPatientId').val();
+              Memberobj.UserIdVal = window.UserObj?.UserID || '';
+              Memberobj.ClientName = $('#txtEmpName').val();
+              Memberobj.CardNo = $('#txtCardNo').val();
+              Memberobj.ClientNo = $('#txtClientNo').val();
+              Memberobj.PolicyNo = $('#txtPolicyNo').val();
+              Memberobj.mfromdate = $('#txtCoverFromDate').val();
+              Memberobj.mtodate = $('#txtCoverToDate').val();
 
-        if not (w._already_printed or self._already_printed_visible(w)):
-            # سجل كامل للحالة عند الفشل — لن نخمن
+              // تسليم القيم للتشخيص قبل الإرسال
+              try { window.__MCR_LAST_MEMBEROBJ = Memberobj; } catch (e) {}
+
+              return new Promise((resolve) => {
+                doAjax(URL + 'Reports/PatientInfo', 'Post', Memberobj, 'application/json', "json", '', function (err, result) {
+                  if (err) resolve({ doAjaxError: String(err) });
+                  else resolve(result);
+                });
+              });
+            }""")
+        except Exception as e:
+            w.progress("print", "run", f"doAjax eval error: {str(e)[:120]}")
+
+        if do_result and do_result.get('st', {}).get('StatusCode') == 'S':
+            file_path = do_result.get('FilePath')
+            w.progress("print", "run", f"doAjax success, FilePath={str(file_path)[:80]}")
+            if file_path:
+                abs_url = file_path if file_path.lower().startswith(('http://', 'https://')) \
+                    else urllib.parse.urljoin(w.page.url or '', file_path)
+                try:
+                    resp = w.ctx.request.get(abs_url, timeout=30000)
+                    ct = (resp.headers.get('content-type') or '').lower()
+                    body = resp.body() or b''
+                    w.progress("print", "run", f"PDF fetch: status={resp.status} ct={ct} size={len(body)}")
+                    if body and body.startswith(b'%PDF'):
+                        w.progress("print", "ok", f"url={abs_url[:110]}")
+                        return {"member": member, "pdf_bytes": body, "pdf_url": abs_url}
+                    else:
+                        w.progress("print", "run", f"not a PDF, head={body[:20]}")
+                except Exception as e:
+                    w.progress("print", "run", f"PDF fetch error: {str(e)[:120]}")
+            else:
+                w.progress("print", "run", "FilePath empty in doAjax result")
+        else:
+            err_info = ""
+            if do_result:
+                err_info = f" statusCode={do_result.get('st',{}).get('StatusCode')} error={str(do_result.get('st',{}).get('StatusDescription',''))[:80]}"
+            # تسجيل Memberobj للتشخيص — لمعرفة أي حقل ناقص أو خاطئ
             try:
-                open_u = w.page.evaluate(
-                    "() => String(window.__MCR_OPEN_URL||'')")[:60]
+                mob = w.page.evaluate("() => window.__MCR_LAST_MEMBEROBJ || {}")
+                w.progress("print", "run", f"doAjax failed | Memberobj={json.dumps(mob, ensure_ascii=False)[:400]} | {err_info}")
             except Exception:
-                open_u = "?"
-            w.progress("print", "error",
-                       f"not captured. url={(w.page.url or '')[-80:]} "
-                       f"open_url={open_u} diag={self._dump_print_candidates(w)}")
-            raise BackendError(f"print_failed | {r.get('error')}")
+                w.progress("print", "run", f"doAjax not successful{err_info}")
         w.progress("print", "run", "already printed — auto fallback to Reprint")
         if not self._dismiss_already_printed(w):
             w.progress("print", "run", "could not dismiss already-printed dialog")
 
         btn = self._find_reprint_button(w)
         if not btn:
+            # تشخيص شامل قبل الفشل
+            try:
+                all_btns = w.page.evaluate("""() => {
+                  return [...document.querySelectorAll('button, a, input[type=button], input[type=submit]')]
+                    .filter(el => el.getClientRects().length > 0)
+                    .map(el => ({tag: el.tagName, text: (el.textContent||el.value||'').trim().slice(0,60), cls: el.className||''}))
+                }""")
+                w.progress("print", "error", f"reprint_button_not_found | all_buttons={json.dumps(all_btns, ensure_ascii=False)[:500]}")
+            except Exception:
+                pass
             raise BackendError("reprint_button_not_found")
-        if not w.trusted_click(btn):
-            w.click(btn)
-        w.progress("print", "run", "reprint table opened")
-        rows = self._wait_reprint_rows(w, timeout_s=15)
+        # نقرة JS المباشرة — الزر type="submit" وقد يكون مغطّى بصيرورة
+        # التحميل .Loading (فتفقد نقرة CDP إياه). المعالج الموجود
+        # delegated عبر jQuery على document فيستقبل أي click.
+        if not w.click(btn):
+            if not w.trusted_click(btn):
+                raise BackendError("reprint_click_failed")
+        w.progress("print", "run", "reprint button clicked — waiting for table")
+        rows = self._wait_reprint_rows(w, timeout_s=20)
         if not rows:
+            # تشخيص شامل لما يظهر على الصفحة بعد النقر على Reprint
+            try:
+                page_state = w.page.evaluate("""() => {
+                  return {
+                    visibleTables: [...document.querySelectorAll('table')].filter(t => t.getClientRects().length > 0).map(t => t.outerHTML.slice(0, 200)),
+                    modals: [...document.querySelectorAll('.modal, .ui-dialog, .swal2-container, [class*="modal"]')].filter(m => m.getClientRects().length > 0).map(m => m.textContent.trim().slice(0, 200)),
+                    failedMsg: (document.querySelector('#FailedMsg')?.textContent || '').trim().slice(0, 200),
+                    allVisible: [...document.querySelectorAll('button, a, input[type=button], input[type=submit]')]
+                        .filter(el => el.getClientRects().length > 0)
+                        .map(el => ({tag: el.tagName, text: (el.textContent||el.value||'').trim().slice(0,60), cls: el.className||''}))
+                  };
+                }""")
+                w.progress("print", "error", f"reprint_table_not_found | page_state={json.dumps(page_state, ensure_ascii=False)[:600]}")
+            except Exception:
+                pass
             raise BackendError("reprint_table_not_found")
         chosen_doctor = str(((card or {}).get("visit") or {}).get("consultant") or "").strip()
         row = self._pick_reprint_row(rows, chosen_doctor)
@@ -916,20 +1128,39 @@ class Liva(Backend):
         if not inp:
             raise BackendError(f"member_input_not_found | {self._state_label(w)}")
 
+        # حقل الدخول يجب أن يكون ظاهراً ومفعّلاً ومخالفاً قبل الإدخال
+        ready = w.wait_for(
+            "() => { const el = document.querySelector('#txtMemberId');"
+            " return !!el && el.getClientRects().length > 0 && !el.disabled && !el.readOnly; }",
+            timeout_s=20, poll_s=0.4)
         cur = ""
         try:
             cur = (inp.evaluate("el => el.value") or "").strip()
         except Exception:
             pass
+        # منع إعادة بحث غير ضرورية إن كان الرقم موجوداً وسليماً
         if cur != memberNo:
-            w.progress("eligibility", "run", f"enter member={memberNo}")
+            # أفرغ الحقل تماماً قبل كتابة الرقم الصحيح
+            w.page.evaluate(
+                "() => { const el = document.querySelector('#txtMemberId');"
+                " if (el) { el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true }));"
+                " el.dispatchEvent(new Event('change', { bubbles: true })); } }")
             w.set_value(inp, memberNo)
+            # تحقق من ملء الحقل بالقيمة الصحيحة قبل النقر على Search
+            confirmed = w.page.evaluate(
+                "() => { const el = document.querySelector('#txtMemberId');"
+                " return el ? el.value.trim() : ''; }") or ""
+            if confirmed != memberNo:
+                raise BackendError(f"member_not_entered | field={confirmed} want={memberNo}")
+            w.progress("eligibility", "run", f"entered member={memberNo} ✓")
+
             btn = self._find(w, JS_SEARCH_BTN)
             if btn:
-                w.click(btn)
+                if not w.trusted_click(btn):
+                    w.click(btn)
             else:
                 w.page.keyboard.press("Enter")
-            w.progress("submitted", "ok", f"member={memberNo}")
+            w.progress("submitted", "ok", f"search click member={memberNo}")
             save_last_good_member(self.id, memberNo)   # لتغذية النبضة حتى لو فشلت اللاحقة
             ok = w.wait_for(
                 "() => document.querySelectorAll('ul.ui-autocomplete li.ui-menu-item').length > 0 ||"
@@ -948,6 +1179,217 @@ class Liva(Backend):
         if not btn:
             raise BackendError(f"print_button_not_found | {self._state_label(w)}")
         return {"member": memberNo}
+
+    # ---------- تشخيص عميق: تفكيك آلية الطباعة/Reprint (kind=diag) ----------
+    def _diag_deep(self, w, member, card):
+        """يعيد خريطة كاملة لآلية الطباعة: بنية الصفحة، نص doAjax الخام،
+        سلوك نقر زر Print الحقيقي، وسلوك نقر زر Reprint (جدول/نافذة/شبكة)."""
+        out = {}
+        pg = w.page
+
+        def ev(js, default=None):
+            try:
+                return pg.evaluate(js)
+            except Exception as e:
+                return {"_err": str(e)[:200]} if default is None else default
+
+        out["globals"] = ev("""() => ({
+            url: location.href,
+            URL: String(window.URL || ''),
+            UserObj: window.UserObj ? JSON.parse(JSON.stringify(window.UserObj)) : null,
+            doAjax: typeof window.doAjax,
+            title: document.title,
+        })""")
+        out["fields"] = ev("""() => {
+          const ids = ['txtMemberId','txtGsmNo','txtSpeciality','txtDoctor','txtPatientId',
+                       'txtEmpName','txtCardNo','txtClientNo','txtPolicyNo',
+                       'txtCoverFromDate','txtCoverToDate','txtSecurityToken'];
+          const o = {};
+          for (const id of ids) {
+            const el = document.querySelector('#'+id);
+            o[id] = el ? {value: el.value, attrs: Object.fromEntries(
+                          [...el.attributes].map(a=>[a.name,a.value]))} : null;
+          }
+          return o;
+        }""")
+        out["buttons"] = ev("""() => {
+          const vis = e => e.getClientRects().length > 0;
+          return [...document.querySelectorAll('button,a.btn,input[type=button],input[type=submit],a')]
+            .filter(e => vis(e))
+            .map(e => ({tag:e.tagName, id:e.id||'', cls:String(e.className||''),
+                        text:(e.textContent||e.value||'').trim().slice(0,80),
+                        onclick:(e.getAttribute('onclick')||'').slice(0,400),
+                        type:e.type||'', disabled:!!e.disabled,
+                        outer:e.outerHTML.slice(0,500)}));
+        }""")
+        out["jquery_events"] = ev("""() => {
+          const o = {};
+          for (const b of document.querySelectorAll('.ListOfMem, .Printmember')) {
+            let evs = [];
+            try {
+              const d = jQuery._data(b, 'events');
+              if (d) for (const t in d) for (const h of d[t]) {
+                evs.push({type:t, ns:h.namespace||'', sel:h.selector||'',
+                          handler:String(h.handler).slice(0,4000)});
+              }
+            } catch (e) { evs.push({err:String(e)}); }
+            o[b.className] = evs;
+          }
+          return o;
+        }""")
+        out["inline_scripts"] = ev("""() => {
+          const hits = [];
+          for (const s of document.querySelectorAll('script:not([src])')) {
+            const t = s.textContent || '';
+            if (/Printmember|ListOfMem|Reprint|PatientInfo|PrintOnline/i.test(t))
+              hits.push(t.slice(0, 15000));
+          }
+          return hits;
+        }""")
+        out["global_funcs"] = ev("""() => {
+          const out = [];
+          for (const k of Object.getOwnPropertyNames(window)) {
+            try { const v = window[k];
+              if (typeof v === 'function') {
+                const src = String(v);
+                if (/Printmember|ListOfMem|Reprint|PatientInfo|PrintOnline|ClaimForm/i.test(src))
+                  out.push({name:k, src: src.slice(0, 4000)});
+              }
+            } catch (e) {}
+          }
+          return out;
+        }""")
+        out["script_srcs"] = ev("""() => [...document.querySelectorAll('script[src]')].map(s=>s.src)""")
+        # محتوى ملف JS الخاص بـ MemberDetails (يحمل معالجات الأزرار)
+        out["memberdetails_js"] = ev("""async () => {
+            const srcs = [...document.querySelectorAll('script[src]')].map(s => s.src);
+            const hit = srcs.find(u => /ProviderMemberDetails/i.test(u));
+            if (!hit) return { found: false };
+            try {
+                const r = await fetch(hit, { credentials: 'include' });
+                const t = await r.text();
+                return { found: true, url: hit, bytes: t.length, text: t.slice(0, 120000) };
+            } catch (e) { return { found: true, url: hit, err: String(e) }; }
+        }""")
+
+        # ---- 1) doAjax PatientInfo مع التقاط الرد الخام ----
+        net = []
+        def on_resp(r):
+            try:
+                u = r.url or ""
+                if "livainsurance" in u or "nlicgulf" in u:
+                    net.append({"method": r.request.method, "url": u, "status": r.status,
+                                "ct": (r.headers or {}).get("content-type", ""),
+                                "post": (r.request.post_data or "")[:2000]})
+            except Exception:
+                pass
+        pg.on("response", on_resp)
+        raw = {}
+        try:
+            with pg.expect_response(lambda r: "PatientInfo" in (r.url or ""),
+                                     timeout=45000) as ri:
+                do_res = ev("""() => {
+                  const Memberobj = {};
+                  Memberobj.Hospno = window.UserObj?.Name || '';
+                  Memberobj.UserType = window.UserObj?.UserType || 'PROVIDER';
+                  Memberobj.Speciality = $('#txtSpeciality').attr('Data-spCode');
+                  Memberobj.DocNo = $('#txtDoctor').attr('data-DocCode');
+                  Memberobj.Gm_MemberNo = $('#txtGsmNo').val();
+                  Memberobj.PatientId = $('#txtPatientId').val();
+                  Memberobj.UserIdVal = window.UserObj?.UserID || '';
+                  Memberobj.ClientName = $('#txtEmpName').val();
+                  Memberobj.CardNo = $('#txtCardNo').val();
+                  Memberobj.ClientNo = $('#txtClientNo').val();
+                  Memberobj.PolicyNo = $('#txtPolicyNo').val();
+                  Memberobj.mfromdate = $('#txtCoverFromDate').val();
+                  Memberobj.mtodate = $('#txtCoverToDate').val();
+                  window.__MCR_MEMOBJ = Memberobj;
+                  return new Promise((resolve) => {
+                    try {
+                      doAjax(URL + 'Reports/PatientInfo', 'Post', Memberobj,
+                             'application/json', 'json', '',
+                             function (err, result) {
+                               if (err) resolve({err:String(err)}); else resolve(result); });
+                    } catch (e) { resolve({thrown:String(e)}); }
+                  });
+                }""")
+            resp = ri.value
+            raw["status"] = resp.status
+            raw["ct"] = (resp.headers or {}).get("content-type", "")
+            try:
+                raw["body"] = resp.text()[:4000]
+            except Exception as e:
+                raw["body_err"] = str(e)[:200]
+        except Exception as e:
+            raw["err"] = str(e)[:250]
+        raw["result"] = do_res
+        out["patientinfo"] = raw
+        out["memberobj"] = ev("() => window.__MCR_MEMOBJ || {}")
+
+        # ---- 2) نقر زر Print الحقيقي (CDP) ومراقبة ما يحدث ----
+        def watch(seconds=12, label="print"):
+            pages0 = [p.url for p in w.ctx.pages]
+            pg.evaluate("() => { window.__MCR_OPEN_URL=''; window.__MCR_OPEN_AT=0; }")
+            obs = []
+            end = time.monotonic() + seconds
+            while time.monotonic() < end:
+                snap = ev("""() => ({
+                    url: location.href,
+                    openUrl: String(window.__MCR_OPEN_URL||''),
+                    tables: [...document.querySelectorAll('table')]
+                        .filter(t=>t.getClientRects().length>0)
+                        .map(t=>({cls:String(t.className||''), id:t.id||'',
+                                  txt:(t.textContent||'').trim().slice(0,300)})),
+                    rows: [...document.querySelectorAll('tr')].filter(r=>r.getClientRects().length>0)
+                        .map(r=>(r.textContent||'').trim().replace(/\\s+/g,' ').slice(0,160)).slice(0,40),
+                    dialogs: [...document.querySelectorAll('.modal,.ui-dialog,.swal2-container,[role=dialog]')]
+                        .filter(m=>m.getClientRects().length>0).map(m=>(m.textContent||'').trim().slice(0,200)),
+                    message: (document.querySelector('#Message')||{}).value || '',
+                    heading: (document.querySelector('#Heading')||{}).value || '',
+                })""", {})
+                snap["ctxPages"] = [p.url for p in w.ctx.pages]
+                snap["newPages"] = [u for u in snap["ctxPages"] if u not in pages0]
+                obs.append(snap)
+                time.sleep(1.0)
+            return obs
+
+        def click_btn(substr):
+            return ev("""(pat) => {
+              const vis = e => e.getClientRects().length > 0 && !e.disabled;
+              const low = (pat || '').toLowerCase();
+              const b = [...document.querySelectorAll('button,a,input[type=button],input[type=submit]')]
+                .find(e => vis(e) && (e.textContent||e.value||'').toLowerCase().includes(low));
+              if (!b) return null;
+              const r = b.getBoundingClientRect();
+              return {outer:b.outerHTML.slice(0,500), x:r.x+r.width/2, y:r.y+r.height/2};
+            }""", substr)
+
+        # زر Reprint
+        rb = click_btn("reprint online claim")
+        out["reprint_button"] = rb
+        if rb:
+            try:
+                pg.mouse.click(rb["x"], rb["y"])
+            except Exception:
+                ev("""() => { const vis=e=>e.getClientRects().length>0&&!e.disabled;
+                   const b=[...document.querySelectorAll('button,a,input[type=button],input[type=submit]')]
+                   .find(e=>vis(e)&&/reprint\\s+(online\\s+)?claim/i.test(e.textContent||e.value||''));
+                   if(b) b.click(); }""")
+            out["reprint_observe"] = watch(20, "reprint")
+            out["reprint_net"] = list(net)
+            out["reprint_pages"] = [{"url": p.url, "html": (p.content()[:8000]
+                                  if p.url != pg.url else "")}
+                                 for p in w.ctx.pages if p is not pg]
+        # ملاحظة: عمداً لا ننقر زر Print الحقيقي في التشخيص — قد يختم
+        # Claim Form حقيقي كـ"مطبوع" للعضو. نقتصر على تشخيص القراءة.
+        net.clear()
+        out["print_button"] = None
+        out["print_observe"] = []
+        try:
+            pg.remove_listener("response", on_resp)
+        except Exception:
+            pass
+        return {"member": member, "diag": out}
 
     # ---------- keepalive: eligibility re-check في نفس الصفحة ----------
     keepalive_without_member = True   # الصفحة تحمل رقم العضوية — لا حاجة لتخزينه مسبقاً
@@ -1065,6 +1507,7 @@ class Liva(Backend):
                 self._open_provider(w)
                 continue
             if state == "provider-login":
+                self._freeze_captcha(w)
                 # لا مهلة اعتباطية: ننتظر حدثاً حقيقياً — مغادرة النموذج
                 # (نجاح) أو بقاء النموذج (كابتشا خاطئة ستُظهر alert يُسجَّل
                 # الآن في السجل). نكمل فقط حين يختفي حقل الكابتشا.
@@ -1082,6 +1525,10 @@ class Liva(Backend):
                         continue          # دخل المزوّد — أكمل التدفق
                     w.progress("login", "run",
                                "captcha rejected — fresh captcha issued")
+                # جرّب الحل التلقائي (ddddocr) قبل إزعاج الموظف — كل محاولة
+                # فاشلة تُصدر كابتشا جديدة من الموقع فتُقرأ من جديد
+                if self._auto_solve_captcha(w):
+                    continue
                 raise self._captcha_needs_human(w) or BackendError("captcha_unavailable")
             if state == "portal-home":
                 self._open_member_details(w)
@@ -1100,6 +1547,9 @@ class Liva(Backend):
                         dump = {"eval_error": str(e)[:200]}
                     dump["url"] = w.page.url
                     return {"member": member, "diag": dump}
+                if kind == "diag2":
+                    # تشخيص عميق للطباعة/Reprint — يكسر mechanisms بلا أثر جانبي
+                    return self._diag_deep(w, member, card)
                 return self._print_or_reprint(w, member, card)
             # مجهول → غالباً Angular ما زال يبني DOM — انتظر ثم أعد الفحص
             # (لا إعادة تحميل — كانت هي ما يقتل البوابة ويُغرق في حلقة)
@@ -1121,11 +1571,12 @@ class Liva(Backend):
             w.progress("eligibility", "run", f"doctor choice={answer}")
             return self.run(w, kind, member, card)
         # كابتشا بوابة المزوّد
+        self._freeze_captcha(w)
         self._submit_provider_login(w, answer)
-        # إشارة نجاح: مغادرة صفحة الدخول (أو ظهور صفحة العضوية/اللوحة)
+        # نفس منطق التحقق: الدخول الحقيقي = مغادرة صفحة الدخول نحو اللوحة
         ok = w.wait_for(
-            "() => !document.querySelector('#CaptchaInputText')",
-            timeout_s=20, poll_s=0.5)
+            "() => /Dashboard/i.test(location.pathname)",
+            timeout_s=25, poll_s=0.5)
         if not ok:
             # رمز خاطئ غالباً → صورة جديدة للموظف
             cap = self._captcha_needs_human(w)

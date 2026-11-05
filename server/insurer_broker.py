@@ -47,7 +47,7 @@ except Exception:  # pragma: no cover
 BROKER_PORT = 3011
 CAPTCHA_LEASE_S = 30.0      # مهلة عادلة — المستخدم يقرأ الكابتشا بسرعة
 CHOICE_LEASE_S = 75.0        # مهلة اختيار عنصر من قائمة (طبيب) — أطول للقراءة
-CAPTCHA_TOTAL_S = 300.0      # الحد الكلي — خمس دقائق مهلة عادلة
+CAPTCHA_TOTAL_S = 600.0      # الحد الكلي — عشر دقائق (الكابتشا مجمّدة ⇒ وقت مريح)
 HEARTBEAT_WINDOW_S = 240.0   # نافذة نبض 4 دقائق
 KEEPALIVE_MAX_S = 90.0
 
