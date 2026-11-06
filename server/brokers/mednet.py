@@ -164,6 +164,8 @@ JS_STATE = f"""() => {{ {_MJS}
 
 class MedNet(Backend):
     id = "mednet"
+    # النبضة تُطلق منذ الإقلاع حتى بلا رقم محفوظ — الجاهزية مسؤولية المرحلة الأولى
+    keepalive_without_member = True
 
     def __init__(self):
         self._dead_since = None
@@ -333,10 +335,21 @@ class MedNet(Backend):
             return inp, val
         door = time.monotonic() + min(30, max(5, w.remaining(kind)))
         clicked = False
+        reload_tried = False   # إعادة تحميل واحدة للصفحة المتجمدة — ليس login
         while time.monotonic() < door and not inp:
             inp = self._find(w, JS_MEMBER_INPUT)
             if inp:
                 break
+            # الجلسة الميتة تُعرض كصفحة login حتى مع بقاء الـURL mednetapprovals.com
+            # — الفحص هنا يوفّر 30 ث كاملة بدل الانزلاق للبناء البارد
+            if self._safe_eval(w, JS_IS_LOGIN):
+                w.progress("session", "run",
+                           "mednet session dead — re-login inside recovery path")
+                self.do_login(w, creds)
+                clicked = False
+                reload_tried = False
+                continue
+            nav = None
             if not clicked:
                 nav = self._find(w, JS_NAV_LINK)
                 if nav:
@@ -344,6 +357,21 @@ class MedNet(Backend):
                     if w.click(nav):
                         clicked = True
                         time.sleep(2)
+            # صفحة متجمدة تماماً (ليست login، لا حقل بحث، لا رابط): أعد
+            # تحميلها مرة واحدة — ADF أحياناً يعيد رسم DOM بعد TTL بصمت
+            if nav is None and not clicked and not reload_tried:
+                reload_tried = True
+                w.progress("navigate", "run",
+                           "frozen page (not login, no member input) — one reload")
+                session_event(self.id, "frozen_reload",
+                              f"one forced goto | url={(w.page.url or '')[-80:]}")
+                try:
+                    w.page.goto(creds["url"], wait_until="domcontentloaded",
+                                timeout=45000)
+                except Exception as e:
+                    w.progress("navigate", "run",
+                               f"frozen-reload failed: {str(e)[:120]}")
+                continue
             time.sleep(0.4)
         if inp:
             return inp, self._input_val(inp)
