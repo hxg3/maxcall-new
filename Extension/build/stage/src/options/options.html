@@ -1,15 +1,14 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl">
+<html lang="en" dir="ltr">
 <head>
   <meta charset="utf-8" />
-  <title>إعدادات مساعد الاستقبال</title>
+  <title>MaxCare Settings</title>
   <style>
     :root { --ink:#0f172a; --sub:#64748b; --line:#e2e8f0; --brand:#0ea5e9; --ok:#059669; --err:#dc2626; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: "Segoe UI", Tahoma, sans-serif; font-size: 13.5px; color: var(--ink); background: #f8fafc; padding: 26px 0 44px; }
-    .wrap { max-width: 520px; margin: 0 auto; display: flex; flex-direction: column; gap: 13px; }
+    .wrap { max-width: 460px; margin: 0 auto; display: flex; flex-direction: column; gap: 13px; }
     h1 { font-size: 17px; }
-    .sub { font-size: 12.5px; color: var(--sub); margin-top: -9px; line-height: 1.7; }
     .card { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 15px 16px; display: flex; flex-direction: column; gap: 10px; }
     .card > h2 { font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
     .card > h2 .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
@@ -18,67 +17,60 @@
     .dot.liva { background: #059669; }
     .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--sub); }
-    input[type=text], input[type=password] { border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; font: inherit; direction: ltr; text-align: left; }
+    input[type=text], input[type=password] { border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; font: inherit; }
     input:focus { outline: 2px solid #bae6fd; border-color: var(--brand); }
-    .hasPass { font-size: 10.5px; color: var(--ok); font-weight: 700; background: #ecfdf5; border-radius: 999px; padding: 1px 8px; align-self: flex-start; }
-    .hint { font-size: 11.5px; color: var(--sub); line-height: 1.8; }
     .actions { display: flex; gap: 9px; align-items: center; flex-wrap: wrap; }
-    button { border: none; border-radius: 10px; padding: 9px 20px; font: inherit; font-weight: 700; cursor: pointer; }
+    button { border: none; border-radius: 10px; padding: 9px 22px; font: inherit; font-weight: 700; cursor: pointer; }
     .save { background: var(--brand); color: #fff; }
     .save:hover { background: #0284c7; }
     .save:disabled { opacity: .5; cursor: default; }
-    #out { font-size: 12.5px; min-height: 17px; }
+    #out { font-size: 12.5px; min-height: 17px; color: var(--sub); }
     #out.ok { color: var(--ok); font-weight: 700; }
     #out.err { color: var(--err); font-weight: 700; }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>كلمات مرور صفحات التأمين</h1>
-    <div class="sub">الحفظ يُرسل إلى خادم MaxCare مباشرة — ما يُحفظ هنا هو ما يستخدمه السيرفر عند الدخول لمواقع التأمين. اترك حقل كلمة المرور فارغاً لتبقى الحالية كما هي.</div>
+    <h1>Insurance logins</h1>
 
     <div class="card">
       <h2><span class="dot nextcare"></span>NextCare</h2>
       <div class="row2">
-        <label>اسم المستخدم
+        <label>User
           <input type="text" id="nextcareUser" autocomplete="off" />
         </label>
-        <label>كلمة المرور
+        <label>Password
           <input type="password" id="nextcarePass" autocomplete="new-password" />
         </label>
       </div>
-      <span class="hasPass" id="nextcareSet" style="display:none">كلمة مرور محفوظة على السيرفر ✓</span>
     </div>
 
     <div class="card">
       <h2><span class="dot mednet"></span>MedNet</h2>
       <div class="row2">
-        <label>اسم المستخدم
+        <label>User
           <input type="text" id="mednetUser" autocomplete="off" />
         </label>
-        <label>كلمة المرور
+        <label>Password
           <input type="password" id="mednetPass" autocomplete="new-password" />
         </label>
       </div>
-      <span class="hasPass" id="mednetSet" style="display:none">كلمة مرور محفوظة على السيرفر ✓</span>
     </div>
 
     <div class="card">
-      <h2><span class="dot liva"></span>Liva (FortiGate + بوابة المزوّد)</h2>
+      <h2><span class="dot liva"></span>Liva</h2>
       <div class="row2">
-        <label>اسم المستخدم
+        <label>User
           <input type="text" id="livaUser" autocomplete="off" />
         </label>
-        <label>كلمة المرور
+        <label>Password
           <input type="password" id="livaPass" autocomplete="new-password" />
         </label>
       </div>
-      <span class="hasPass" id="livaSet" style="display:none">كلمة مرور محفوظة على السيرفر ✓</span>
-      <div class="hint">تغيير كلمة Liva يفتح القفل تلقائياً في الوسيط ويستعيد الجاهزية فوراً.</div>
     </div>
 
     <div class="actions">
-      <button class="save" id="save">حفظ على السيرفر</button>
+      <button class="save" id="save">Save</button>
       <span id="out"></span>
     </div>
   </div>

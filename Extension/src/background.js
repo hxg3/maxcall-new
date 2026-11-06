@@ -36,7 +36,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
         case "insurer:printPdf": {
           // ملف PDF جاهز (نموذج ثابت كـOQIC) — يُطبع داخل تبويب HIS مباشرة
+          report(null, { step: "print", status: "run" });
           const ok = await printDataUrlInUserTab(msg.dataUrl, "oqic");
+          report(null, { step: "print", status: ok ? "ok" : "error", detail: ok ? "" : "print failed" });
           sendResponse({ ok, reason: ok ? "" : "print_failed" });
           break;
         }
@@ -45,6 +47,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const tabs = await chrome.tabs.query({ url: HIS_TAB_PATTERNS }).catch(() => []);
           const userTab = tabs.find((t) => t.active) || tabs[0];
           if (!userTab) { sendResponse({ ok: false, reason: "no_his_tab" }); break; }
+          report(null, { step: "print", status: "run" });
           try {
             const res = await chrome.scripting.executeScript({
               target: { tabId: userTab.id },
@@ -67,18 +70,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 }
               },
             });
-            sendResponse(res?.[0]?.result?.ok ? { ok: true } : { ok: false, reason: res?.[0]?.result?.error || "print failed" });
+            const ok = !!res?.[0]?.result?.ok;
+            report(null, { step: "print", status: ok ? "ok" : "error", detail: ok ? "" : (res?.[0]?.result?.error || "print failed") });
+            sendResponse(ok ? { ok: true } : { ok: false, reason: res?.[0]?.result?.error || "print failed" });
           } catch (e) {
+            report(null, { step: "print", status: "error", detail: String(e).slice(0, 120) });
             sendResponse({ ok: false, reason: String(e) });
           }
           break;
         }
         case "insurer:printComposite": {
           // طباعة مجمعة في صفحة الموظف: مستند التأمين + صور المرفقات المختارة، كل جزء في صفحة خاصة
-          const { parts = [], title = "المستند والمرفقات" } = msg;
+          const { parts = [], title = "Document + attachments" } = msg;
           const tabs = await chrome.tabs.query({ url: HIS_TAB_PATTERNS }).catch(() => []);
           const userTab = tabs.find((t) => t.active) || tabs[0];
           if (!userTab) { sendResponse({ ok: false, reason: "no_his_tab" }); break; }
+          report(null, { step: "print", status: "run" });
           try {
             const res = await chrome.scripting.executeScript({
               target: { tabId: userTab.id },
@@ -89,7 +96,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(title)}</title>`;
                 html += `<style>@page{size:A4;margin:7mm 8mm;}*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;margin:0;color:#111;line-height:1.3}.section{page-break-after:always}.section:last-child{page-break-after:auto}h2{font-size:13px;border-bottom:1.2px solid #003057;padding-bottom:4px;margin:0 0 7px;color:#003057;letter-spacing:.4px}.sub{font-size:8px;color:#666;margin-bottom:6px}img{max-width:100%;max-height:88vh;height:auto;display:block;margin:0 auto}embed,iframe{width:100%;height:88vh;display:block;margin:0 auto;border:none;background:#fff}.fullimg{width:100%;max-height:88vh;object-fit:contain;display:block;margin:0 auto}</style></head><body>`;
                 for (const p of parts) {
-                  html += `<div class="section"><h2>${esc(p.label || "مستند")}</h2>`;
+                  html += `<div class="section"><h2>${esc(p.label || "Document")}</h2>`;
                   if (p.type === "html") {
                     const c = String(p.content || "");
                     // إذا كان HTML صفحة كاملة، افتحها في iframe؛ وإلا أدخل محتواها مباشرة
@@ -104,7 +111,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                   } else if (p.type === "pdf") {
                     html += `<embed type="application/pdf" src="${esc(p.dataUrl)}">`;
                   } else if (p.type === "image") {
-                    html += `<img class="fullimg" src="${esc(p.dataUrl)}" alt="${esc(p.label || "مرفق")}">`;
+                    html += `<img class="fullimg" src="${esc(p.dataUrl)}" alt="${esc(p.label || "attachment")}">`;
                     if (p.caption) html += `<div class="sub">${esc(p.caption)}</div>`;
                   }
                   html += `</div>`;
@@ -122,8 +129,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 return { ok: true };
               },
             });
-            sendResponse(res?.[0]?.result?.ok ? { ok: true } : { ok: false, reason: res?.[0]?.result?.error || "print failed" });
+            const ok = !!res?.[0]?.result?.ok;
+            report(null, { step: "print", status: ok ? "ok" : "error", detail: ok ? "" : (res?.[0]?.result?.error || "print failed") });
+            sendResponse(ok ? { ok: true } : { ok: false, reason: res?.[0]?.result?.error || "print failed" });
           } catch (e) {
+            report(null, { step: "print", status: "error", detail: String(e).slice(0, 120) });
             sendResponse({ ok: false, reason: String(e) });
           }
           break;
@@ -142,21 +152,34 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           break;
         }
         case "wa:getLastImages": {
-          // آخر الصور من محادثات واتساب ويب (حقن السكربت في تبويب الواتساب)
+          // آخر الصور من محادثات واتساب ويب — world:"MAIN" إلزامي: window.require
+          // (مكتبات واتساب) لا توجد إلا في عالم الصفحة نفسه
           const limit = Math.min(Math.max(Number(msg.limit) || 5, 1), 10);
           const tabs = await chrome.tabs.query({ url: ["https://web.whatsapp.com/*"] }).catch(() => []);
           const waTab = tabs.find((t) => t.active) || tabs[0];
           if (!waTab) { sendResponse({ ok: false, reason: "no_whatsapp_tab" }); break; }
           try {
-            await chrome.scripting.executeScript({ target: { tabId: waTab.id }, files: ["src/lib/wa-images.js"] });
-            const res = await chrome.scripting.executeScript({
-              target: { tabId: waTab.id },
-              func: (limit) => window.__mcr_fetchLastWaImages(limit),
-              args: [limit],
+            await chrome.scripting.executeScript({
+              target: { tabId: waTab.id }, world: "MAIN", files: ["src/lib/wa-images.js"],
             });
-            sendResponse(res?.[0]?.result || { ok: false, reason: "no_result" });
+            // سباق مع مؤقّت من عالم الخدمة: لو عُلّق وعد الصفحة (تجميد مؤقتات
+            // التبويب الخلفي) نردّ خلال 20 ثانية بدل الانتظار إلى ما لا نهاية.
+            const res = await Promise.race([
+              chrome.scripting.executeScript({
+                target: { tabId: waTab.id },
+                world: "MAIN",
+                args: [limit],
+                func: (n) => Promise.resolve()
+                  .then(() => window.__mcr_fetchLastWaImages(n))
+                  .catch((e) => ({ ok: false, reason: String((e && e.message) || e).slice(0, 120) })),
+              }),
+              new Promise((_, reject) =>
+                setTimeout(() => reject(new Error("wa_timeout")), 20000)),
+            ]);
+            const out = res?.[0]?.result;
+            sendResponse(out && typeof out.ok === "boolean" ? out : { ok: false, reason: "no_result" });
           } catch (e) {
-            sendResponse({ ok: false, reason: String(e) });
+            sendResponse({ ok: false, reason: String(e).slice(0, 120) });
           }
           break;
         }
@@ -574,7 +597,7 @@ async function printDataUrlInUserTab(dataUrl, insurerId = "nextcare") {
 }
 
 // طباعة مجمعة (مستند + مرفقات) في صفحة الموظف عبر iframe مخفي + print
-async function printCompositeInTab(tabId, parts, title = "المستند والمرفقات") {
+async function printCompositeInTab(tabId, parts, title = "Document + attachments") {
   try {
     const res = await chrome.scripting.executeScript({
       target: { tabId },
@@ -585,7 +608,7 @@ async function printCompositeInTab(tabId, parts, title = "المستند وال�
         let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(title)}</title>`;
         html += `<style>@page{size:A4;margin:7mm 8mm;}*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;margin:0;color:#111;line-height:1.3}.section{page-break-after:always}.section:last-child{page-break-after:auto}h2{font-size:13px;border-bottom:1.2px solid #003057;padding-bottom:4px;margin:0 0 7px;color:#003057;letter-spacing:.4px}.sub{font-size:8px;color:#666;margin-bottom:6px}img{max-width:100%;max-height:88vh;height:auto;display:block;margin:0 auto}embed,iframe{width:100%;height:88vh;display:block;margin:0 auto;border:none;background:#fff}</style></head><body>`;
         for (const p of parts) {
-          html += `<div class="section"><h2>${esc(p.label || "مستند")}</h2>`;
+          html += `<div class="section"><h2>${esc(p.label || "Document")}</h2>`;
           if (p.type === "html") {
             const c = String(p.content || "");
             if (/<html[\s>]/i.test(c)) {
@@ -625,7 +648,7 @@ async function printCompositeInTab(tabId, parts, title = "المستند وال�
 }
 
 // طباعة مجمعة في تبويب المشفى النشط (أو أول تبويب متاح)
-async function printCompositeInUserTab(parts, insurerId = "nextcare", title = "المستند والمرفقات") {
+async function printCompositeInUserTab(parts, insurerId = "nextcare", title = "Document + attachments") {
   const tabs = await chrome.tabs.query({ url: HIS_TAB_PATTERNS }).catch(() => []);
   const hisTab = tabs.find((t) => t.active) || tabs[0];
   if (hisTab) {
@@ -976,7 +999,7 @@ async function runBrokerInsurer(insurerId, card, serviceType) {
       return { ok: false, reason: s.error || "broker_failed" };
     }
   }
-  await brokerFailed(insurerId, "انتهت مهلة العملية — نفّذ يدوياً كما تعودت");
+  await brokerFailed(insurerId, "timed out — do it manually as usual");
   return { ok: false, reason: "broker_timeout" };
 }
 
@@ -984,7 +1007,7 @@ async function brokerFailed(insurerId, err) {
   await log("warn", `${insurerId} broker failed`, String(err).slice(0, 200));
   report(null, {
     step: "print", status: "error",
-    detail: "تعذر استخراج المستند — نفّذ العملية يدوياً كما تعودت",
+    detail: "Could not get the document — do it manually as usual",
   });
 }
 
@@ -1006,16 +1029,17 @@ async function finishBrokerPrint(jobId, insurerId) {
   }
   report(null, { step: "document", status: "ok" });
   const dataUrl = `data:application/pdf;base64,${pdf.pdf_b64}`;
-  const job = Array.from(jobs.values()).find((j) => j.insurerId === insurerId && !j.reportHandled);
-  const attachments = job?.attachments || [];
+  const attachments = brokerAttachments.get(insurerId) || [];
   if (attachments.length) {
     const printParts = [
-      { type: "pdf", dataUrl, label: insurerId || "المستند" },
+      { type: "pdf", dataUrl, label: INSURER_NAMES[insurerId] || "Document" },
       ...attachments.map((a) => ({
         type: "image",
         dataUrl: a.dataUrl,
         label: a.fileName,
-        caption: a.source === "whatsapp" ? `واتساب — ${a.chatName || ""}` : `HIS — ${a.category || "مستند مرفق"}`,
+        caption: a.source === "whatsapp"
+          ? `WhatsApp${a.chatName ? " — " + a.chatName : ""}`
+          : `HIS — ${a.category || "attachment"}`,
       })),
     ];
     const ok = await printCompositeInUserTab(printParts, insurerId);
@@ -1046,15 +1070,15 @@ async function openBrokerCaptchaAsk(jobId, captcha, insurerId) {
   const base = { countdownSeconds: captcha.lease || 15 };
   const request = captcha.type === "choice"
     ? { kind: "choice",
-        title: captcha.title || `${name} — اختر من القائمة`,
+        title: captcha.title || `${name} — pick from the list`,
         options: Array.isArray(captcha.options) ? captcha.options : [],
-        hint: captcha.hint || "اختر العنصر المطابق — ستنتقل المهمة لجهاز آخر عند انتهاء الوقت",
+        hint: captcha.hint || "Pick the matching item — it moves to the other device when time runs out",
         ...base }
     : { kind: "captcha",
-        title: `${name} — التحقق البشري`,
+        title: `${name} — human check`,
         image: `data:image/jpeg;base64,${captcha.img_b64}`,
-        hint: "أدخل رمز التحقق — سينتهي وقد يتحرك التحقق إلى جهاز آخر",
-        placeholder: "الرمز الظاهر في الصورة",
+        hint: "Type the code — it expires and moves to the other device",
+        placeholder: "Code shown in the image",
         ...base };
   chrome.tabs.sendMessage(hisTab.id, { type: "ui:ask", requestId, request }).catch(() => {});
 }
@@ -1065,6 +1089,8 @@ async function openBrokerCaptchaAsk(jobId, captcha, insurerId) {
 
 // قفل مهمة واحدة — يمنع النقر المزدوج/المتعارض الذي أبطل المحاولات
 const activeBrokerJobs = new Set();
+// مرفقات مهمة وسيط جارية — insurerId → attachments (تُطبع مع المستند في دفعة واحدة)
+const brokerAttachments = new Map();
 async function brokerJobActive(insurerId) {
   return activeBrokerJobs.has(insurerId);
 }
@@ -1072,7 +1098,7 @@ async function brokerJobActive(insurerId) {
 async function runInsurer({ insurerId, card, serviceType, attachments = [] }) {
   if (!insurerId) return { ok: false, reason: "unknown_insurer" };
   if (activeBrokerJobs.has(insurerId)) {
-    return { ok: false, reason: "already_running", message: "المهمة قيد التنفيذ — انتظر حتى تكتمل" };
+    return { ok: false, reason: "already_running", message: "Already running" };
   }
   const insurer = INSURERS.find((i) => i.id === insurerId);
   if (!insurer) return { ok: false, reason: "unknown_insurer" };
@@ -1085,10 +1111,12 @@ async function runInsurer({ insurerId, card, serviceType, attachments = [] }) {
   // وضع الوسيط (الوساطة على السيرفر — بواعلام التأمين تشبه NextCare)
   if (BROKER_INSURERS.has(insurerId)) {
     activeBrokerJobs.add(insurerId);
+    brokerAttachments.set(insurerId, Array.isArray(attachments) ? attachments : []);
     try {
       return await runBrokerInsurer(insurerId, card, serviceType);
     } finally {
       activeBrokerJobs.delete(insurerId);
+      brokerAttachments.delete(insurerId);
     }
   }
 
@@ -1109,7 +1137,7 @@ async function runInsurer({ insurerId, card, serviceType, attachments = [] }) {
             type: "image",
             dataUrl: a.dataUrl,
             label: a.fileName,
-            caption: a.source === "whatsapp" ? `واتساب — ${a.chatName || ""}` : `HIS — ${a.category || "مستند مرفق"}`,
+            caption: a.source === "whatsapp" ? `WhatsApp${a.chatName ? " — " + a.chatName : ""}` : `HIS — ${a.category || "attachment"}`,
           })),
         ];
         const ok = await printCompositeInUserTab(printParts, "nextcare");
@@ -1252,7 +1280,7 @@ async function dispatchToTab(tabId, attempt = 0) {
   if (!job) return;
   if (jobExpired(job)) {
     jobs.delete(tabId);
-    report(tabId, { step: "timeout", status: "error", detail: "انتهت مهلة العملية" });
+    report(tabId, { step: "timeout", status: "error", detail: "Timed out" });
     return;
   }
   job.dispatching = true;
@@ -1280,7 +1308,7 @@ async function dispatchToTab(tabId, attempt = 0) {
       return dispatchToTab(tabId, attempt + 1);
     }
     await log("error", "dispatch: content script unreachable", `tab=${tabId}`);
-    report(tabId, { step: "content_script", status: "error", detail: "تعذر حقن السكربت في صفحة الموقع" });
+    report(tabId, { step: "content_script", status: "error", detail: "Could not inject into the site page" });
   }
 }
 
@@ -1310,7 +1338,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (!job.dispatching) {
     job.navCount = (job.navCount || 0) + 1;
     if (job.navCount > 10) {
-      report(tabId, { step: "timeout", status: "error", detail: "عدد تنقلات كبير — توقفت الحلقة" });
+      report(tabId, { step: "timeout", status: "error", detail: "Too many page changes — stopped" });
       jobs.delete(tabId);
       return;
     }

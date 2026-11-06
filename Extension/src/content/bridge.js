@@ -349,7 +349,7 @@
     },
     result({ title, autoPrint, onPrint }) {
       const o = ensureOverlay();
-      o.title.textContent = title || "المستند جاهز";
+      o.title.textContent = title || "Document ready";
       o.body.textContent = "";
       o.body.appendChild(stepRow("Reached the insurance document", "ok"));
       const btn = document.createElement("button");

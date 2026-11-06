@@ -1,7 +1,6 @@
-/** @file options.js — إعدادات كلمات مرور صفحات التأمين.
- * الحفظ يُرسل إلى خادم MaxCare (الوسيط يحدث /etc/maxcall-insurers.json حياً —
- * الوسيط يقرأه عند كل محاولة دخول بلا restart).
- * كلمة المرور الفارغة = تبقى الحالية على الخادم كما هي.
+/** @file options.js — insurance logins (user + password per insurer).
+ * Save sends the change to the MaxCare server (the broker applies it live).
+ * An empty password keeps the one already stored on the server.
  */
 import { getSettings, saveSettings } from "../lib/settings.js";
 
@@ -9,13 +8,9 @@ const $ = (id) => document.getElementById(id);
 const INSURERS = ["nextcare", "mednet", "liva"];
 const FALLBACK_BASES = ["http://maxcall.local:3001", "http://192.168.1.32:3001"];
 
-function bases() {
-  return FALLBACK_BASES; // host_permissions تغطي العنوانين فقط
-}
-
 async function credsRequest(path, { method = "GET", body, timeoutMs = 12000 } = {}) {
   let lastErr = null;
-  for (const base of bases()) {
+  for (const base of FALLBACK_BASES) {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), timeoutMs);
     try {
@@ -28,15 +23,15 @@ async function credsRequest(path, { method = "GET", body, timeoutMs = 12000 } = 
       const json = await res.json().catch(() => null);
       if (res.ok && json) return json;
       lastErr = new Error(json?.error || `http_${res.status}`);
-      if (res.status !== 503) break; // العنوان يرد — الخطأ من الخدمة نفسها لا من العنوان
+      if (res.status !== 503) break; // the address answered — the error is from the service
     } catch (e) {
       lastErr = e;
-      if (e.name === "AbortError") break; // abort يلغي الجميع
+      if (e.name === "AbortError") break;
     } finally {
       clearTimeout(timer);
     }
   }
-  throw lastErr || new Error("server_unreachable");
+  throw lastErr || new Error("server unreachable");
 }
 
 function setOut(text, cls) {
@@ -45,11 +40,6 @@ function setOut(text, cls) {
   out.className = cls || "";
 }
 
-function markSet(insurer, hasPass) {
-  $(`${insurer}Set`).style.display = hasPass ? "" : "none";
-}
-
-// ---------- التحميل: اقرأ ما هو محفوظ على الخادم الآن ----------
 async function load() {
   try {
     const res = await credsRequest("/api/insurer/creds");
@@ -57,45 +47,36 @@ async function load() {
       const c = (res.insurers || {})[ins] || {};
       $(`${ins}User`).value = c.user || "";
       $(`${ins}Pass`).value = "";
-      markSet(ins, !!c.has_pass);
     }
   } catch (e) {
-    setOut(`تعذر قراءة البيانات من الخادم: ${e.message || e}`, "err");
+    setOut(`Load failed: ${e.message || e}`, "err");
   }
 }
 
-// ---------- الحفظ: يُرسل التغيير إلى الخادم ----------
 $("save").addEventListener("click", async () => {
   const btn = $("save");
   btn.disabled = true;
-  setOut("جاري الحفظ على الخادم…");
+  setOut("Saving…");
   try {
     const localPatch = { insurers: {} };
     const changed = [];
     for (const ins of INSURERS) {
       const user = $(`${ins}User`).value.trim();
       const pass = $(`${ins}Pass`).value;
-      if (!user && !pass) continue; // لا تغيير لهذه الشركة
+      if (!user && !pass) continue; // nothing to change for this insurer
       const body = { insurer: ins, user };
       if (pass) body.pass = pass;
       await credsRequest("/api/insurer/creds", { method: "POST", body, timeoutMs: 15000 });
       changed.push(ins);
-      // مرآة محلية صامتة للمطابقة (الخادم هو المصدر المعتمد)
+      // silent local mirror — the server stays the source of truth
       localPatch.insurers[ins] = { enabled: true, user, ...(pass ? { pass } : {}) };
     }
     if (changed.length) await saveSettings(localPatch);
-    if (changed.length === 1) {
-      setOut(`تم حفظ بيانات ${changed[0]} على الخادم ✓`, "ok");
-    } else if (changed.length > 1) {
-      setOut(`تم حفظ بيانات ${changed.length} شركات على الخادم ✓`, "ok");
-    } else {
-      setOut("لا توجد تغييرات للحفظ");
-    }
-    // منع إرسال نفس كلمة المرور مجدداً عند حفظ لاحق
+    setOut(changed.length ? "Saved" : "No changes", changed.length ? "ok" : "");
     for (const ins of INSURERS) $(`${ins}Pass`).value = "";
     await load();
   } catch (e) {
-    setOut(`فشل الحفظ: ${e.message || e} — راجع اتصال الخادم`, "err");
+    setOut(`Error: ${e.message || e}`, "err");
   } finally {
     btn.disabled = false;
   }

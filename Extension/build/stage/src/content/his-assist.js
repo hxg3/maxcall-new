@@ -8,7 +8,7 @@
   // الرسائل: "ui:ask" (اعرض) و"ui:askClear" (أغلق).
 
   const STYLE = `
-    .mcr-ask{position:fixed;inset-inline-end:18px;bottom:18px;z-index:2147483647;direction:rtl;
+    .mcr-ask{position:fixed;inset-inline-end:18px;bottom:18px;z-index:2147483647;direction:ltr;
       font-family:"Segoe UI",Tahoma,sans-serif;font-size:13px;color:#e2e8f0;background:#0f172af5;
       border:1px solid #334155;border-radius:14px;box-shadow:0 14px 36px #0007;overflow:hidden;
       width:320px;max-width:calc(100vw - 32px)}
@@ -100,7 +100,7 @@
         left -= 1;
         if (!root.isConnected) { clearInterval(countTimer); return; }
         if (left <= 0) {
-          countEl.textContent = "منقض";
+          countEl.textContent = "0";
           countEl.classList.add("low");
           clearInterval(countTimer);
           // لا تُرسل شيئاً — الرخصة تنتهي على السيرفر وتنتقل للجهاز التالي؛
