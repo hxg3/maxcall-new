@@ -201,6 +201,114 @@ async function runHtmlForm() {
   }
 }
 
+async function runGigForm() {
+  if (!state.insurer || !state.card) return;
+  const card = state.card;
+  $("printBtn").disabled = true;
+  $("printBtn").textContent = "Preparing…";
+  setStatus("Preparing the document…");
+  addStep("Fetching GIG form", "run");
+  try {
+    const res = await fetch(state.insurer.templateUrl, { cache: "no-store" });
+    if (!res.ok) throw new Error(`template fetch failed: ${res.status}`);
+    let html = await res.text();
+
+    // تقسيم رقم HIS: البوليسي = كل الأجزاء ما عدا آخر 3، والعضوية = آخر 3
+    const raw = String(card.insurance?.card_no || "").trim();
+    const parts = raw.split("/").map((p) => p.trim()).filter(Boolean);
+    const [policyNo, membershipNo] = parts.length > 3
+      ? [parts.slice(0, -3).join("/"), parts.slice(-3).join("/")]
+      : [raw, raw];
+
+    // نفس تنظيف فيبل: تسقط الرموز الميتة، وفاصل واحد بين الكلمات
+    const cleanName = String(card.patient?.fullName || card.patient?.name || "")
+      .split(/\s+/).map((t) => t.trim())
+      .filter((t) => t && !/^([.\-_]+|na|n\/a)$/i.test(t)).join(" ");
+
+    const sex = String(card.patient?.sex || "").trim().toLowerCase();
+    const isMale = sex.startsWith("m"), isFemale = sex.startsWith("f");
+
+    const svc = $("typeSel")?.value || card.insurance?.service_type || card.typeHint || card.service_type || "";
+    const vi = visitIndex(svc, card.typeHint);
+    const checked = Array.from({ length: 6 }, (_, i) => i === vi ? " checked" : "");
+
+    const data = {
+      policyNo, membershipNo, name: cleanName,
+      date: new Date().toLocaleDateString("en-GB"),
+      timestamp: String(Date.now()),
+      sexMaleChecked: isMale ? " checked" : "",
+      sexFemaleChecked: isFemale ? " checked" : "",
+      visit0: checked[0], visit1: checked[1], visit2: checked[2],
+      visit3: checked[3], visit4: checked[4], visit5: checked[5],
+    };
+    for (const [k, v] of Object.entries(data))
+      html = html.replace(new RegExp(`{{${k}}}`, "g"), String(v ?? ""));
+
+    const r2 = await send({ type: "insurer:printHtml", html });
+    if (!r2?.ok) throw new Error(r2?.reason || "print failed");
+    addStep("Print dialog opened ✓", "ok");
+    setStatus("Done ✓ — the print dialog is open in your window");
+  } catch (e) {
+    log("error", "gig form failed", String(e));
+    setStatus(`Failed: ${e.message}`, true);
+    addStep("Failed", "err");
+  } finally {
+    $("printBtn").disabled = false;
+    $("printBtn").textContent = "Print insurance document";
+  }
+}
+
+function visitIndex(svc, hint) {
+  // مطابقة substring بالترتيب الأدق-أولاً (نفس منطق النسخة الأخرى من المنطق)؛
+  // الرمزان القصيران er / ip يُطابقان ككلمة كاملة فقط — "maternity" تحتوي
+  // "er" لكنها تُلتقط بمطابقتها لـ"matern" أولاً
+  const hay = (`${String(svc || "").toLowerCase()} ${String(hint || "").toLowerCase()} `).toLowerCase();
+  const kws = [
+    ["dental", 4], ["tooth", 4],
+    ["optical", 5], ["optometr", 5], ["eye", 5],
+    ["matern", 3], ["pregnan", 3],
+    ["in-patient", 1], ["inpatient", 1], ["in patient", 1], ["admitted", 1], ["admission", 1],
+    ["emergency", 2], ["casualty", 2], ["a&e", 2],
+    ["out-patient", 0], ["outpatient", 0], ["opd", 0],
+  ];
+  for (const [kw, idx] of kws) {
+    if (hay.includes(kw)) return idx;
+  }
+  const m = hay.match(/\b(er|ip)\b/);
+  if (m) return m[1] === "er" ? 2 : 1;
+  return 0; // الأغلب Outpatient
+}
+
+async function runStaticPdf() {
+  if (!state.insurer || !state.card) return;
+  $("printBtn").disabled = true;
+  $("printBtn").textContent = "Preparing…";
+  setStatus("Opening the printout…");
+  addStep("Fetching the form", "run");
+  try {
+    const res = await fetch(state.insurer.templateUrl, { cache: "no-store" });
+    if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
+    const blob = await res.blob();
+    const dataUrl = await new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(String(fr.result || ""));
+      fr.onerror = () => reject(fr.error || new Error("read failed"));
+      fr.readAsDataURL(blob);
+    });
+    const r2 = await send({ type: "insurer:printPdf", dataUrl });
+    if (!r2?.ok) throw new Error(r2?.reason || "print failed");
+    addStep("Print dialog opened ✓", "ok");
+    setStatus("Done ✓ — the print dialog is open in your window");
+  } catch (e) {
+    log("error", "static pdf failed", String(e));
+    setStatus(`Failed: ${e.message}`, true);
+    addStep("Failed", "err");
+  } finally {
+    $("printBtn").disabled = false;
+    $("printBtn").textContent = "Print insurance document";
+  }
+}
+
 function renderCard(card) {
   state.card = card;
   $("patientEmpty").style.display = "none";
@@ -389,7 +497,8 @@ async function startRun() {
 
   const st = await getSettings();
   const c = (st.insurers || {})[state.insurer.id] || {};
-  if (!c.user || !c.pass) {
+  const needsCreds = state.insurer.id !== "gig" && state.insurer.id !== "oqic";
+  if (needsCreds && (!c.user || !c.pass)) {
     setStatus("Warning: login credentials incomplete (Settings) — works only with a live session");
     addStep("Credentials incomplete (Settings)", "err");
   } else {
@@ -445,7 +554,10 @@ async function copyLog() {
 }
 
 $("printBtn").addEventListener("click", async () => {
-  if (state.insurer?.kind === "excel" || state.insurer?.kind === "html-form") await runHtmlForm();
+  const kind = state.insurer?.kind;
+  if (kind === "static-pdf") await runStaticPdf();
+  else if (state.insurer?.id === "gig" && kind === "html-form") await runGigForm();
+  else if (kind === "excel" || kind === "html-form") await runHtmlForm();
   else await startRun();
 });
 $("copyLog").addEventListener("click", (e) => { e.preventDefault(); copyLog(); });

@@ -34,6 +34,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           sendResponse(job ? { ok: true, job: publicJob(job) } : { ok: false, reason: "no_job" });
           break;
         }
+        case "insurer:printPdf": {
+          // ملف PDF جاهز (نموذج ثابت كـOQIC) — يُطبع داخل تبويب HIS مباشرة
+          const ok = await printDataUrlInUserTab(msg.dataUrl, "oqic");
+          sendResponse({ ok, reason: ok ? "" : "print_failed" });
+          break;
+        }
         case "insurer:printHtml": {
           const html = msg.html || "";
           const tabs = await chrome.tabs.query({ url: HIS_TAB_PATTERNS }).catch(() => []);

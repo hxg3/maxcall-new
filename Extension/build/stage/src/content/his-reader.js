@@ -25,10 +25,10 @@
   const LABEL_RE = /patient\s*id|file\s*no|mrn|رقم\s*الملف|رقم\s*المريض/i;
   const CARDNO_RE = /^[A-Za-z0-9][A-Za-z0-9\/\-]{6,24}$/;
   const PAYER_NAME_RE =
-    /NEXTCARE|MEDNET|MED\s*GULF|MEDGULF|TAKAFUL|DAMAN|AXA|BUPA|DHOFAR\s*INS|INSURANCE|تأمين/i;
+    /NEXTCARE|MEDNET|MED\s*GULF|MEDGULF|TAKAFUL|DAMAN|AXA|BUPA|DHOFAR\s*INS|GIG|OQIC|INSURANCE|تأمين/i;
   // اسم شركة معروف — يُفضَّل على المطابقة العامة ("…INSURANCE…")
   const KNOWN_PAYER_RE =
-    /LIVA|NLIC|MEDNET|MED\s*GULF|NEXTCARE|VIPUL|TAKAFUL|DAMAN|AXA|BUPA/i;
+    /LIVA|NLIC|MEDNET|MED\s*GULF|NEXTCARE|VIPUL|TAKAFUL|DAMAN|AXA|BUPA|GIG|OQIC/i;
 
   function val(sel) {
     return (document.querySelector(sel)?.value || "").trim();
