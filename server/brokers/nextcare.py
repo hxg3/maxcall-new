@@ -179,6 +179,25 @@ class NextCare(Backend):
             time.sleep(0.4)
         return
 
+    def _prewarm(self, w, kind):
+        """أعد صفحة الاستعلام جاهزة **للطلب التالي** — بعد اكتمال المهمة.
+        تكلفة الـgoto تُدفع هنا (الموظف تلقى استجابته) بدل بداية الطلب
+        القادم؛ عندها يجد `_page_is_fresh_eligibility()` صادقة ويتخطى goto
+        بالكامل. فشل التسخين لا يكسر شيئاً: الطلب القادم يعود للمسار
+        المستهلك goto كما اليوم."""
+        if w.remaining(kind) < 8:
+            w.progress("navigate", "run",
+                       "pre-warm skipped — deadline too close")
+            return
+        try:
+            self._open_eligibility(w)
+            w.progress("navigate", "ok",
+                       "eligibility pre-warmed for next request")
+        except Exception as e:
+            # أي فشل هنا يُسجَّل فقط — لا يطال نتيجة مهمة مكتملة
+            w.progress("navigate", "run",
+                       f"pre-warm skipped: {str(e)[:120]}")
+
     def _wait_print_btn(self, w, timeout_s):
         door = time.monotonic() + timeout_s
         while time.monotonic() < door:
@@ -319,7 +338,7 @@ class NextCare(Backend):
         self._note_ready(w)
         w.progress("eligibility", "ok")
         if kind == "keepalive":
-            # الصفحة تُعاد تحميلها نظيفة عند الطلب القادم
+            self._prewarm(w, kind)
             return {"member": member, "result": "ok"}
 
         # الطباعة — التنزيل يُلتقط عبر download في العامل
@@ -330,6 +349,6 @@ class NextCare(Backend):
         if not r.get("ok"):
             raise BackendError(f"print_failed | {r.get('error')}")
         w.progress("print", "ok", f"url={str(r.get('url', ''))[:110]}")
-        # صفحة الاستعلام تُعاد تحميلها نظيفة عند الطلب القادم
+        self._prewarm(w, kind)
         return {"member": member, "pdf_bytes": r.get("bytes"),
                 "pdf_url": r.get("url", "")}
