@@ -184,10 +184,14 @@ async function runHtmlForm(selectedAttachments = []) {
       html = html.replace(new RegExp(`{{${key}}}`, "g"), String(val ?? ""));
     }
 
-    const printParts = [{ type: "html", content: html, label: "نموذج فيبول" }];
-    if (selectedAttachments.length) printParts.push(...attachmentsParts());
-    const res2 = await send({ type: "insurer:printComposite", parts: printParts });
-    if (!res2?.ok) throw new Error(res2?.reason || "print failed");
+    if (selectedAttachments.length) {
+      const printParts = [{ type: "html", content: html, label: "نموذج فيبول" }, ...attachmentsParts()];
+      const res2 = await send({ type: "insurer:printComposite", parts: printParts });
+      if (!res2?.ok) throw new Error(res2?.reason || "print failed");
+    } else {
+      const res2 = await send({ type: "insurer:printHtml", html });
+      if (!res2?.ok) throw new Error(res2?.reason || "print failed");
+    }
 
     addStep("Print dialog opened ✓", "ok");
     setStatus("Done ✓ — the print dialog is open in your window");
@@ -245,10 +249,14 @@ async function runGigForm(selectedAttachments = []) {
     for (const [k, v] of Object.entries(data))
       html = html.replace(new RegExp(`{{${k}}}`, "g"), String(v ?? ""));
 
-    const printParts = [{ type: "html", content: html, label: "نموذج GIG" }];
-    if (selectedAttachments.length) printParts.push(...attachmentsParts());
-    const r2 = await send({ type: "insurer:printComposite", parts: printParts });
-    if (!r2?.ok) throw new Error(r2?.reason || "print failed");
+    if (selectedAttachments.length) {
+      const printParts = [{ type: "html", content: html, label: "نموذج GIG" }, ...attachmentsParts()];
+      const r2 = await send({ type: "insurer:printComposite", parts: printParts });
+      if (!r2?.ok) throw new Error(r2?.reason || "print failed");
+    } else {
+      const r2 = await send({ type: "insurer:printHtml", html });
+      if (!r2?.ok) throw new Error(r2?.reason || "print failed");
+    }
     addStep("Print dialog opened ✓", "ok");
     setStatus("Done ✓ — the print dialog is open in your window");
   } catch (e) {
@@ -437,10 +445,14 @@ async function runStaticPdf(selectedAttachments = []) {
       fr.onerror = () => reject(fr.error || new Error("read failed"));
       fr.readAsDataURL(blob);
     });
-    const parts = [{ type: "pdf", dataUrl, label: state.insurer.label || "المستند" }];
-    if (selectedAttachments.length) parts.push(...attachmentsParts());
-    const r2 = await send({ type: "insurer:printComposite", parts });
-    if (!r2?.ok) throw new Error(r2?.reason || "print failed");
+    if (selectedAttachments.length) {
+      const parts = [{ type: "pdf", dataUrl, label: state.insurer.label || "المستند" }, ...attachmentsParts()];
+      const r2 = await send({ type: "insurer:printComposite", parts });
+      if (!r2?.ok) throw new Error(r2?.reason || "print failed");
+    } else {
+      const r2 = await send({ type: "insurer:printPdf", dataUrl });
+      if (!r2?.ok) throw new Error(r2?.reason || "print failed");
+    }
     addStep("Print dialog opened ✓", "ok");
     setStatus("Done ✓ — the print dialog is open in your window");
   } catch (e) {
@@ -470,6 +482,8 @@ function renderCard(card) {
     $("insChip").textContent = insurer.label;
     $("printBtn").disabled = false;
     $("excelFields").style.display = "none";
+    $("attachCard").style.display = "";
+    renderAttachments();
     // حقول Vipul الإضافية خاصة بـvipul فقط — GIG يملأ كل شيء من بطاقة HIS
     if (insurer.id === "vipul" && (insurer.kind === "excel" || insurer.kind === "html-form")) {
       $("printBtn").textContent = "Print insurance document";
@@ -503,6 +517,7 @@ function renderCard(card) {
     $("insChip").textContent = card.insurance.payer_name || "No insurance";
     $("insChip").classList.add("warn");
     setStatus("Insurance company not supported yet", true);
+    $("attachCard").style.display = "none";
   }
   $("iCard").textContent = card.insurance.card_no || "—";
 }
