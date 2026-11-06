@@ -325,7 +325,8 @@ function renderCard(card) {
     $("insChip").textContent = insurer.label;
     $("printBtn").disabled = false;
     $("excelFields").style.display = "none";
-    if (insurer.kind === "excel" || insurer.kind === "html-form") {
+    // حقول Vipul الإضافية خاصة بـvipul فقط — GIG يملأ كل شيء من بطاقة HIS
+    if (insurer.id === "vipul" && (insurer.kind === "excel" || insurer.kind === "html-form")) {
       $("printBtn").textContent = "Print insurance document";
       const info = detectMissingExcelFields(card);
       renderExcelForm(card, info);
