@@ -749,7 +749,7 @@ class Liva(Backend):
             except Exception:
                 pass
             el.fill("")
-            el.press_sequentially(text, delay=40)
+            el.press_sequentially(text, delay=18)
         except Exception:
             return None
         if w.wait_for(JS_DOCTOR_MENU_READY, timeout_s=2.5, poll_s=0.2):

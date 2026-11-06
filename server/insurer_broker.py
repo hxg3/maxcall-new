@@ -76,6 +76,7 @@ class Job(dict):
         self.setdefault("stages", []).append({
             "step": step, "status": status, "detail": str(detail)[:200],
             "ts": round(time.time()),
+            "ts_ms": round(time.time() * 1000),   # قياس دقيق — إضافية فقط (ts الأصلي بلا مساس)
         })
 
 
