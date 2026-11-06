@@ -3,7 +3,7 @@ import { getSettings } from "../lib/settings.js";
 import { log } from "../lib/log.js";
 
 const $ = (id) => document.getElementById(id);
-const state = { card: null, insurer: null, tabId: null };
+const state = { card: null, insurer: null, tabId: null, attachments: [], selectedIds: new Set(), hisPatId: null };
 
 const send = (msg) => chrome.runtime.sendMessage(msg);
 
@@ -126,7 +126,7 @@ function collectExcelInputs() {
   return out;
 }
 
-async function runHtmlForm() {
+async function runHtmlForm(selectedAttachments = []) {
   if (!state.insurer || !state.card) return;
   const card = state.card;
   const info = detectMissingExcelFields(card);
@@ -184,8 +184,9 @@ async function runHtmlForm() {
       html = html.replace(new RegExp(`{{${key}}}`, "g"), String(val ?? ""));
     }
 
-    // إرسال الـHTML المعبأ إلى الخلفية → طباعة في تبويب الموظف
-    const res2 = await send({ type: "insurer:printHtml", html });
+    const printParts = [{ type: "html", content: html, label: "نموذج فيبول" }];
+    if (selectedAttachments.length) printParts.push(...attachmentsParts());
+    const res2 = await send({ type: "insurer:printComposite", parts: printParts });
     if (!res2?.ok) throw new Error(res2?.reason || "print failed");
 
     addStep("Print dialog opened ✓", "ok");
@@ -201,7 +202,7 @@ async function runHtmlForm() {
   }
 }
 
-async function runGigForm() {
+async function runGigForm(selectedAttachments = []) {
   if (!state.insurer || !state.card) return;
   const card = state.card;
   $("printBtn").disabled = true;
@@ -244,7 +245,9 @@ async function runGigForm() {
     for (const [k, v] of Object.entries(data))
       html = html.replace(new RegExp(`{{${k}}}`, "g"), String(v ?? ""));
 
-    const r2 = await send({ type: "insurer:printHtml", html });
+    const printParts = [{ type: "html", content: html, label: "نموذج GIG" }];
+    if (selectedAttachments.length) printParts.push(...attachmentsParts());
+    const r2 = await send({ type: "insurer:printComposite", parts: printParts });
     if (!r2?.ok) throw new Error(r2?.reason || "print failed");
     addStep("Print dialog opened ✓", "ok");
     setStatus("Done ✓ — the print dialog is open in your window");
@@ -279,7 +282,146 @@ function visitIndex(svc, hint) {
   return 0; // الأغلب Outpatient
 }
 
-async function runStaticPdf() {
+// ------------------------------------------------------------------
+// مرفقات الطباعة: مستندات محفوظة في HIS + آخر صور من واتساب ويب
+// ------------------------------------------------------------------
+function collectSelectedAttachments() {
+  return state.attachments.filter((a) => state.selectedIds.has(a.id));
+}
+
+function toggleAttachment(id) {
+  if (state.selectedIds.has(id)) state.selectedIds.delete(id);
+  else state.selectedIds.add(id);
+  renderAttachments();
+}
+
+function renderAttachments() {
+  const list = $("attachList");
+  list.textContent = "";
+  if (!state.attachments.length) {
+    $("attachCard").style.display = "none";
+    $("attachStatus").textContent = "";
+    return;
+  }
+  $("attachCard").style.display = "";
+  let nSel = 0;
+  for (const a of state.attachments) {
+    const sel = state.selectedIds.has(a.id);
+    if (sel) nSel += 1;
+    const wrap = document.createElement("div");
+    wrap.style.cssText =
+      "position:relative;border:1px solid var(--line);border-radius:8px;padding:5px;width:86px;background:#fff;flex:none;";
+    if (sel) wrap.style.borderColor = "var(--brand)";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = sel;
+    cb.style.cssText = "position:absolute;top:4px;right:4px;width:16px;height:16px;accent-color:var(--brand);";
+    cb.addEventListener("change", () => toggleAttachment(a.id));
+    const img = document.createElement("img");
+    img.src = a.dataUrl;
+    img.style.cssText = "width:100%;height:64px;object-fit:cover;border-radius:6px;display:block;margin-bottom:4px;";
+    const name = document.createElement("div");
+    name.textContent = a.fileName;
+    name.style.cssText = "font-size:10px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;";
+    const srcLine = document.createElement("div");
+    srcLine.textContent =
+      Math.round(a.size / 1024) + " KB · " + (a.source === "whatsapp" ? "واتساب" : "HIS") + (a.chatName ? " — " + a.chatName : "");
+    srcLine.style.cssText = "font-size:8px;color:var(--sub);";
+    wrap.append(cb, img, name, srcLine);
+    list.appendChild(wrap);
+  }
+  $("attachStatus").textContent = `تم اختيار ${nSel} من ${state.attachments.length} مرفق`;
+}
+
+async function loadHisDocuments() {
+  if (!state.hisPatId || state.hisPatId === "—") {
+    setStatus("لا يمكن جلب مستندات HIS — رقم الملف غير واضح", true);
+    return;
+  }
+  $("printBtn").disabled = true;
+  $("printBtn").textContent = "جلب مستندات HIS…";
+  setStatus("جلب مستندات المريض من HIS…");
+  state.attachments = [];
+  state.selectedIds = new Set();
+  renderAttachments();
+  try {
+    const res = await send({ type: "his:getDocuments", patId: state.hisPatId });
+    if (!res.ok) throw new Error(res.reason || "فشل جلب مستندات HIS");
+    for (const d of res.documents || []) {
+      const id = `his-${d.id}`;
+      state.attachments.push({
+        id,
+        source: "his",
+        fileName: d.fileName,
+        dataUrl: d.dataUrl,
+        mime: d.fileType,
+        size: d.size,
+        category: d.category,
+      });
+      state.selectedIds.add(id); // التحديد التلقائي للمرفقات المستجلبة من HIS
+    }
+    renderAttachments();
+    setStatus(`تم جلب ${res.documents.length} مستند من HIS`);
+  } catch (e) {
+    log("error", "his documents failed", String(e));
+    setStatus(`فشل جلب مستندات HIS: ${e.message}`, true);
+  } finally {
+    $("printBtn").disabled = false;
+    $("printBtn").textContent = state.insurer ? "Print insurance document" : "Print insurance document";
+  }
+}
+
+async function loadWaImages() {
+  $("printBtn").disabled = true;
+  $("printBtn").textContent = "جلب صور واتساب…";
+  setStatus("جلب آخر صور من واتساب ويب…");
+  try {
+    const res = await send({ type: "wa:getLastImages", limit: 5 });
+    if (!res.ok) throw new Error(res.reason || "فشل جلب صور واتساب");
+    const existingIds = new Set(state.attachments.map((a) => a.id));
+    let added = 0;
+    for (const im of res.images || []) {
+      if (existingIds.has(im.id)) continue;
+      const id = `wa-${im.id}`;
+      state.attachments.push({
+        id,
+        source: "whatsapp",
+        fileName: `whatsapp_${im.t}.jpg`,
+        dataUrl: im.dataUrl,
+        mime: im.mime,
+        size: im.size,
+        caption: im.caption,
+        chatName: im.chatName,
+      });
+      state.selectedIds.add(id);
+      existingIds.add(id);
+      added += 1;
+    }
+    renderAttachments();
+    setStatus(`تم جلب ${added} صورة جديدة من واتساب (المجموع ${state.attachments.length})`);
+  } catch (e) {
+    log("error", "whatsapp images failed", String(e));
+    setStatus(`فشل جلب صور واتساب: ${e.message}`, true);
+  } finally {
+    $("printBtn").disabled = false;
+    $("printBtn").textContent = state.insurer ? "Print insurance document" : "Print insurance document";
+  }
+}
+
+function attachmentsParts() {
+  const parts = [];
+  for (const a of collectSelectedAttachments()) {
+    parts.push({
+      type: "image",
+      dataUrl: a.dataUrl,
+      label: a.fileName,
+      caption: a.source === "whatsapp" ? `واتساب — ${a.chatName || ""}` : `HIS — ${a.category || "مستند مرفق"}`,
+    });
+  }
+  return parts;
+}
+
+async function runStaticPdf(selectedAttachments = []) {
   if (!state.insurer || !state.card) return;
   $("printBtn").disabled = true;
   $("printBtn").textContent = "Preparing…";
@@ -295,7 +437,9 @@ async function runStaticPdf() {
       fr.onerror = () => reject(fr.error || new Error("read failed"));
       fr.readAsDataURL(blob);
     });
-    const r2 = await send({ type: "insurer:printPdf", dataUrl });
+    const parts = [{ type: "pdf", dataUrl, label: state.insurer.label || "المستند" }];
+    if (selectedAttachments.length) parts.push(...attachmentsParts());
+    const r2 = await send({ type: "insurer:printComposite", parts });
     if (!r2?.ok) throw new Error(r2?.reason || "print failed");
     addStep("Print dialog opened ✓", "ok");
     setStatus("Done ✓ — the print dialog is open in your window");
@@ -311,6 +455,7 @@ async function runStaticPdf() {
 
 function renderCard(card) {
   state.card = card;
+  state.hisPatId = card.patient.pat_id || "—";
   $("patientEmpty").style.display = "none";
   $("patientBody").style.display = "";
   $("pName").textContent = card.patient.name || "—";
@@ -486,7 +631,7 @@ function printBtnReset(text = "Print insurance document") {
 }
 
 let runBusy = false;
-async function startRun() {
+async function startRun(selectedAttachments = []) {
   if (runBusy) { setStatus("المهمة قيد التنفيذ بالفعل — سأُبقيك على اطلاع", true); return; }
   if (!state.insurer || !state.card) return;
   runBusy = true;
@@ -494,7 +639,7 @@ async function startRun() {
   printBtnBusy("Working in background…");
   $("steps").textContent = "";
   const serviceType = $("typeSel")?.value || null;
-  log("info", "popup: startRun", `insurer=${state.insurer.id} type=${serviceType}`);
+  log("info", "popup: startRun", `insurer=${state.insurer.id} type=${serviceType} attachments=${selectedAttachments.length}`);
 
   const st = await getSettings();
   const c = (st.insurers || {})[state.insurer.id] || {};
@@ -511,6 +656,7 @@ async function startRun() {
     insurerId: state.insurer.id,
     card: state.card,
     serviceType,
+    attachments: selectedAttachments.map((a) => ({ id: a.id, source: a.source, fileName: a.fileName, dataUrl: a.dataUrl, mime: a.mime, size: a.size, caption: a.caption, chatName: a.chatName })),
   });
   if (!res.ok) {
     setStatus(`Could not start: ${res.reason}`, true);
@@ -556,10 +702,11 @@ async function copyLog() {
 
 $("printBtn").addEventListener("click", async () => {
   const kind = state.insurer?.kind;
-  if (kind === "static-pdf") await runStaticPdf();
-  else if (state.insurer?.id === "gig" && kind === "html-form") await runGigForm();
-  else if (kind === "excel" || kind === "html-form") await runHtmlForm();
-  else await startRun();
+  const selected = collectSelectedAttachments();
+  if (kind === "static-pdf") await runStaticPdf(selected);
+  else if (state.insurer?.id === "gig" && kind === "html-form") await runGigForm(selected);
+  else if (kind === "excel" || kind === "html-form") await runHtmlForm(selected);
+  else await startRun(selected);
 });
 $("copyLog").addEventListener("click", (e) => { e.preventDefault(); copyLog(); });
 $("manualGo").addEventListener("click", () => {
@@ -569,6 +716,8 @@ $("manualGo").addEventListener("click", () => {
 $("manualId").addEventListener("keydown", (e) => {
   if (e.key === "Enter") $("manualGo").click();
 });
+$("attachFromHis").addEventListener("click", (e) => { e.preventDefault(); loadHisDocuments(); });
+$("attachFromWa").addEventListener("click", (e) => { e.preventDefault(); loadWaImages(); });
 $("openOptions").addEventListener("click", (e) => {
   e.preventDefault();
   chrome.runtime.openOptionsPage();
