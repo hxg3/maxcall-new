@@ -127,9 +127,36 @@ JS_SEARCH_BTN = f"""() => {{ {_MJS}
       .find(el => okEl(el) && (el.id === 'btnSearch' || /^\\s*search\\s*$/i.test(el.textContent || el.value || ''))) || null;
 }}"""
 
-JS_DOCTOR_ITEMS = """() => [...document.querySelectorAll('ul.ui-autocomplete li.ui-menu-item')]
-    .map(li => ((li.querySelector('.ui-menu-item-wrapper') || li).textContent || '').trim())
-    .filter(Boolean)"""
+JS_DOCTOR_ITEMS = """() => {
+  // القائمة الخاصة بـ #txtDoctor فقط — jQuery UI يبقي كل قوائم الصفحة
+  // (طبيب + speciality + غيرها) في الـDOM بعد إخفائها، والقراءة العامة
+  // كانت تُرجع عناصر بحث قديم متبقّي (فتقترح "ELSAYED MUSTAFA" مثلاً).
+  // الطريقة الرسمية: $(...).autocomplete('widget') تُرجع عنصر قائمة هذا
+  // الحقل وحده. والنتيجة تُقرأ فقط و القائمة ظاهرة (رد المقبس وصل).
+  try {
+    const $el = jQuery('#txtDoctor');
+    const menu = $el.autocomplete('widget');
+    if (!menu || !menu.length) return [];
+    if (!menu.is(':visible')) return [];
+    return menu.find('li.ui-menu-item').toArray()
+        .map(li => ((li.querySelector('.ui-menu-item-wrapper') || li).textContent || '').trim())
+        .filter(Boolean);
+  } catch (e) {
+    return [];
+  }
+}"""
+
+
+JS_DOCTOR_MENU_READY = """() => {
+  try {
+    const $el = jQuery('#txtDoctor');
+    const menu = $el.autocomplete('widget');
+    return !!menu && !!menu.length && menu.is(':visible') &&
+           menu.find('li.ui-menu-item').length > 0;
+  } catch (e) {
+    return false;
+  }
+}"""
 
 
 
@@ -144,6 +171,23 @@ JS_ALREADY_PRINTED = """() => {
   return [...document.querySelectorAll('body *')]
       .filter(el => ok(el) && /already printed/i.test(el.textContent || '') && el.children.length < 4)
       .length;
+}"""
+
+# #FailedMsg — حاوية رسائل البوابة (Action Failed / Claim Form already…)
+# تظهر باللون الأحمر عند الرفض؛ نقرأها حرفياً لنميّز "already printed"
+# (الشرع الوحيد لمسار Reprint) عن أي رفض آخر يجب أن يتوقف عنده النظام.
+JS_FAILED_MSG_VISIBLE = """() => {
+  const el = document.querySelector('#FailedMsg');
+  if (!el) return false;
+  const cs = getComputedStyle(el);
+  const shown = cs.display !== 'none' && cs.visibility !== 'hidden' &&
+                el.getClientRects().length > 0;
+  return shown && (el.textContent || '').trim().length > 0;
+}"""
+
+JS_FAILED_MSG_TEXT = """() => {
+  const el = document.querySelector('#FailedMsg');
+  return el ? (el.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 400) : '';
 }"""
 
 JS_DISMISS_ALERT = """() => {
@@ -687,29 +731,29 @@ class Liva(Backend):
             return []
 
     def _type_into_doctor(self, w, text):
-        """اكتب في حقول الدكتور فقط حتى تظهر قائمة jQuery UI.
-        تستثنى الحقول التي ليست طبيب (sepeciality — يملأها البوابة تلقائياً)."""
+        """اكتب في حقل الطبيب فقط حتى تظهر قائمة autocomplete الخاصة به.
+        إغلاق القائمة أولاً حتى لا تُقرأ عناصر بحث سابق متبقية.
+        ننتظر القائمة **الخاصة بـ#txtDoctor** (jQuery widget) — لا مجرد
+        وجود أي li.ui-menu-item على الصفحة."""
         NOT_DOCTOR = {"txtMemberId", "txtGsmNo", "CaptchaInputText", "txtSpeciality",
                       "txtPatientId", "txtDateofAdmission", "txtSecurityToken"}
-        loc = w.page.locator(
-            'input.ui-autocomplete-input, input[role="combobox"],'
-            ' input[id*="doctor" i], input[name*="doctor" i]')
-        for i in range(min(loc.count(), 8)):
-            el = loc.nth(i)
+        loc = w.page.locator('#txtDoctor')
+        if loc.count() == 0:
+            return None
+        el = loc.first
+        try:
             try:
-                if not el.is_visible():
-                    continue
-                el_id = el.get_attribute("id") or ""
-                el_name = el.get_attribute("name") or ""
-                if el_id in NOT_DOCTOR or el_name in NOT_DOCTOR:
-                    continue
-                el.fill("")
-                el.press_sequentially(text, delay=40)
+                w.page.evaluate("""() => {
+                  try { jQuery('#txtDoctor').autocomplete('close'); } catch (e) {}
+                }""")
             except Exception:
-                continue
-            if w.wait_for("""() => document.querySelectorAll('ul.ui-autocomplete li.ui-menu-item').length > 0""",
-                          timeout_s=2.5, poll_s=0.2):
-                return el
+                pass
+            el.fill("")
+            el.press_sequentially(text, delay=40)
+        except Exception:
+            return None
+        if w.wait_for(JS_DOCTOR_MENU_READY, timeout_s=2.5, poll_s=0.2):
+            return el
         return None
 
     def _select_doctor(self, w, card):
@@ -746,24 +790,23 @@ class Liva(Backend):
             )
         if wanted:
             save_doctor_alias(wanted, target)   # ذاكرة المطابقات — لا نطلبها ثانية
-        # انقر العنصر المطابق في القائمة
+        # انقر العنصر المطابق في قائمة الطبيب فقط (لا قوائم أخرى على الصفحة)
         clicked = w.page.evaluate(
             """(want) => {
                 const norm = s => String(s || '').toUpperCase().replace(/[^A-Z0-9 ]+/g, ' ').replace(/\\s+/g, ' ').trim();
                 const t = norm(want);
-                const li = [...document.querySelectorAll('ul.ui-autocomplete li.ui-menu-item')]
+                try {
+                  const menu = jQuery('#txtDoctor').autocomplete('widget');
+                  const li = menu.find('li.ui-menu-item').toArray()
                     .find(el => norm((el.querySelector('.ui-menu-item-wrapper') || el).textContent) === t);
-                if (!li) return false;
-                li.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-                li.click();
-                return true;
+                  if (!li) return false;
+                  li.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+                  li.click();
+                  return true;
+                } catch (e) { return false; }
             }""", target)
         if not clicked:
-            # fallback: ثبت النص يدوياً في الحقل
-            try:
-                inp.fill(target)
-            except Exception:
-                pass
+            raise BackendError(f"doctor_pick_failed | target={target}")
         w.progress("eligibility", "run", f"doctor={target}")
         return target
 
@@ -877,6 +920,18 @@ class Liva(Backend):
             return not self._already_printed_visible(w)
         except Exception:
             return False
+
+    def _failed_msg_visible(self, w):
+        try:
+            return bool(w.page.evaluate(JS_FAILED_MSG_VISIBLE))
+        except Exception:
+            return False
+
+    def _failed_msg_text(self, w):
+        try:
+            return w.page.evaluate(JS_FAILED_MSG_TEXT) or ""
+        except Exception:
+            return ""
 
     def _find_reprint_button(self, w):
         """الزر له كلاس ListOfMem ونص "Reprint Online Claim Form" — ليس RePrintmember."""
@@ -1048,69 +1103,27 @@ class Liva(Backend):
             info = ("found" if btn2 else "absent") + f" | {self._dump_print_candidates(w)}"
             raise BackendError(f"print_button_not_ready | {info[:300]} | {state}")
         w._already_printed = False
-        w.progress("print", "run", "calling doAjax directly…")
-        # استدعاء doAjax مباشرة من سياق الصفحة (يتجاوز مشكلة النقر على الزر)
-        do_result = None
-        try:
-            do_result = w.page.evaluate("""() => {
-              const Memberobj = {};
-              Memberobj.Hospno = window.UserObj?.Name || '';
-              Memberobj.UserType = window.UserObj?.UserType || 'PROVIDER';
-              Memberobj.Speciality = $('#txtSpeciality').attr('Data-spCode');
-              Memberobj.DocNo = $('#txtDoctor').attr('data-DocCode');
-              Memberobj.Gm_MemberNo = $('#txtGsmNo').val();
-              Memberobj.PatientId = $('#txtPatientId').val();
-              Memberobj.UserIdVal = window.UserObj?.UserID || '';
-              Memberobj.ClientName = $('#txtEmpName').val();
-              Memberobj.CardNo = $('#txtCardNo').val();
-              Memberobj.ClientNo = $('#txtClientNo').val();
-              Memberobj.PolicyNo = $('#txtPolicyNo').val();
-              Memberobj.mfromdate = $('#txtCoverFromDate').val();
-              Memberobj.mtodate = $('#txtCoverToDate').val();
-
-              // تسليم القيم للتشخيص قبل الإرسال
-              try { window.__MCR_LAST_MEMBEROBJ = Memberobj; } catch (e) {}
-
-              return new Promise((resolve) => {
-                doAjax(URL + 'Reports/PatientInfo', 'Post', Memberobj, 'application/json', "json", '', function (err, result) {
-                  if (err) resolve({ doAjaxError: String(err) });
-                  else resolve(result);
-                });
-              });
-            }""")
-        except Exception as e:
-            w.progress("print", "run", f"doAjax eval error: {str(e)[:120]}")
-
-        if do_result and do_result.get('st', {}).get('StatusCode') == 'S':
-            file_path = do_result.get('FilePath')
-            w.progress("print", "run", f"doAjax success, FilePath={str(file_path)[:80]}")
-            if file_path:
-                abs_url = file_path if file_path.lower().startswith(('http://', 'https://')) \
-                    else urllib.parse.urljoin(w.page.url or '', file_path)
-                try:
-                    resp = w.ctx.request.get(abs_url, timeout=30000)
-                    ct = (resp.headers.get('content-type') or '').lower()
-                    body = resp.body() or b''
-                    w.progress("print", "run", f"PDF fetch: status={resp.status} ct={ct} size={len(body)}")
-                    if body and body.startswith(b'%PDF'):
-                        w.progress("print", "ok", f"url={abs_url[:110]}")
-                        return {"member": member, "pdf_bytes": body, "pdf_url": abs_url}
-                    else:
-                        w.progress("print", "run", f"not a PDF, head={body[:20]}")
-                except Exception as e:
-                    w.progress("print", "run", f"PDF fetch error: {str(e)[:120]}")
-            else:
-                w.progress("print", "run", "FilePath empty in doAjax result")
-        else:
-            err_info = ""
-            if do_result:
-                err_info = f" statusCode={do_result.get('st',{}).get('StatusCode')} error={str(do_result.get('st',{}).get('StatusDescription',''))[:80]}"
-            # تسجيل Memberobj للتشخيص — لمعرفة أي حقل ناقص أو خاطئ
-            try:
-                mob = w.page.evaluate("() => window.__MCR_LAST_MEMBEROBJ || {}")
-                w.progress("print", "run", f"doAjax failed | Memberobj={json.dumps(mob, ensure_ascii=False)[:400]} | {err_info}")
-            except Exception:
-                w.progress("print", "run", f"doAjax not successful{err_info}")
+        w.progress("print", "run", "print button clicked — waiting for result (S → PDF · F → reprint only)")
+        # الطريقة الافتراضية: نقر زر "Print Online Claim Form" الحقيقي
+        # (نفس معالج البوابة .Printmember: validation → Loading → Reports/PatientInfo).
+        # window.open(FilePath) يُلتقط بنفس آلية Reprint (FormDetail) — لا فرق
+        # بين الطريقتين في كيفية استخراج المستند.
+        if not w.click(btn):
+            if not w.trusted_click(btn):
+                raise BackendError("print_click_failed")
+        r = self._report_hit_poll(w, timeout_s=25, stop_pred=self._failed_msg_visible)
+        if r.get("ok"):
+            w.progress("print", "ok", f"url={(r.get('url') or '')[:110]}")
+            return {"member": member, "pdf_bytes": r.get("bytes"),
+                    "pdf_url": r.get("url", "")}
+        # لم يصل أي رابط PDF — اقرأ سبب الرفض الحقيقي من #FailedMsg
+        fmsg = self._failed_msg_text(w) or ""
+        # الحالة الشرعية الوحيدة التي تنتقل لمسار Reprint: "Action Failed …
+        # Claim Form already printed for this member & for the selected Doctor"
+        if not re.search(r"already\s*printed", fmsg, re.IGNORECASE):
+            reason = fmsg or r.get("error") or "unknown"
+            w.progress("print", "error", f"print_failed | {reason[:180]}")
+            raise BackendError(f"print_failed | {reason[:250]}")
         w.progress("print", "run", "already printed — auto fallback to Reprint")
         if not self._dismiss_already_printed(w):
             w.progress("print", "run", "could not dismiss already-printed dialog")
