@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "MaxCare Reception Assistant",
-  "version": "0.10.1",
+  "version": "0.11.0",
   "description": "مساعد موظف الاستقبال: جلب بيانات المريض والتأمين من MAXCARE وتشغيل مواقع شركات التأمين تلقائياً حتى صفحة الطباعة.",
   "icons": {
     "16": "icons/icon16.png",
@@ -31,7 +31,8 @@
     "http://192.168.1.77:81/*",
     "https://pulse-uae.nextcarehealth.com/*",
     "https://mednetapprovals.com/*",
-    "https://online.nlicgulf.com:12443/*"
+    "https://online.nlicgulf.com:12443/*",
+    "https://web.whatsapp.com/*"
   ],
   "content_scripts": [
     {

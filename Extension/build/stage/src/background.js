@@ -73,6 +73,93 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           }
           break;
         }
+        case "insurer:printComposite": {
+          // طباعة مجمعة في صفحة الموظف: مستند التأمين + صور المرفقات المختارة، كل جزء في صفحة خاصة
+          const { parts = [], title = "المستند والمرفقات" } = msg;
+          const tabs = await chrome.tabs.query({ url: HIS_TAB_PATTERNS }).catch(() => []);
+          const userTab = tabs.find((t) => t.active) || tabs[0];
+          if (!userTab) { sendResponse({ ok: false, reason: "no_his_tab" }); break; }
+          try {
+            const res = await chrome.scripting.executeScript({
+              target: { tabId: userTab.id },
+              world: "MAIN",
+              args: [parts, title],
+              func: async (parts, title) => {
+                const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[c]);
+                let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(title)}</title>`;
+                html += `<style>@page{size:A4;margin:7mm 8mm;}*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;margin:0;color:#111;line-height:1.3}.section{page-break-after:always}.section:last-child{page-break-after:auto}h2{font-size:13px;border-bottom:1.2px solid #003057;padding-bottom:4px;margin:0 0 7px;color:#003057;letter-spacing:.4px}.sub{font-size:8px;color:#666;margin-bottom:6px}img{max-width:100%;max-height:88vh;height:auto;display:block;margin:0 auto}embed,iframe{width:100%;height:88vh;display:block;margin:0 auto;border:none;background:#fff}.fullimg{width:100%;max-height:88vh;object-fit:contain;display:block;margin:0 auto}</style></head><body>`;
+                for (const p of parts) {
+                  html += `<div class="section"><h2>${esc(p.label || "مستند")}</h2>`;
+                  if (p.type === "html") {
+                    const c = String(p.content || "");
+                    // إذا كان HTML صفحة كاملة، افتحها في iframe؛ وإلا أدخل محتواها مباشرة
+                    if (/<html[\s>]/i.test(c)) {
+                      const blob = new Blob([c], { type: "text/html" });
+                      const u = URL.createObjectURL(blob);
+                      html += `<iframe src="${u}" loading="eager"></iframe>`;
+                      setTimeout(() => URL.revokeObjectURL(u), 20000);
+                    } else {
+                      html += `<div style="font-size:10.5px">${c}</div>`;
+                    }
+                  } else if (p.type === "pdf") {
+                    html += `<embed type="application/pdf" src="${esc(p.dataUrl)}">`;
+                  } else if (p.type === "image") {
+                    html += `<img class="fullimg" src="${esc(p.dataUrl)}" alt="${esc(p.label || "مرفق")}">`;
+                    if (p.caption) html += `<div class="sub">${esc(p.caption)}</div>`;
+                  }
+                  html += `</div>`;
+                }
+                html += `</body></html>`;
+                const blob = new Blob([html], { type: "text/html" });
+                const url = URL.createObjectURL(blob);
+                const iframe = document.createElement("iframe");
+                iframe.style.cssText = "position:fixed;right:0;bottom:0;width:2px;height:2px;opacity:0.01;border:0;";
+                iframe.src = url;
+                document.body.appendChild(iframe);
+                await new Promise((r2) => { iframe.onload = r2; setTimeout(r2, 9000); });
+                iframe.contentWindow.print();
+                setTimeout(() => { iframe.remove(); URL.revokeObjectURL(url); }, 1000);
+                return { ok: true };
+              },
+            });
+            sendResponse(res?.[0]?.result?.ok ? { ok: true } : { ok: false, reason: res?.[0]?.result?.error || "print failed" });
+          } catch (e) {
+            sendResponse({ ok: false, reason: String(e) });
+          }
+          break;
+        }
+        case "his:getDocuments": {
+          // مستندات المريض المحفوظة في صفحة المشفى (قراءة فقط، لا حفظ)
+          const tabs = await chrome.tabs.query({ url: HIS_TAB_PATTERNS }).catch(() => []);
+          const hisTab = tabs.find((t) => t.active) || tabs[0];
+          if (!hisTab) { sendResponse({ ok: false, reason: "no_his_tab" }); break; }
+          try {
+            const resp = await chrome.tabs.sendMessage(hisTab.id, { type: "his:fetchDocuments", patId: msg.patId });
+            sendResponse(resp || { ok: false, reason: "no_response" });
+          } catch (e) {
+            sendResponse({ ok: false, reason: String(e) });
+          }
+          break;
+        }
+        case "wa:getLastImages": {
+          // آخر الصور من محادثات واتساب ويب (حقن السكربت في تبويب الواتساب)
+          const limit = Math.min(Math.max(Number(msg.limit) || 5, 1), 10);
+          const tabs = await chrome.tabs.query({ url: ["https://web.whatsapp.com/*"] }).catch(() => []);
+          const waTab = tabs.find((t) => t.active) || tabs[0];
+          if (!waTab) { sendResponse({ ok: false, reason: "no_whatsapp_tab" }); break; }
+          try {
+            await chrome.scripting.executeScript({ target: { tabId: waTab.id }, files: ["src/lib/wa-images.js"] });
+            const res = await chrome.scripting.executeScript({
+              target: { tabId: waTab.id },
+              func: (limit) => window.__mcr_fetchLastWaImages(limit),
+              args: [limit],
+            });
+            sendResponse(res?.[0]?.result || { ok: false, reason: "no_result" });
+          } catch (e) {
+            sendResponse({ ok: false, reason: String(e) });
+          }
+          break;
+        }
         case "insurer:ask": {
           // المحوّل يسأل الموظف (كابتشا/اسم) — نعرض السؤال في صفحة المشفى
           const tabId = sender?.tab?.id ?? null;
@@ -486,6 +573,77 @@ async function printDataUrlInUserTab(dataUrl, insurerId = "nextcare") {
   return false;
 }
 
+// طباعة مجمعة (مستند + مرفقات) في صفحة الموظف عبر iframe مخفي + print
+async function printCompositeInTab(tabId, parts, title = "المستند والمرفقات") {
+  try {
+    const res = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: "MAIN",
+      args: [parts, title],
+      func: async (parts, title) => {
+        const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[c]);
+        let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(title)}</title>`;
+        html += `<style>@page{size:A4;margin:7mm 8mm;}*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;margin:0;color:#111;line-height:1.3}.section{page-break-after:always}.section:last-child{page-break-after:auto}h2{font-size:13px;border-bottom:1.2px solid #003057;padding-bottom:4px;margin:0 0 7px;color:#003057;letter-spacing:.4px}.sub{font-size:8px;color:#666;margin-bottom:6px}img{max-width:100%;max-height:88vh;height:auto;display:block;margin:0 auto}embed,iframe{width:100%;height:88vh;display:block;margin:0 auto;border:none;background:#fff}</style></head><body>`;
+        for (const p of parts) {
+          html += `<div class="section"><h2>${esc(p.label || "مستند")}</h2>`;
+          if (p.type === "html") {
+            const c = String(p.content || "");
+            if (/<html[\s>]/i.test(c)) {
+              const blob = new Blob([c], { type: "text/html" });
+              const u = URL.createObjectURL(blob);
+              html += `<iframe src="${u}" loading="eager"></iframe>`;
+              setTimeout(() => URL.revokeObjectURL(u), 20000);
+            } else {
+              html += `<div style="font-size:10.5px">${c}</div>`;
+            }
+          } else if (p.type === "pdf") {
+            html += `<embed type="application/pdf" src="${esc(p.dataUrl)}">`;
+          } else if (p.type === "image") {
+            html += `<img src="${esc(p.dataUrl)}" style="max-width:100%;max-height:88vh;height:auto;display:block;margin:0 auto">`;
+            if (p.caption) html += `<div class="sub">${esc(p.caption)}</div>`;
+          }
+          html += `</div>`;
+        }
+        html += `</body></html>`;
+        const blob = new Blob([html], { type: "text/html" });
+        const url = URL.createObjectURL(blob);
+        const iframe = document.createElement("iframe");
+        iframe.style.cssText = "position:fixed;right:0;bottom:0;width:2px;height:2px;opacity:0.01;border:0;";
+        iframe.src = url;
+        document.body.appendChild(iframe);
+        await new Promise((r2) => { iframe.onload = r2; setTimeout(r2, 9000); });
+        iframe.contentWindow.print();
+        setTimeout(() => { iframe.remove(); URL.revokeObjectURL(url); }, 1000);
+        return { ok: true };
+      },
+    });
+    return res?.[0]?.result?.ok === true;
+  } catch (e) {
+    await log("warn", "print composite in tab failed", String(e).slice(0, 120));
+    return false;
+  }
+}
+
+// طباعة مجمعة في تبويب المشفى النشط (أو أول تبويب متاح)
+async function printCompositeInUserTab(parts, insurerId = "nextcare", title = "المستند والمرفقات") {
+  const tabs = await chrome.tabs.query({ url: HIS_TAB_PATTERNS }).catch(() => []);
+  const hisTab = tabs.find((t) => t.active) || tabs[0];
+  if (hisTab) {
+    const ok = await printCompositeInTab(hisTab.id, parts, title);
+    if (ok) return true;
+    await log("warn", "in-tab composite print failed", "");
+  }
+  // احتياط: طباعة أول جزء PDF فقط في نافذة منفصلة
+  const pdfPart = parts.find((p) => p.type === "pdf");
+  if (pdfPart) {
+    await chrome.storage.session.set({ mcrPrintPdf: pdfPart.dataUrl }).catch(() => {});
+    const userWinId = await userWindowId({ insurerId });
+    await chrome.tabs.create({ windowId: userWinId, url: chrome.runtime.getURL("src/print/print.html"), active: true });
+    return false;
+  }
+  return false;
+}
+
 function watchingJob(tabId) {
   return printWatch && printWatch.tabId === tabId && Date.now() - printWatch.since < 120000;
 }
@@ -848,8 +1006,24 @@ async function finishBrokerPrint(jobId, insurerId) {
   }
   report(null, { step: "document", status: "ok" });
   const dataUrl = `data:application/pdf;base64,${pdf.pdf_b64}`;
+  const job = Array.from(jobs.values()).find((j) => j.insurerId === insurerId && !j.reportHandled);
+  const attachments = job?.attachments || [];
+  if (attachments.length) {
+    const printParts = [
+      { type: "pdf", dataUrl, label: insurerId || "المستند" },
+      ...attachments.map((a) => ({
+        type: "image",
+        dataUrl: a.dataUrl,
+        label: a.fileName,
+        caption: a.source === "whatsapp" ? `واتساب — ${a.chatName || ""}` : `HIS — ${a.category || "مستند مرفق"}`,
+      })),
+    ];
+    const ok = await printCompositeInUserTab(printParts, insurerId);
+    report(null, { step: "print", status: ok ? "ok" : "error" });
+    return ok ? { ok: true } : { ok: true, printError: true };
+  }
   const ok = await printDataUrlInUserTab(dataUrl, insurerId);
-  report(null, { step: "print", status: "ok" });
+  report(null, { step: "print", status: ok ? "ok" : "error" });
   return ok ? { ok: true } : { ok: true, printError: true };
 }
 
@@ -895,7 +1069,7 @@ async function brokerJobActive(insurerId) {
   return activeBrokerJobs.has(insurerId);
 }
 
-async function runInsurer({ insurerId, card, serviceType }) {
+async function runInsurer({ insurerId, card, serviceType, attachments = [] }) {
   if (!insurerId) return { ok: false, reason: "unknown_insurer" };
   if (activeBrokerJobs.has(insurerId)) {
     return { ok: false, reason: "already_running", message: "المهمة قيد التنفيذ — انتظر حتى تكتمل" };
@@ -926,9 +1100,25 @@ async function runInsurer({ insurerId, card, serviceType }) {
       (e) => ({ ok: false, error: String(e).slice(0, 150) })
     );
     if (r?.ok && r.dataUrl) {
-      // الطباعة داخل تبويب الموظف نفسه (iframe مخفي + print) — لا تبويب جديد
-      await printDataUrlInUserTab(r.dataUrl, "nextcare");
-      report(null, { step: "print", status: "ok" });
+      const job = Array.from(jobs.values()).find((j) => j.insurerId === insurerId && !j.reportHandled);
+      const attachments = job?.attachments || [];
+      if (attachments.length) {
+        const printParts = [
+          { type: "pdf", dataUrl: r.dataUrl, label: "NextCare" },
+          ...attachments.map((a) => ({
+            type: "image",
+            dataUrl: a.dataUrl,
+            label: a.fileName,
+            caption: a.source === "whatsapp" ? `واتساب — ${a.chatName || ""}` : `HIS — ${a.category || "مستند مرفق"}`,
+          })),
+        ];
+        const ok = await printCompositeInUserTab(printParts, "nextcare");
+        report(null, { step: "print", status: ok ? "ok" : "error" });
+      } else {
+        // الطباعة داخل تبويب الموظف نفسه (iframe مخفي + print) — لا تبويب جديد
+        await printDataUrlInUserTab(r.dataUrl, "nextcare");
+        report(null, { step: "print", status: "ok" });
+      }
       const winId = insWindows.get("nextcare");
       if (winId) {
         insWindows.delete("nextcare");
@@ -953,6 +1143,7 @@ async function runInsurer({ insurerId, card, serviceType }) {
     error: null,
     startedAt: Date.now(),
     dispatching: false,
+    attachments: Array.isArray(attachments) ? attachments : [],
   });
   await log("info", `run: ${insurerId} on tab ${tab.id} (background window)`, `serviceType=${serviceType || "-"}`);
   report(tab.id, { step: "navigate", status: "run" });

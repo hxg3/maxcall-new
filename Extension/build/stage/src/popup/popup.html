@@ -26,6 +26,8 @@
     .kv span { direction: ltr; font-family: Consolas, monospace; font-size: 12px; }
     .cardno { font-size: 15px; font-weight: 700; letter-spacing: 1px; }
     select { border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; font: inherit; font-size: 12px; background: #fff; color: var(--ink); max-width: 185px; }
+    button.smallBtn { border: 1px solid var(--line); border-radius: 8px; padding: 4px 9px; font: inherit; font-weight: 600; font-size: 11.5px; color: var(--ink); background: #fff; cursor: pointer; }
+    button.smallBtn:hover { border-color: var(--brand); }
     button.cta { border: none; border-radius: 10px; padding: 10px; font: inherit; font-weight: 700; color: #fff; background: var(--brand); cursor: pointer; }
     button.cta:hover { background: #0284c7; }
     button.cta:disabled { opacity: .45; cursor: default; }
@@ -79,6 +81,18 @@
     <div class="card" id="excelFields" style="display:none">
       <div style="font-weight:700; margin-bottom:6px">Fields to complete</div>
       <div id="excelInputs"></div>
+    </div>
+
+    <div class="card" id="attachCard" style="display:none">
+      <div style="font-weight:700; margin-bottom:7px; display:flex; justify-content:space-between; align-items:center; gap:8px">
+        <div>مرفقات للطباعة</div>
+        <div style="display:flex; gap:6px">
+          <button type="button" id="attachFromHis" class="smallBtn">من HIS</button>
+          <button type="button" id="attachFromWa" class="smallBtn">من واتساب</button>
+        </div>
+      </div>
+      <div id="attachList" style="display:flex; flex-wrap:wrap; gap:7px; max-height:150px; overflow-y:auto; border:1px solid var(--line); border-radius:8px; padding:6px; background:#fff;"></div>
+      <div id="attachStatus" style="font-size:11px; color:var(--sub); margin-top:5px; min-height:14px;"></div>
     </div>
 
     <button class="cta" id="printBtn" disabled>Print insurance document</button>
