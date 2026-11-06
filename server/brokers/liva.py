@@ -1006,6 +1006,13 @@ class Liva(Backend):
     def _print_or_reprint(self, w, member, card):
         """المسار الطبيعي (Print Online Claim Form) وإلا مسار Reprint تلقائياً
         عند رسالة "Claim Form already printed"."""
+        # حارس الهوية النهائي: لا طباعة/مطالبة إن لم تكن الصفحة ما زالت
+        # على نفس العضو المطلوب (إعادة توجيه أو تحديث نصف أثناء العمل)
+        still = w.page.evaluate(
+            "() => (document.querySelector('#txtMemberId') || {}).value || ''") or ""
+        if still.strip() != str(member or "").strip():
+            raise BackendError(
+                f"member_mismatch_before_print | page={still.strip() or '?'} want={member}")
         # تصحيح اسم سمة boostrap: البوابة تقرأ data-DocCode (كبيرة) بينما HTML
         # يحمل data-doccode (صغيرة) ⇒ DocNo = undefined ⇒ يتم تجاهلdoAjax بصمت
         try:
@@ -1180,7 +1187,23 @@ class Liva(Backend):
             cur = (inp.evaluate("el => el.value") or "").strip()
         except Exception:
             pass
-        # منع إعادة بحث غير ضرورية إن كان الرقم موجوداً وسليماً
+        # منع إعادة بحث غير ضرورية إن كان الرقم موجوداً وسليماً —
+        # لكن أيضاً تأكد أن بيانات البحث السابقة ما زالت كاملة (لو كانت
+        # السابقة قد فشلت نصفياً تُمسح الحقول ويبقى الرقم — فنعيد البحث)
+        data_alive = w.page.evaluate(
+            """() => {
+              const g = ((document.querySelector('#txtGsmNo') || {}).value || '').trim();
+              const st = ((document.querySelector('#txtStaffCode') || {}).value || '').trim();
+              const en = ((document.querySelector('#txtEmpName') || {}).value || '').trim();
+              const pn = ((document.querySelector('#txtPolicyNo') || {}).value || '').trim();
+              return !!(g || st || en || pn);
+            }""")
+        if cur == memberNo and data_alive:
+            # أبقِ المسار: البيانات للعضو نفسه — لا إعادة بحث
+            pass
+        elif cur == memberNo and not data_alive:
+            w.progress("eligibility", "run", "stale half-cleared page — forcing fresh search")
+            cur = ""   # أسقط إلى مسار البحث الجديد
         if cur != memberNo:
             # أفرغ الحقل تماماً قبل كتابة الرقم الصحيح
             w.page.evaluate(
@@ -1197,19 +1220,51 @@ class Liva(Backend):
             w.progress("eligibility", "run", f"entered member={memberNo} ✓")
 
             btn = self._find(w, JS_SEARCH_BTN)
-            if btn:
-                if not w.trusted_click(btn):
-                    w.click(btn)
-            else:
-                w.page.keyboard.press("Enter")
-            w.progress("submitted", "ok", f"search click member={memberNo}")
+            # النجاح الحقيقي للبحث = رد S من PreApproval/GetMemberInfo بعد
+            # النقر — لا "وجود عناصر autocomplete" (jQuery UI يضيف الصنف
+            # ثابتاً على الصفحة فيعود الانتظار فوراً وتُطبع بيانات العضو
+            # السابق). ننتظر الرد نفسه ونتحقق من StatusCode قبل أي خطوة
+            # لاحقة — عند أي فشل/بطء نتوقف برسالة واضحة بدل الطباعة الخطأ
+            search_resp = None
+            try:
+                with w.page.expect_response(
+                        lambda r: "PreApproval/GetMemberInfo" in (r.url or ""),
+                        timeout=25000) as resp_info:
+                    if btn:
+                        if not w.trusted_click(btn):
+                            w.click(btn)
+                    else:
+                        w.page.keyboard.press("Enter")
+                search_resp = resp_info.value
+            except Exception as e:
+                # لا رد — الصفحة ما زالت تعرض بيانات العضو السابق
+                raise BackendError(
+                    f"member_search_no_response | {str(e)[:120]}")
+            try:
+                body = search_resp.json()
+            except Exception:
+                body = None
+                try:
+                    body = json.loads(search_resp.text() or "")
+                except Exception:
+                    body = {}
+            st = (body or {}).get("st") or {}
+            code = str(st.get("StatusCode") or "").upper()
+            if code != "S":
+                desc = str(st.get("StatusDescription") or "")[:160]
+                raise BackendError(f"member_search_failed | status={code or '?'} | {desc}")
+            # فحوصات شبكية (fetch) لا تمنع — مجرد إشارة في السجل:
+            # #txtGsmNo يُملأ من MemberData.MobileNo في callback النجاح نفسه
+            renewed = w.wait_for(
+                """() => { const el = document.querySelector('#txtGsmNo');
+                         const v = (el && (el.value || '').trim()) || '';
+                         return v.length >= 8; }""",
+                timeout_s=8, poll_s=0.3)
+            if not renewed:
+                w.progress("eligibility", "run",
+                           "warn: gsm field empty after search (member may have no mobile on file)")
+            w.progress("submitted", "ok", f"search ok member={memberNo}")
             save_last_good_member(self.id, memberNo)   # لتغذية النبضة حتى لو فشلت اللاحقة
-            ok = w.wait_for(
-                "() => document.querySelectorAll('ul.ui-autocomplete li.ui-menu-item').length > 0 ||"
-                " !!document.querySelector('input.ui-autocomplete-input')",
-                timeout_s=12, poll_s=0.3)
-            if not ok:
-                w.progress("eligibility", "run", "search returned no doctor list yet")
         else:
             w.progress("eligibility", "run", f"member already on page={memberNo}")
 
