@@ -6,27 +6,28 @@ const $ = (id) => document.getElementById(id);
 const state = { card: null, insurer: null, tabId: null, attachments: [], selectedIds: new Set(), hisPatId: null };
 
 const send = (msg) => chrome.runtime.sendMessage(msg);
+const PRN = "طباعة مستند التأمين";
 
 const STEP_LABEL = {
-  login: "Signing in",
-  eligibility: "Eligibility page",
-  submitted: "Submitting search",
-  navigate: "Navigating",
-  document: "Document ready",
-  print: "Preparing document",
-  dashboard: "Site dashboard",
-  captcha: "Solve the captcha",
-  probe: "Probe mode",
+  login: "تسجيل الدخول",
+  eligibility: "صفحة الأهلية",
+  submitted: "إرسال البحث",
+  navigate: "التنقل",
+  document: "المستند جاهز",
+  print: "تحضير الطباعة",
+  dashboard: "لوحة الموقع",
+  captcha: "أدخل الكابتشا",
+  probe: "وضع الفحص",
 };
 
 const ERR_TEXT = {
-  no_his_tab: "Open the HIS page first",
-  patient_not_detected: "Patient not detected — enter the file number manually",
-  unauthorized: "Server credentials are wrong (Settings)",
-  server_unreachable: "MaxCare server unreachable",
-  server_not_configured: "Server URL not set — Settings",
-  rate_limited: "Too many requests — retry in a moment",
-  timeout: "Server connection timed out",
+  no_his_tab: "افتح صفحة المشفى أولاً",
+  patient_not_detected: "لم يُقرأ المريض — اكتب رقم الملف يدوياً",
+  unauthorized: "بيانات السيرفر غير صحيحة (الإعدادات)",
+  server_unreachable: "خادم MaxCare غير متاح",
+  server_not_configured: "عنوان السيرفر غير مضبوط — الإعدادات",
+  rate_limited: "طلبات كثيرة — أعد المحاولة بعد لحظات",
+  timeout: "انتهت مهلة الاتصال بالسيرفر",
 };
 
 function setStatus(text, isErr = false) {
@@ -37,6 +38,7 @@ function setStatus(text, isErr = false) {
 
 function addStep(text, kind) {
   const steps = $("steps");
+  steps.style.display = "flex"; // أول خطوة تُظهر المنطقة
   const prev = steps.querySelector('[data-run="1"]');
   if (prev) {
     prev.removeAttribute("data-run");
@@ -134,16 +136,16 @@ async function runHtmlForm(selectedAttachments = []) {
   const inputs = collectExcelInputs();
   for (const f of info.missing) {
     if (f.required && !inputs[f.key]) {
-      setStatus(`Please fill: ${f.label}`, true);
+      setStatus(`املأ الحقل: ${f.label}`, true);
       return;
     }
   }
 
   $("printBtn").disabled = true;
-  $("printBtn").textContent = "Preparing…";
-  setStatus("Preparing the document…");
+  $("printBtn").textContent = "تحضير المستند…";
+  setStatus("نحضّر المستند…");
   $("steps").textContent = "";
-  addStep("Fetching template", "run");
+  addStep("جلب النموذج", "run");
 
   try {
     const { fetchTemplateCached } = await import("../lib/xlsx-fill.js");
@@ -152,7 +154,7 @@ async function runHtmlForm(selectedAttachments = []) {
     const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) throw new Error(`template fetch failed: ${res.status}`);
     let html = await res.text();
-    addStep("Filling the form", "ok");
+    addStep("تعبئة النموذج", "ok");
 
     const rawPolicy = (card.rawPolicyNo || card.insurance?.policy_no || "").trim();
     const isNumeric = /^\d+$/.test(rawPolicy);
@@ -193,16 +195,16 @@ async function runHtmlForm(selectedAttachments = []) {
       if (!res2?.ok) throw new Error(res2?.reason || "print failed");
     }
 
-    addStep("Print dialog opened ✓", "ok");
-    setStatus("Done ✓ — the print dialog is open in your window");
+    addStep("نافذة الطباعة فُتحت ✓", "ok");
+    setStatus("تم ✓ — نافذة الطباعة مفتوحة على شاشتك");
   } catch (e) {
     log("error", "html form failed", String(e));
-    setStatus(`Failed: ${e.message}`, true);
-    addStep("Failed", "err");
+    setStatus(`فشل: ${e.message}`, true);
+    addStep("فشل", "err");
   } finally {
     $("printBtn").disabled = false;
     $("printBtn").textContent = state.insurer?.kind === "excel" || state.insurer?.kind === "html-form"
-      ? "Print insurance document" : "Print insurance document";
+      ;
   }
 }
 
@@ -210,9 +212,9 @@ async function runGigForm(selectedAttachments = []) {
   if (!state.insurer || !state.card) return;
   const card = state.card;
   $("printBtn").disabled = true;
-  $("printBtn").textContent = "Preparing…";
-  setStatus("Preparing the document…");
-  addStep("Fetching GIG form", "run");
+  $("printBtn").textContent = "تحضير المستند…";
+  setStatus("نحضّر المستند…");
+  addStep("تحضير نموذج GIG", "run");
   try {
     const res = await fetch(state.insurer.templateUrl, { cache: "no-store" });
     if (!res.ok) throw new Error(`template fetch failed: ${res.status}`);
@@ -257,15 +259,15 @@ async function runGigForm(selectedAttachments = []) {
       const r2 = await send({ type: "insurer:printHtml", html });
       if (!r2?.ok) throw new Error(r2?.reason || "print failed");
     }
-    addStep("Print dialog opened ✓", "ok");
-    setStatus("Done ✓ — the print dialog is open in your window");
+    addStep("نافذة الطباعة فُتحت ✓", "ok");
+    setStatus("تم ✓ — نافذة الطباعة مفتوحة على شاشتك");
   } catch (e) {
     log("error", "gig form failed", String(e));
-    setStatus(`Failed: ${e.message}`, true);
-    addStep("Failed", "err");
+    setStatus(`فشل: ${e.message}`, true);
+    addStep("فشل", "err");
   } finally {
     $("printBtn").disabled = false;
-    $("printBtn").textContent = "Print insurance document";
+    $("printBtn").textContent = PRN;
   }
 }
 
@@ -303,15 +305,27 @@ function toggleAttachment(id) {
   renderAttachments();
 }
 
+function clearAllAttachments() {
+  state.attachments = [];
+  state.selectedIds = new Set();
+  renderAttachments();
+  setStatus("تم مسح المرفقات");
+}
+
 function renderAttachments() {
   const list = $("attachList");
   list.textContent = "";
+  // البطاقة ظاهرة دائماً عند وجود تأمين مدعوم — حتى قبل جلب أي مرفق
+  $("attachCard").style.display = "";
+  $("clearAttach").style.display = state.attachments.length ? "" : "none";
   if (!state.attachments.length) {
-    $("attachCard").style.display = "none";
+    const empty = document.createElement("div");
+    empty.textContent = "لا مرفقات بعد — اسحب صوراً من HIS أو واتساب";
+    empty.style.cssText = "font-size:11px;color:var(--sub);padding:2px;";
+    list.appendChild(empty);
     $("attachStatus").textContent = "";
     return;
   }
-  $("attachCard").style.display = "";
   let nSel = 0;
   for (const a of state.attachments) {
     const sel = state.selectedIds.has(a.id);
@@ -342,12 +356,13 @@ function renderAttachments() {
 }
 
 async function loadHisDocuments() {
+  const btn = $("attachFromHis");
   if (!state.hisPatId || state.hisPatId === "—") {
     setStatus("لا يمكن جلب مستندات HIS — رقم الملف غير واضح", true);
     return;
   }
-  $("printBtn").disabled = true;
-  $("printBtn").textContent = "جلب مستندات HIS…";
+  btn.disabled = true;
+  btn.textContent = "…جلب";
   setStatus("جلب مستندات المريض من HIS…");
   state.attachments = [];
   state.selectedIds = new Set();
@@ -366,7 +381,7 @@ async function loadHisDocuments() {
         size: d.size,
         category: d.category,
       });
-      state.selectedIds.add(id); // التحديد التلقائي للمرفقات المستجلبة من HIS
+      state.selectedIds.add(id); // التحديد التلقائي لمرفقات HIS
     }
     renderAttachments();
     setStatus(`تم جلب ${res.documents.length} مستند من HIS`);
@@ -374,14 +389,15 @@ async function loadHisDocuments() {
     log("error", "his documents failed", String(e));
     setStatus(`فشل جلب مستندات HIS: ${e.message}`, true);
   } finally {
-    $("printBtn").disabled = false;
-    $("printBtn").textContent = state.insurer ? "Print insurance document" : "Print insurance document";
+    btn.disabled = false;
+    btn.textContent = "من HIS";
   }
 }
 
 async function loadWaImages() {
-  $("printBtn").disabled = true;
-  $("printBtn").textContent = "جلب صور واتساب…";
+  const btn = $("attachFromWa");
+  btn.disabled = true;
+  btn.textContent = "…جلب";
   setStatus("جلب آخر صور من واتساب ويب…");
   try {
     const res = await send({ type: "wa:getLastImages", limit: 5 });
@@ -406,13 +422,13 @@ async function loadWaImages() {
       added += 1;
     }
     renderAttachments();
-    setStatus(`تم جلب ${added} صورة جديدة من واتساب (المجموع ${state.attachments.length})`);
+    setStatus(`تم جلب ${added} صورة من واتساب (المجموع ${state.attachments.length})`);
   } catch (e) {
     log("error", "whatsapp images failed", String(e));
     setStatus(`فشل جلب صور واتساب: ${e.message}`, true);
   } finally {
-    $("printBtn").disabled = false;
-    $("printBtn").textContent = state.insurer ? "Print insurance document" : "Print insurance document";
+    btn.disabled = false;
+    btn.textContent = "من واتساب";
   }
 }
 
@@ -432,9 +448,9 @@ function attachmentsParts() {
 async function runStaticPdf(selectedAttachments = []) {
   if (!state.insurer || !state.card) return;
   $("printBtn").disabled = true;
-  $("printBtn").textContent = "Preparing…";
-  setStatus("Opening the printout…");
-  addStep("Fetching the form", "run");
+  $("printBtn").textContent = "تحضير المستند…";
+  setStatus("فتح المستند…");
+  addStep("تحضير النموذج", "run");
   try {
     const res = await fetch(state.insurer.templateUrl, { cache: "no-store" });
     if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
@@ -453,15 +469,15 @@ async function runStaticPdf(selectedAttachments = []) {
       const r2 = await send({ type: "insurer:printPdf", dataUrl });
       if (!r2?.ok) throw new Error(r2?.reason || "print failed");
     }
-    addStep("Print dialog opened ✓", "ok");
-    setStatus("Done ✓ — the print dialog is open in your window");
+    addStep("نافذة الطباعة فُتحت ✓", "ok");
+    setStatus("تم ✓ — نافذة الطباعة مفتوحة على شاشتك");
   } catch (e) {
     log("error", "static pdf failed", String(e));
-    setStatus(`Failed: ${e.message}`, true);
-    addStep("Failed", "err");
+    setStatus(`فشل: ${e.message}`, true);
+    addStep("فشل", "err");
   } finally {
     $("printBtn").disabled = false;
-    $("printBtn").textContent = "Print insurance document";
+    $("printBtn").textContent = PRN;
   }
 }
 
@@ -486,17 +502,17 @@ function renderCard(card) {
     renderAttachments();
     // حقول Vipul الإضافية خاصة بـvipul فقط — GIG يملأ كل شيء من بطاقة HIS
     if (insurer.id === "vipul" && (insurer.kind === "excel" || insurer.kind === "html-form")) {
-      $("printBtn").textContent = "Print insurance document";
+      $("printBtn").textContent = PRN;
       const info = detectMissingExcelFields(card);
       renderExcelForm(card, info);
       if (!info.missing.length) {
         $("excelFields").style.display = "none";
-        setStatus("All fields detected — ready to print");
+        setStatus("كل الحقول جاهزة — يمكن الطباعة");
       } else {
         setStatus(`${info.missing.length} field(s) need your input`);
       }
     } else {
-      $("printBtn").textContent = "Print insurance document";
+      $("printBtn").textContent = PRN;
       if (insurer.types) {
         $("typeRow").style.display = "";
         $("typeSel").textContent = "";
@@ -516,7 +532,7 @@ function renderCard(card) {
   } else {
     $("insChip").textContent = card.insurance.payer_name || "No insurance";
     $("insChip").classList.add("warn");
-    setStatus("Insurance company not supported yet", true);
+    setStatus("شركة التأمين غير مدعومة بعد", true);
     $("attachCard").style.display = "none";
   }
   $("iCard").textContent = card.insurance.card_no || "—";
@@ -577,12 +593,12 @@ async function loadPatient(det) {
   log("info", "popup: loadPatient", JSON.stringify(det || {}).slice(0, 300));
   let card = null;
   if (det?.patId) {
-    setStatus("Fetching insurance data…");
+    setStatus("جلب بيانات التأمين…");
     const res = await send({ type: "his:patient", patId: det.patId });
     log("info", "popup: his:patient", JSON.stringify(res).slice(0, 300));
     if (res.ok) card = mergeCard(res, det);
     else if (!det.cardNo && !det.payerText) {
-      setStatus(ERR_TEXT[res.reason] || `Error: ${res.reason}`, true);
+      setStatus(ERR_TEXT[res.reason] || `خطأ: ${res.reason}`, true);
       if (["patient_not_detected", "no_his_tab"].includes(res.reason)) showManual();
       return;
     }
@@ -618,16 +634,16 @@ chrome.runtime.onMessage.addListener((msg) => {
     setStatus(msg.detail ? `${label}: ${msg.detail}` : label, true);
     printBtnReset();
   } else if (msg.step === "print" && msg.status === "ok") {
-    addStep("Print dialog opened", "ok");
-    setStatus("Done ✓ — the print dialog is open in your window");
+    addStep("نافذة الطباعة فُتحت", "ok");
+    setStatus("تم ✓ — نافذة الطباعة مفتوحة على شاشتك");
     runBusy = false;
-    printBtnReset("Print insurance document");
+    printBtnReset(PRN);
   } else if (msg.step === "document") {
     addStep(label, "ok");
-    setStatus("Document reached — preparing print…");
+    setStatus("وصل المستند — نحضّر الطباعة…");
   } else if (msg.step === "print") {
-    printBtnBusy("Preparing document…");
-    setStatus("Preparing the document — the print dialog will open here…");
+    printBtnBusy("تحضير المستند…");
+    setStatus("نحضّر المستند — ستفتح نافذة الطباعة هنا…");
   } else {
     addStep(label, "run");
     setStatus(label + "…");
@@ -639,7 +655,7 @@ function printBtnBusy(text) {
     '<span class="spin-white"></span>' + text;
 }
 
-function printBtnReset(text = "Print insurance document") {
+function printBtnReset(text = PRN) {
   $("printBtn").textContent = text;
   $("printBtn").disabled = false;
   runBusy = false;
@@ -651,7 +667,7 @@ async function startRun(selectedAttachments = []) {
   if (!state.insurer || !state.card) return;
   runBusy = true;
   $("printBtn").disabled = true;
-  printBtnBusy("Working in background…");
+  printBtnBusy("تعمل في الخلفية…");
   $("steps").textContent = "";
   const serviceType = $("typeSel")?.value || null;
   log("info", "popup: startRun", `insurer=${state.insurer.id} type=${serviceType} attachments=${selectedAttachments.length}`);
@@ -660,10 +676,10 @@ async function startRun(selectedAttachments = []) {
   const c = (st.insurers || {})[state.insurer.id] || {};
   const needsCreds = state.insurer.id !== "gig" && state.insurer.id !== "oqic";
   if (needsCreds && (!c.user || !c.pass)) {
-    setStatus("Warning: login credentials incomplete (Settings) — works only with a live session");
-    addStep("Credentials incomplete (Settings)", "err");
+    setStatus("تنبيه: بيانات الدخول غير مضبوطة — يعمل بالجلسة الحية فقط");
+    addStep("بيانات الدخول غير مضبوطة", "err");
   } else {
-    setStatus("Running in the background — the print dialog will open automatically…");
+    setStatus("تعمل في الخلفية — ستفتح نافذة الطباعة تلقائياً…");
   }
 
   const res = await send({
@@ -674,12 +690,12 @@ async function startRun(selectedAttachments = []) {
     attachments: selectedAttachments.map((a) => ({ id: a.id, source: a.source, fileName: a.fileName, dataUrl: a.dataUrl, mime: a.mime, size: a.size, caption: a.caption, chatName: a.chatName })),
   });
   if (!res.ok) {
-    setStatus(`Could not start: ${res.reason}`, true);
+    setStatus(`تعذر البدء: ${res.reason}`, true);
     printBtnReset();
     return;
   }
   state.tabId = res.tabId;
-  addStep("Running insurer site in background", "run");
+  addStep("الموقع يعمل في الخلفية", "run");
   if (!res.ok) runBusy = false;
 }
 
@@ -692,7 +708,7 @@ async function probe() {
       sent += 1;
     }
   }
-  setStatus(sent ? `Probe + recording active in ${sent} tab(s) — do the flow manually (2 min)` : "Open the insurer site tab first", true);
+  setStatus(sent ? `وضع الفحص والتسجيل في ${sent} تبويب — نفّذ التدفق يدوياً (دقيقتان)` : "افتح تبويب موقع التأمين أولاً", true);
 }
 
 async function copyLog() {
@@ -709,9 +725,9 @@ async function copyLog() {
       document.execCommand("copy");
       ta.remove();
     }
-    setStatus("Log copied — send it to the developer");
+    setStatus("نُسخ السجل — أرسله للمطور");
   } catch (e) {
-    setStatus("Copy failed — open the popup console", true);
+    setStatus("فشل النسخ — افتح وحدة تحكم النافذة", true);
   }
 }
 
@@ -733,6 +749,7 @@ $("manualId").addEventListener("keydown", (e) => {
 });
 $("attachFromHis").addEventListener("click", (e) => { e.preventDefault(); loadHisDocuments(); });
 $("attachFromWa").addEventListener("click", (e) => { e.preventDefault(); loadWaImages(); });
+$("clearAttach").addEventListener("click", clearAllAttachments);
 $("openOptions").addEventListener("click", (e) => {
   e.preventDefault();
   chrome.runtime.openOptionsPage();
@@ -751,8 +768,8 @@ $("probeLink").addEventListener("click", (e) => {
 
 // إعادة قراءة صفحة المشفى من جديد — بلا إعادة تحميل الصفحة
 async function refreshPatient() {
-  setStatus("Reading patient…");
-  $("patientEmpty").textContent = "Reading patient from the HIS page…";
+  setStatus("قراءة المريض…");
+  $("patientEmpty").textContent = "قراءة المريض من صفحة المشفى…";
   $("patientEmpty").style.display = "";
   $("patientBody").style.display = "none";
   const det = await send({ type: "his:detect" });
@@ -806,8 +823,8 @@ async function checkUpdate() {
 $("updBtn").addEventListener("click", () => {
   log("info", "popup: update clicked — trying native host");
   $("updBtn").disabled = true;
-  $("updBtn").textContent = "Updating…";
-  $("updText").textContent = "Updating — the popup will refresh automatically…";
+  $("updBtn").textContent = "جاري التحديث…";
+  $("updText").textContent = "جاري التحديث — ستُحدّث النافذة تلقائياً…";
   try {
     chrome.runtime.sendNativeMessage("com.maxcare.updater", { cmd: "update" }, (res) => {
       const err = chrome.runtime.lastError;
@@ -815,7 +832,7 @@ $("updBtn").addEventListener("click", () => {
         const why = err?.message || res?.error || "unknown";
         log("error", "self-update failed", why);
         $("updBtn").disabled = false;
-        $("updBtn").textContent = "Update";
+        $("updBtn").textContent = "تحديث";
         $("updText").textContent =
           `Self-update failed (${why}) — run setup-updater.ps1 once with: -ExtensionID ${chrome.runtime.id}`;
         return;

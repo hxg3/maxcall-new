@@ -1,46 +1,55 @@
 <!DOCTYPE html>
-<html lang="en" dir="ltr">
+<html lang="ar" dir="rtl">
 <head>
   <meta charset="utf-8" />
   <style>
     :root { --ink:#0f172a; --sub:#64748b; --line:#e2e8f0; --brand:#0ea5e9; --ok:#059669; --err:#dc2626; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { width: 320px; font-family: "Segoe UI", Tahoma, sans-serif; font-size: 13px; color: var(--ink); background: #f8fafc; }
-    header { display: flex; align-items: center; gap: 8px; padding: 12px 14px 10px; }
-    .logo { width: 22px; height: 22px; border-radius: 7px; background: linear-gradient(135deg, #0ea5e9, #0369a1); }
+    body { width: 340px; font-family: "Segoe UI", Tahoma, sans-serif; font-size: 13px; color: var(--ink); background: #f8fafc; }
+    header { display: flex; align-items: center; gap: 8px; padding: 11px 14px 9px; }
+    .logo { width: 22px; height: 22px; border-radius: 7px; background: linear-gradient(135deg, #0ea5e9, #0369a1); flex: none; }
     header h1 { font-size: 13.5px; font-weight: 700; flex: 1; }
-    header a { color: var(--sub); font-size: 15px; text-decoration: none; }
-    header a:hover { color: var(--ink); }
+    header .hbtn { display: flex; gap: 2px; }
+    header a { color: var(--sub); font-size: 15px; text-decoration: none; padding: 3px 6px; border-radius: 7px; }
+    header a:hover { color: var(--ink); background: #e2e8f0; }
     #updBar { display: none; align-items: center; gap: 8px; margin: 0 14px 8px; padding: 8px 12px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 10px; font-size: 12px; color: #92400e; }
     #updBar.show { display: flex; }
     #updBtn { border: none; border-radius: 8px; background: #d97706; color: #fff; font: inherit; font-weight: 700; padding: 4px 12px; cursor: pointer; }
-    main { padding: 0 14px 12px; display: flex; flex-direction: column; gap: 10px; }
+    main { padding: 0 14px 12px; display: flex; flex-direction: column; gap: 9px; }
     .card { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
     .empty { color: var(--sub); text-align: center; padding: 14px 6px; }
-    .p-name { font-size: 15px; font-weight: 700; }
-    .p-meta { color: var(--sub); margin-top: 2px; }
-    .chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 999px; background: #ecfeff; color: #0e7490; font-weight: 600; font-size: 12px; }
+    .p-name { font-size: 15px; font-weight: 700; direction: ltr; text-align: left; }
+    .p-meta { color: var(--sub); margin-top: 2px; font-size: 12px; }
+    .cardTitle { font-size: 12.5px; font-weight: 700; color: var(--sub); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 999px; background: #ecfeff; color: #0e7490; font-weight: 700; font-size: 12px; }
     .chip.warn { background: #fff7ed; color: #c2410c; }
     .kv { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 3px 0; }
     .kv b { font-weight: 600; color: var(--sub); font-size: 12px; }
-    .kv span { direction: ltr; font-family: Consolas, monospace; font-size: 12px; }
+    .kv span { direction: ltr; font-family: Consolas, monospace; }
     .cardno { font-size: 15px; font-weight: 700; letter-spacing: 1px; }
     select { border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; font: inherit; font-size: 12px; background: #fff; color: var(--ink); max-width: 185px; }
-    button.smallBtn { border: 1px solid var(--line); border-radius: 8px; padding: 4px 9px; font: inherit; font-weight: 600; font-size: 11.5px; color: var(--ink); background: #fff; cursor: pointer; }
-    button.smallBtn:hover { border-color: var(--brand); }
-    button.cta { border: none; border-radius: 10px; padding: 10px; font: inherit; font-weight: 700; color: #fff; background: var(--brand); cursor: pointer; }
+    button.smallBtn { border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; font: inherit; font-weight: 700; font-size: 11.5px; color: var(--ink); background: #fff; cursor: pointer; white-space: nowrap; }
+    button.smallBtn:hover { border-color: var(--brand); color: var(--brand); }
+    button.smallBtn:disabled { opacity: .5; cursor: default; }
+    button.link { border: none; background: none; color: var(--sub); font: inherit; font-size: 11px; cursor: pointer; text-decoration: underline; }
+    button.link:hover { color: var(--err); }
+    button.cta { border: none; border-radius: 11px; padding: 11px; width: 100%; font: inherit; font-weight: 700; font-size: 13.5px; color: #fff; background: var(--brand); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; }
     button.cta:hover { background: #0284c7; }
     button.cta:disabled { opacity: .45; cursor: default; }
     .manual { display: none; gap: 6px; }
     .manual input { flex: 1; border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; font: inherit; direction: ltr; }
-    .manual button { border: none; border-radius: 9px; background: #1e293b; color: #fff; font: inherit; font-weight: 600; padding: 0 14px; cursor: pointer; }
-    #steps { display: none; flex-direction: column; gap: 5px; padding: 4px 2px; }
+    .manual button { border: none; border-radius: 9px; background: #1e293b; color: #fff; font: inherit; font-weight: 700; padding: 8px 14px; cursor: pointer; }
+    #attachList { display: flex; flex-wrap: wrap; gap: 7px; max-height: 148px; overflow-y: auto; border: 1px solid var(--line); border-radius: 9px; padding: 7px; background: #fafbfc; min-height: 34px; margin-top: 7px; }
+    #attachEmpty { font-size: 11px; color: var(--sub); padding: 2px; }
+    #attachStatus { font-size: 11px; color: var(--sub); margin-top: 5px; min-height: 14px; }
+    #excelInputs input { width: 100%; border: 1px solid #e2e8f0; border-radius: 8px; padding: 6px 8px; font: inherit; }
+    #steps { display: flex; flex-direction: column; gap: 5px; padding: 2px; }
     .step { display: flex; align-items: center; gap: 7px; color: var(--sub); }
     .step.ok { color: var(--ok); }
     .step.err { color: var(--err); }
     .spin { width: 11px; height: 11px; border: 2px solid var(--brand); border-top-color: transparent; border-radius: 50%; animation: sp .7s linear infinite; flex: none; }
     @keyframes sp { to { transform: rotate(360deg); } }
-    .spin-white { display: inline-block; width: 12px; height: 12px; border: 2px solid #fff; border-top-color: transparent; border-radius: 50%; animation: sp .7s linear infinite; vertical-align: -2px; margin-inline-end: 7px; }
+    .spin-white { display: inline-block; width: 12px; height: 12px; border: 2px solid #fff; border-top-color: transparent; border-radius: 50%; animation: sp .7s linear infinite; }
     .ic { width: 14px; text-align: center; flex: none; }
     #status { font-size: 12px; color: var(--sub); text-align: center; min-height: 16px; }
     #status.err { color: var(--err); font-weight: 600; }
@@ -51,17 +60,19 @@
 <body>
   <header>
     <div class="logo"></div>
-    <h1>Reception Assistant</h1>
-    <a href="#" id="refreshBtn" title="Re-read the page">↻</a>
-    <a href="#" id="openOptions" title="Settings">⚙</a>
+    <h1>مساعد الاستقبال</h1>
+    <div class="hbtn">
+      <a href="#" id="refreshBtn" title="إعادة قراءة الصفحة">↻</a>
+      <a href="#" id="openOptions" title="الإعدادات">⚙</a>
+    </div>
   </header>
   <div id="updBar">
     <span id="updText"></span>
-    <button id="updBtn">Update</button>
+    <button id="updBtn">تحديث</button>
   </div>
   <main>
     <div class="card" id="patientCard">
-      <div class="empty" id="patientEmpty">Reading patient from the HIS page…</div>
+      <div class="empty" id="patientEmpty">قراءة المريض من صفحة المشفى…</div>
       <div id="patientBody" style="display:none">
         <div class="p-name" id="pName"></div>
         <div class="p-meta" id="pMeta"></div>
@@ -69,45 +80,46 @@
     </div>
 
     <div class="card" id="insCard" style="display:none">
-      <div class="chip" id="insChip"></div>
-      <div style="margin-top:8px">
-        <div class="kv"><b>Card No</b><span class="cardno" id="iCard"></span></div>
-        <div class="kv" id="typeRow" style="display:none"><b>Type</b>
+      <div class="cardTitle"><span class="chip" id="insChip"></span></div>
+      <div style="margin-top:7px">
+        <div class="kv"><b>رقم البطاقة</b><span class="cardno" id="iCard"></span></div>
+        <div class="kv" id="typeRow" style="display:none"><b>النوع</b>
           <select id="typeSel"></select>
         </div>
       </div>
     </div>
 
     <div class="card" id="excelFields" style="display:none">
-      <div style="font-weight:700; margin-bottom:6px">Fields to complete</div>
-      <div id="excelInputs"></div>
+      <div class="cardTitle">حقول مطلوبة</div>
+      <div id="excelInputs" style="margin-top:7px"></div>
     </div>
 
     <div class="card" id="attachCard">
-      <div style="font-weight:700; margin-bottom:7px; display:flex; justify-content:space-between; align-items:center; gap:8px">
-        <div>مرفقات للطباعة (اختياري)</div>
-        <div style="display:flex; gap:6px">
-          <button type="button" id="attachFromHis" class="smallBtn">من HIS</button>
-          <button type="button" id="attachFromWa" class="smallBtn">من واتساب</button>
-        </div>
+      <div class="cardTitle">
+        <span>إرفاق صور للطباعة (اختياري)</span>
+        <button type="button" id="clearAttach" class="link" style="display:none">مسح الكل</button>
       </div>
-      <div id="attachList" style="display:flex; flex-wrap:wrap; gap:7px; max-height:150px; overflow-y:auto; border:1px solid var(--line); border-radius:8px; padding:6px; background:#fff;"></div>
-      <div id="attachStatus" style="font-size:11px; color:var(--sub); margin-top:5px; min-height:14px;"></div>
+      <div style="display:flex; gap:6px; margin-top:7px">
+        <button type="button" id="attachFromHis" class="smallBtn" style="flex:1">🖼 من HIS</button>
+        <button type="button" id="attachFromWa" class="smallBtn" style="flex:1">💬 من واتساب</button>
+      </div>
+      <div id="attachList"><div id="attachEmpty">لا مرفقات بعد — سحب صوراً من HIS أو واتساب</div></div>
+      <div id="attachStatus"></div>
     </div>
 
-    <button class="cta" id="printBtn" disabled>Print insurance document</button>
+    <button class="cta" id="printBtn" disabled>طباعة مستند التأمين</button>
 
     <div class="manual" id="manual">
-      <input id="manualId" placeholder="Patient file no" inputmode="numeric" />
-      <button id="manualGo">Search</button>
+      <input id="manualId" placeholder="رقم ملف المريض" inputmode="numeric" />
+      <button id="manualGo">بحث</button>
     </div>
 
-    <div id="steps"></div>
+    <div id="steps" style="display:none"></div>
     <div id="status"></div>
   </main>
   <footer>
-    <a href="#" id="probeLink">Probe + record (2 min)</a>
-    <a href="#" id="copyLog">📋 Copy log</a>
+    <a href="#" id="probeLink">فحص + تسجيل (دقيقتان)</a>
+    <a href="#" id="copyLog">نسخ السجل</a>
   </footer>
   <script type="module" src="popup.js"></script>
 </body>

@@ -18,7 +18,9 @@
 """
 
 import base64
+import json
 import logging
+import os
 import sys
 import threading
 import time
@@ -33,6 +35,7 @@ from flask import Flask, jsonify, request
 from brokers.base import (
     BackendError, NeedsCaptcha, NeedsChoice, last_good_member, STATE_DIR,
     session_cache_view, auth_locked, auth_lock_reason, AuthLocked,
+    CREDS_FILE, load_creds, creds_for, _creds_lock,
 )
 from brokers.mednet import MedNet
 from brokers.nextcare import NextCare
@@ -454,6 +457,54 @@ def answer_captcha(jid):
     if ok:
         return jsonify({"ok": True})
     return jsonify({"ok": False, "error": err}), 409
+
+
+# ---------------------------------------------------------------------------
+# بيانات الدخول — قراءة (مقنّعة) وكتابة حية من الامتداد عبر app.py.
+# الكتابة عينية: ملف مؤقت + os.replace + صلاحيات 600 — ولا restart: الوسيط
+# يقرأ الملف حياً (كاش mtime 5 ث)، وتغيير الكلمة يفتح القفل تلقائياً (base.py).
+# ---------------------------------------------------------------------------
+CREDS_EDITABLE = ("mednet", "nextcare", "liva")
+
+
+@app.get("/creds")
+def creds_view():
+    out = {}
+    for ins in CREDS_EDITABLE:
+        c = creds_for(ins)
+        out[ins] = {"user": c.get("user", ""), "has_pass": bool(c.get("pass"))}
+    return jsonify({"ok": True, "insurers": out})
+
+
+@app.post("/creds")
+def creds_update():
+    d = request.get_json(silent=True) or {}
+    ins = str(d.get("insurer", "")).strip()
+    if ins not in CREDS_EDITABLE:
+        return jsonify({"ok": False, "error": "تأمين غير قابل للتعديل"}), 400
+    user = str(d.get("user", "")).strip()
+    password = str(d.get("pass", ""))
+    if not user and not password:
+        return jsonify({"ok": False, "error": "لا يوجد تغييرات"}), 400
+    # نسخة عميقة — لا تُعدّل الكاش المُخرج من load_creds مباشرة
+    data = {k: (dict(v) if isinstance(v, dict) else v) for k, v in load_creds().items()}
+    entry = dict(data.get(ins) or {})
+    if user:
+        entry["user"] = user
+    if password:
+        entry["pass"] = password
+    data[ins] = entry
+    tmp = CREDS_FILE.with_name(CREDS_FILE.name + ".tmp")
+    with _creds_lock:
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, CREDS_FILE)
+        os.chmod(CREDS_FILE, 0o600)
+    log.info(f"[creds] updated {ins} user={'set' if user else 'kept'} "
+             f"pass={'changed' if password else 'kept'}")
+    return jsonify({"ok": True, "insurer": ins,
+                    "user": entry.get("user", ""),
+                    "has_pass": bool(entry.get("pass"))})
 
 
 @app.get("/health")

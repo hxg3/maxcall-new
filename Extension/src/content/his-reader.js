@@ -141,6 +141,12 @@
     return best;
   }
 
+  // رقم ملف المريض المستقر — الحقل دائم الوجود في صفحة التسجيل (name="txtPat_ID")
+  function patIdField() {
+    const v = (document.querySelector("#txtPat_ID")?.value || "").trim();
+    return /^[1-9][0-9]{1,9}$/.test(v) ? v : null;
+  }
+
   function diagnostics() {
     const ids = {};
     for (const [k, sel] of Object.entries(F)) {
@@ -151,7 +157,9 @@
   }
 
   function readActivePatient() {
-    const patId = fromUrl() || fromLabeledInputs() || null;
+    // patId: الرابط أولاً (PatientRegistration/<id>) ثم حقل المعرف المستقر #txtPat_ID
+    // (ظاهر حياً بقيمة Pat_ID حتى عند فتح الزيارة برقم مختلف)
+    const patId = fromUrl() || fromLabeledInputs() || patIdField() || null;
     const cardNo = readCardNo();
     const payerText = readPayer();
     if (!patId && !cardNo && !payerText) {

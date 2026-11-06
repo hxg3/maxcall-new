@@ -965,6 +965,31 @@ def his_patient(pat_id):
     return jsonify(his_broker.insurance_card(pat_id))
 
 
+@app.route("/api/insurer/creds")
+def insurer_creds_get():
+    """بيانات دخول التأمينات (مقنّعة: اسم المستخدم + هل الكلمة محفوظة) —
+    للامتداد (صفحة الإعدادات). LAN فقط، والتوسّط نفسه داخلي على 3011."""
+    if not _lan_only():
+        abort(403)
+    try:
+        return jsonify(_broker_json("/creds", timeout=5))
+    except Exception:
+        return _insurer_proxy_error()
+
+
+@app.route("/api/insurer/creds", methods=["POST"])
+def insurer_creds_post():
+    """حفظ بيانات الدخول من الامتداد → الوسيط يكتب /etc/maxcall-insurers.json
+    حياً (بلا restart — الكاش مبنياً على mtime). كلمة مرور فارغة = تبقى الحالية."""
+    if not _lan_only():
+        abort(403)
+    d = request.get_json(silent=True) or {}
+    try:
+        return jsonify(_broker_json("/creds", d, method="POST", timeout=10))
+    except Exception:
+        return _insurer_proxy_error()
+
+
 # ---------------------------------------------------------------------------
 # Chrome extension self-hosted updates (CRX + update manifest)
 # ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "MaxCare Reception Assistant",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "مساعد موظف الاستقبال: جلب بيانات المريض والتأمين من MAXCARE وتشغيل مواقع شركات التأمين تلقائياً حتى صفحة الطباعة.",
   "icons": {
     "16": "icons/icon16.png",
@@ -27,6 +27,7 @@
   ],
   "host_permissions": [
     "http://maxcall.local:3001/*",
+    "http://192.168.1.32:3001/*",
     "http://solverserver:81/*",
     "http://192.168.1.77:81/*",
     "https://pulse-uae.nextcarehealth.com/*",
