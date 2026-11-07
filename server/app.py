@@ -439,6 +439,52 @@ def insurer_job_answer(jid):
         return _insurer_proxy_error()
 
 
+@app.route("/api/insurer/pdf-to-png", methods=["POST"])
+def insurer_pdf_to_png():
+    """تحويل PDF إلى صور PNG عبر Ghostscript — لطباعة المستند كاملاً مع
+    المرفقات في حوار طباعة واحد (تضمين PDF داخل HTML يُطبع صفحته الأولى
+    فقط في كروم). استدعاء من الإضافة فقط (شبكة المشفى)."""
+    if not _lan_only():
+        abort(403)
+    import base64 as _b64
+    import tempfile as _tmp
+    d = request.get_json(silent=True) or {}
+    pdf_b64 = str(d.get("pdf_b64") or "").strip()
+    if not pdf_b64 or len(pdf_b64) > 60_000_000:
+        return jsonify({"ok": False, "error": "bad_pdf"}), 400
+    try:
+        raw = _b64.b64decode(pdf_b64, validate=False)
+    except Exception:
+        return jsonify({"ok": False, "error": "bad_pdf"}), 400
+    if not raw.startswith(b"%PDF"):
+        return jsonify({"ok": False, "error": "not_pdf"}), 400
+    try:
+        dpi = int(d.get("dpi") or 200)
+    except Exception:
+        dpi = 200
+    dpi = max(72, min(dpi, 300))
+    with _tmp.TemporaryDirectory(prefix="pdfpng_") as td:
+        src = os.path.join(td, "in.pdf")
+        with open(src, "wb") as f:
+            f.write(raw)
+        cmd = ["gs", "-dNOPAUSE", "-dBATCH", "-dSAFER", "-sDEVICE=png16m",
+               f"-r{dpi}", "-dTextAlphaBits=4", "-dGraphicsAlphaBits=4",
+               f"-o{os.path.join(td, 'p-%03d.png')}", src]
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, timeout=90)
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"gs_failed:{e}"}), 500
+        pages = sorted(glob.glob(os.path.join(td, "p-*.png")))
+        if not pages:
+            return jsonify({"ok": False, "error": "no_pages"}), 500
+        pages = pages[:24]  # سقف أمان لعدد الصفحات
+        images = []
+        for p in pages:
+            with open(p, "rb") as f:
+                images.append(_b64.b64encode(f.read()).decode("ascii"))
+    return jsonify({"ok": True, "images": images, "pages": len(images)})
+
+
 @app.route("/api/agent/login", methods=["POST"])
 def agent_login():
     if _hit("agentlogin:" + _client_ip(), 20, 300):

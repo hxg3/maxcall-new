@@ -259,9 +259,28 @@ function collectSelectedAttachments() {
 }
 
 function toggleAttachment(id) {
-  if (state.selectedIds.has(id)) state.selectedIds.delete(id);
-  else state.selectedIds.add(id);
+  if (state.selectedIds.has(id)) {
+    state.selectedIds.delete(id);
+  } else {
+    state.selectedIds.add(id);
+    // صورة واتساب مختارة = تُعبّأ فوراً في حقل المستندات داخل صفحة المشفى
+    const a = state.attachments.find((x) => x.id === id);
+    if (a && a.source === "whatsapp") fillHisFile(a);
+  }
   renderAttachments();
+}
+
+// وضع الصورة في حقل الملفات (input[type=file]) ليكون جاهزاً للحفظ في HIS
+async function fillHisFile(a) {
+  if (isPdfAttachment(a)) return;
+  try {
+    const res = await send({ type: "his:fillFile", dataUrl: a.dataUrl, fileName: a.fileName });
+    log(res?.ok ? "info" : "warn", "his file field",
+      res?.ok ? `filled ${a.fileName}` : (res?.reason || "failed"));
+    setStatus(res?.ok ? "Ready to save in HIS" : `HIS field: ${res?.reason || "failed"}`, !res?.ok);
+  } catch (e) {
+    log("warn", "his file field", String(e));
+  }
 }
 
 function clearAllAttachments() {
@@ -273,19 +292,34 @@ function clearAllAttachments() {
   setStatus("Attachments cleared");
 }
 
+let previewZoom = 1;
+
+function applyPreviewZoom() {
+  $("previewImg").style.transform = previewZoom === 1 ? "" : `scale(${previewZoom})`;
+}
+
 function openPreview(a) {
   const box = $("preview");
-  $("previewImg").src = a.dataUrl;
+  const pdf = isPdfAttachment(a);
+  previewZoom = 1;
+  applyPreviewZoom();
+  $("previewImg").style.display = pdf ? "none" : "";
+  $("previewImg").src = pdf ? "" : a.dataUrl;
+  $("previewPdf").style.display = pdf ? "flex" : "none";
   $("previewCap").textContent =
     `${a.fileName} · ${Math.round(a.size / 1024)} KB · ` +
     (a.source === "whatsapp" ? (a.chatName || "WhatsApp") : "HIS");
   box.style.display = "flex";
+  box.scrollTop = 0;
+  box.scrollLeft = 0;
   box.focus();
 }
 
 function closePreview() {
   $("preview").style.display = "none";
   $("previewImg").src = "";
+  previewZoom = 1;
+  applyPreviewZoom();
 }
 
 function renderAttachments() {
@@ -317,10 +351,18 @@ function renderAttachments() {
     cb.style.cssText = "position:absolute;top:4px;right:4px;width:16px;height:16px;accent-color:var(--brand);";
     cb.addEventListener("click", (e) => e.stopPropagation());
     cb.addEventListener("change", () => toggleAttachment(a.id));
-    const img = document.createElement("img");
-    img.src = a.dataUrl;
-    img.style.cssText = "width:100%;height:64px;object-fit:cover;border-radius:6px;display:block;margin-bottom:4px;";
-    img.addEventListener("click", (e) => { e.stopPropagation(); openPreview(a); });
+    let thumb;
+    if (isPdfAttachment(a)) {
+      thumb = document.createElement("div");
+      thumb.textContent = "PDF";
+      thumb.style.cssText =
+        "width:100%;height:64px;border-radius:6px;background:#eef2f7;color:#003057;font-size:12px;font-weight:800;letter-spacing:1px;display:flex;align-items:center;justify-content:center;margin-bottom:4px;";
+    } else {
+      thumb = document.createElement("img");
+      thumb.src = a.dataUrl;
+      thumb.style.cssText = "width:100%;height:64px;object-fit:cover;border-radius:6px;display:block;margin-bottom:4px;";
+    }
+    thumb.addEventListener("click", (e) => { e.stopPropagation(); openPreview(a); });
     const name = document.createElement("div");
     name.textContent = a.fileName;
     name.style.cssText = "font-size:10px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;";
@@ -328,7 +370,7 @@ function renderAttachments() {
     srcLine.textContent =
       Math.round(a.size / 1024) + " KB · " + (a.source === "whatsapp" ? "Wa" : "HIS") + (a.chatName ? " — " + a.chatName : "");
     srcLine.style.cssText = "font-size:8px;color:var(--sub);";
-    wrap.append(cb, img, name, srcLine);
+    wrap.append(cb, thumb, name, srcLine);
     // النقر على البطاقة يفتح معاينة كبيرة (والشبكة يبدّل التحديد)
     wrap.addEventListener("click", (e) => {
       if (e.target === cb) return;
@@ -345,7 +387,12 @@ async function autoLoadHisDocs() {
   if (state.hisDocsPatId === state.hisPatId) return;
   state.hisDocsPatId = state.hisPatId;
   try {
-    const res = await send({ type: "his:getDocuments", patId: state.hisPatId });
+    let res = await send({ type: "his:getDocuments", patId: state.hisPatId });
+    if (!res?.ok) {
+      // خطأ عابر (جلسة/شبكة)؟ محاولة ثانية قبل الاستسلام
+      await new Promise((r) => setTimeout(r, 1200));
+      res = await send({ type: "his:getDocuments", patId: state.hisPatId });
+    }
     if (!res?.ok) {
       state.hisDocsPatId = null; // يُعاد المحاولة في الفتح القادم
       state.hisDocsDone = true;
@@ -367,7 +414,6 @@ async function autoLoadHisDocs() {
         size: d.size,
         category: d.category,
       });
-      state.selectedIds.add(id); // تحديد تلقائي لمرفقات المريض
       existingIds.add(id);
       added += 1;
     }
@@ -405,7 +451,6 @@ async function loadWaImages() {
         caption: im.caption,
         chatName: im.chatName,
       });
-      state.selectedIds.add(id);
       existingIds.add(id);
       added += 1;
     }
@@ -420,11 +465,15 @@ async function loadWaImages() {
   }
 }
 
+function isPdfAttachment(a) {
+  return /pdf/i.test(a.mime || "") || /\.pdf$/i.test(a.fileName || "");
+}
+
 function attachmentsParts() {
   const parts = [];
   for (const a of collectSelectedAttachments()) {
     parts.push({
-      type: "image",
+      type: isPdfAttachment(a) ? "pdf" : "image",
       dataUrl: a.dataUrl,
       label: a.fileName,
       caption: a.source === "whatsapp"
@@ -734,6 +783,15 @@ $("manualId").addEventListener("keydown", (e) => {
 $("attachFromWa").addEventListener("click", (e) => { e.preventDefault(); loadWaImages(); });
 $("clearAttach").addEventListener("click", clearAllAttachments);
 $("preview").addEventListener("click", closePreview);
+// تكبير/تصغير المعاينة بعجلة الماوس (التمرير يسحب الصورة عند التكبير)
+$("preview").addEventListener("wheel", (e) => {
+  if ($("preview").style.display === "none") return;
+  e.preventDefault();
+  e.stopPropagation();
+  const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+  previewZoom = Math.min(5, Math.max(0.4, previewZoom * factor));
+  applyPreviewZoom();
+}, { passive: false });
 $("openOptions").addEventListener("click", (e) => {
   e.preventDefault();
   chrome.runtime.openOptionsPage();

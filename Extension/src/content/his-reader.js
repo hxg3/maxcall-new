@@ -243,8 +243,20 @@
     const documents = [];
     for (const it of list) {
       if (!it || !it.PatientFileID) continue;
-      const ft = (it.FileType || "").toLowerCase();
-      if (ft.indexOf("image") < 0 && ft.indexOf("jpeg") < 0 && ft.indexOf("png") < 0) continue;
+      const ftRaw = String(it.FileType || "");
+      const ft = ftRaw.toLowerCase();
+      const fname = String(it.FileName || "").toLowerCase();
+      // مستندات قابلة للطباعة: صور + PDF — يُقبل أيضاً النوع الفارغ/الغريب
+      // إذا كان الامتداد معروفاً (كانت بعض الصور تُرفض لأن FileType فارغ)
+      const printable =
+        ft.startsWith("image") || ft.includes("pdf") ||
+        ft === "jpg" || ft === "png" ||
+        (!ft && /\.(jpe?g|png|pdf)$/.test(fname));
+      if (!printable) continue;
+      const mime = ftRaw.includes("/") ? ftRaw
+        : /\.pdf$/.test(fname) ? "application/pdf"
+        : /\.png$/.test(fname) ? "image/png"
+        : "image/jpeg";
 
       // الخطوة 2: محتوى كل مستند بالبايتات
       const r2 = await post("FileUpload/GetUploadedFilesByID", {
@@ -262,10 +274,10 @@
       documents.push({
         id: it.PatientFileID,
         patId: it.Pat_Id || Number(patId) || 0,
-        fileName: it.FileName || `image_${it.PatientFileID}.${ft.split("/")[1] || "jpeg"}`,
-        fileType: it.FileType || "image/jpeg",
+        fileName: it.FileName || `document_${it.PatientFileID}`,
+        fileType: mime,
         category: it.KB_FileType || "",
-        dataUrl: `data:${it.FileType || "image/jpeg"};base64,${detail.PatientFileString}`,
+        dataUrl: `data:${mime};base64,${detail.PatientFileString}`,
         size: Math.round((detail.PatientFileString.length * 3) / 4),
       });
     }

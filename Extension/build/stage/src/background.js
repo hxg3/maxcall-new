@@ -53,26 +53,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               target: { tabId: userTab.id },
               world: "MAIN",
               args: [html],
-              func: async (htmlStr) => {
-                try {
-                  const blob = new Blob([htmlStr], { type: "text/html" });
-                  const url = URL.createObjectURL(blob);
-                  const iframe = document.createElement("iframe");
-                  iframe.style.cssText = "position:fixed;right:0;bottom:0;width:2px;height:2px;opacity:0.01;border:0;";
-                  iframe.src = url;
-                  document.body.appendChild(iframe);
-                  await new Promise((r2) => { iframe.onload = r2; setTimeout(r2, 8000); });
-                  iframe.contentWindow.print();
-                  setTimeout(() => { iframe.remove(); URL.revokeObjectURL(url); }, 1000);
-                  return { ok: true };
-                } catch (e) {
-                  return { ok: false, error: String((e && e.message) || e) };
-                }
-              },
+              func: MCR_PrintHtml,
             });
-            const ok = !!res?.[0]?.result?.ok;
-            report(null, { step: "print", status: ok ? "ok" : "error", detail: ok ? "" : (res?.[0]?.result?.error || "print failed") });
-            sendResponse(ok ? { ok: true } : { ok: false, reason: res?.[0]?.result?.error || "print failed" });
+            const out = res?.[0]?.result;
+            if (out?.ok && out.sawBeforeprint === false) {
+              await log("warn", "html print", "dialog did not open (no beforeprint)");
+            }
+            const ok = !!out?.ok;
+            report(null, { step: "print", status: ok ? "ok" : "error", detail: ok ? "" : (out?.error || "print failed") });
+            sendResponse(ok ? { ok: true } : { ok: false, reason: out?.error || "print failed" });
           } catch (e) {
             report(null, { step: "print", status: "error", detail: String(e).slice(0, 120) });
             sendResponse({ ok: false, reason: String(e) });
@@ -81,60 +70,56 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
         case "insurer:printComposite": {
           // طباعة مجمعة في صفحة الموظف: مستند التأمين + صور المرفقات المختارة، كل جزء في صفحة خاصة
-          const { parts = [], title = "Document + attachments" } = msg;
+          const { parts: rawParts = [], title = "Document + attachments" } = msg;
           const tabs = await chrome.tabs.query({ url: HIS_TAB_PATTERNS }).catch(() => []);
           const userTab = tabs.find((t) => t.active) || tabs[0];
           if (!userTab) { sendResponse({ ok: false, reason: "no_his_tab" }); break; }
           report(null, { step: "print", status: "run" });
           try {
+            const parts = await pdfPartsToImages(rawParts);
+            await log("info", "composite print", `parts=${parts.length} (popup path)`);
             const res = await chrome.scripting.executeScript({
               target: { tabId: userTab.id },
               world: "MAIN",
               args: [parts, title],
-              func: async (parts, title) => {
-                const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[c]);
-                let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(title)}</title>`;
-                html += `<style>@page{size:A4;margin:7mm 8mm;}*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;margin:0;color:#111;line-height:1.3}.section{page-break-after:always}.section:last-child{page-break-after:auto}h2{font-size:13px;border-bottom:1.2px solid #003057;padding-bottom:4px;margin:0 0 7px;color:#003057;letter-spacing:.4px}.sub{font-size:8px;color:#666;margin-bottom:6px}img{max-width:100%;max-height:88vh;height:auto;display:block;margin:0 auto}embed,iframe{width:100%;height:88vh;display:block;margin:0 auto;border:none;background:#fff}.fullimg{width:100%;max-height:88vh;object-fit:contain;display:block;margin:0 auto}</style></head><body>`;
-                for (const p of parts) {
-                  html += `<div class="section"><h2>${esc(p.label || "Document")}</h2>`;
-                  if (p.type === "html") {
-                    const c = String(p.content || "");
-                    // إذا كان HTML صفحة كاملة، افتحها في iframe؛ وإلا أدخل محتواها مباشرة
-                    if (/<html[\s>]/i.test(c)) {
-                      const blob = new Blob([c], { type: "text/html" });
-                      const u = URL.createObjectURL(blob);
-                      html += `<iframe src="${u}" loading="eager"></iframe>`;
-                      setTimeout(() => URL.revokeObjectURL(u), 20000);
-                    } else {
-                      html += `<div style="font-size:10.5px">${c}</div>`;
-                    }
-                  } else if (p.type === "pdf") {
-                    html += `<embed type="application/pdf" src="${esc(p.dataUrl)}">`;
-                  } else if (p.type === "image") {
-                    html += `<img class="fullimg" src="${esc(p.dataUrl)}" alt="${esc(p.label || "attachment")}">`;
-                    if (p.caption) html += `<div class="sub">${esc(p.caption)}</div>`;
-                  }
-                  html += `</div>`;
-                }
-                html += `</body></html>`;
-                const blob = new Blob([html], { type: "text/html" });
-                const url = URL.createObjectURL(blob);
-                const iframe = document.createElement("iframe");
-                iframe.style.cssText = "position:fixed;right:0;bottom:0;width:2px;height:2px;opacity:0.01;border:0;";
-                iframe.src = url;
-                document.body.appendChild(iframe);
-                await new Promise((r2) => { iframe.onload = r2; setTimeout(r2, 9000); });
-                iframe.contentWindow.print();
-                setTimeout(() => { iframe.remove(); URL.revokeObjectURL(url); }, 1000);
-                return { ok: true };
-              },
+              func: MCR_PrintComposite,
             });
-            const ok = !!res?.[0]?.result?.ok;
-            report(null, { step: "print", status: ok ? "ok" : "error", detail: ok ? "" : (res?.[0]?.result?.error || "print failed") });
-            sendResponse(ok ? { ok: true } : { ok: false, reason: res?.[0]?.result?.error || "print failed" });
+            const out = res?.[0]?.result;
+            const dialogOpened = !!out?.ok && out.sawBeforeprint !== false;
+            if (!dialogOpened) {
+              await log("warn", "composite print", out?.error || "dialog did not open (no beforeprint)");
+              // احتياط: اطبع الجزء الأول وحده بالطريق المعروف (بلا نوافذ جديدة)
+              const first = parts[0];
+              const fbOk = first?.type === "html" ? await printHtmlInUserTab(first.content)
+                : first?.type === "pdf" ? await printDataUrlInUserTab(first.dataUrl)
+                : false;
+              await log("info", "composite fallback", fbOk ? "first part printed alone" : "failed");
+              report(null, { step: "print", status: fbOk ? "ok" : "error" });
+              sendResponse(fbOk ? { ok: true, fallback: true } : { ok: false, reason: out?.error || "print_failed" });
+              break;
+            }
+            report(null, { step: "print", status: "ok" });
+            sendResponse({ ok: true });
           } catch (e) {
             report(null, { step: "print", status: "error", detail: String(e).slice(0, 120) });
             sendResponse({ ok: false, reason: String(e) });
+          }
+          break;
+        }
+        case "his:fillFile": {
+          // وضع صورة الواتساب في حقل المستندات داخل صفحة المشفى (جاهزة للحفظ)
+          const tabs = await chrome.tabs.query({ url: HIS_TAB_PATTERNS }).catch(() => []);
+          const hisTab = tabs.find((t) => t.active) || tabs[0];
+          if (!hisTab) { sendResponse({ ok: false, reason: "no_his_tab" }); break; }
+          try {
+            const res = await chrome.scripting.executeScript({
+              target: { tabId: hisTab.id },
+              args: [msg.dataUrl || "", msg.fileName || "attachment.jpg"],
+              func: MCR_FillHisFile,
+            });
+            sendResponse(res?.[0]?.result || { ok: false, reason: "no_result" });
+          } catch (e) {
+            sendResponse({ ok: false, reason: String(e).slice(0, 120) });
           }
           break;
         }
@@ -548,8 +533,12 @@ async function finishJob(tabId, insurerId) {
   }
 }
 
-// يُحقن في عالم الصفحة (MAIN) داخل تبويب المشفى — يفتح PDF من data URL
-// في iframe مخفي ثم يفتح حوار الطباعة فوراً.
+// ------------------------------------------------------------------
+// دوال تُحقن في عالم الصفحة (MAIN) داخل تبويب المشفى
+// الإطار المخفي بعرض ورقة A4 ‏(794px) لا بعرض2px (التخطيط كان ينكمش
+// فيبدو المطبوع فارغاً)؛ الإطار يُزال عند afterprint فقط — مؤقّت الإزالة
+// كان قد يُزيله أثناء تحميل معاينة الطباعة فيختفي كل شيء.
+// ------------------------------------------------------------------
 function MCR_PrintDataUrl(dataUrl) {
   return (async () => {
     try {
@@ -557,17 +546,256 @@ function MCR_PrintDataUrl(dataUrl) {
       const url = URL.createObjectURL(blob);
       const iframe = document.createElement("iframe");
       iframe.style.cssText =
-        "position:fixed;right:0;bottom:0;width:2px;height:2px;opacity:0.01;border:0;";
+        "position:fixed;left:-10000px;top:0;width:794px;height:1123px;border:0;";
       iframe.src = url;
       document.body.appendChild(iframe);
       await new Promise((resolve) => { iframe.onload = resolve; setTimeout(resolve, 8000); });
-      iframe.contentWindow.print();
-      setTimeout(() => { iframe.remove(); URL.revokeObjectURL(url); }, 5000);
+      const w = iframe.contentWindow;
+      let cleaned = false;
+      const cleanup = () => {
+        if (cleaned) return;
+        cleaned = true;
+        iframe.remove();
+        URL.revokeObjectURL(url);
+      };
+      w.addEventListener("afterprint", () => setTimeout(cleanup, 300));
+      setTimeout(cleanup, 300000);
+      w.focus();
+      w.print();
       return { ok: true };
     } catch (e) {
       return { ok: false, error: String((e && e.message) || e) };
     }
   })();
+}
+
+// HTML (نموذج) في iframe مخفي ثم حوار الطباعة — يُزال الإطار عند afterprint
+function MCR_PrintHtml(htmlStr) {
+  return (async () => {
+    try {
+      const blob = new Blob([htmlStr], { type: "text/html" });
+      const url = URL.createObjectURL(blob);
+      const iframe = document.createElement("iframe");
+      iframe.style.cssText =
+        "position:fixed;left:-10000px;top:0;width:794px;height:1123px;border:0;";
+      iframe.src = url;
+      document.body.appendChild(iframe);
+      await new Promise((r2) => { iframe.onload = r2; setTimeout(r2, 8000); });
+      const w = iframe.contentWindow;
+      let sawBefore = false, cleaned = false;
+      const cleanup = () => {
+        if (cleaned) return;
+        cleaned = true;
+        iframe.remove();
+        URL.revokeObjectURL(url);
+      };
+      w.addEventListener("beforeprint", () => { sawBefore = true; });
+      w.addEventListener("afterprint", () => setTimeout(cleanup, 300));
+      setTimeout(cleanup, 300000);
+      w.focus();
+      w.print();
+      await new Promise((r2) => setTimeout(r2, 2000));
+      return { ok: true, sawBeforeprint: sawBefore };
+    } catch (e) {
+      return { ok: false, error: String((e && e.message) || e) };
+    }
+  })();
+}
+
+// طباعة مجمّعة: كل جزء في صفحة مستقلة (page-break) — نسخة تأمين + مرفقات
+// في حوار طباعة واحد. الصور تُنتظر حتى اكتمالها قبل فتح الحوار.
+function MCR_PrintComposite(parts, title) {
+  return (async () => {
+    try {
+      const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[c]);
+      let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(title)}</title>`;
+      html += `<style>@page{size:A4;margin:7mm 8mm;}*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;margin:0;color:#111;line-height:1.3}.section{page-break-after:always}.section:last-child{page-break-after:auto}h2{font-size:13px;border-bottom:1.2px solid #003057;padding-bottom:4px;margin:0 0 7px;color:#003057;letter-spacing:.4px}.sub{font-size:8px;color:#666;margin-bottom:6px}img{max-width:100%;max-height:88vh;height:auto;display:block;margin:0 auto}embed,iframe{width:100%;height:88vh;display:block;margin:0 auto;border:none;background:#fff}</style></head><body>`;
+      for (const p of parts) {
+        html += `<div class="section"><h2>${esc(p.label || "Document")}</h2>`;
+        if (p.type === "html") {
+          const c = String(p.content || "");
+          if (/<html[\s>]/i.test(c)) {
+            const blob = new Blob([c], { type: "text/html" });
+            const u = URL.createObjectURL(blob);
+            html += `<iframe src="${u}" loading="eager"></iframe>`;
+            setTimeout(() => URL.revokeObjectURL(u), 60000);
+          } else {
+            html += `<div style="font-size:10.5px">${c}</div>`;
+          }
+        } else if (p.type === "pdf") {
+          // احتياط فقط: PDF داخل HTML يُطبع صفحته الأولى — المسار الأساسي
+          // يُحوّل PDF إلى صور قبل الوصول إلى هنا (pdfPartsToImages)
+          html += `<embed type="application/pdf" src="${esc(p.dataUrl)}">`;
+        } else if (p.type === "image") {
+          html += `<img src="${esc(p.dataUrl)}" alt="${esc(p.label || "attachment")}">`;
+          if (p.caption) html += `<div class="sub">${esc(p.caption)}</div>`;
+        }
+        html += `</div>`;
+      }
+      html += `</body></html>`;
+      const blob = new Blob([html], { type: "text/html" });
+      const url = URL.createObjectURL(blob);
+      const iframe = document.createElement("iframe");
+      iframe.style.cssText =
+        "position:fixed;left:-10000px;top:0;width:794px;height:1123px;border:0;";
+      iframe.src = url;
+      document.body.appendChild(iframe);
+      await new Promise((r2) => { iframe.onload = r2; setTimeout(r2, 9000); });
+      const w = iframe.contentWindow;
+      const imgs = Array.from((w.document && w.document.images) || []);
+      await Promise.race([
+        Promise.all(imgs.map((im) => im.complete ? null : new Promise((r3) => { im.onload = im.onerror = r3; }))),
+        new Promise((r3) => setTimeout(r3, 4000)),
+      ]);
+      let sawBefore = false, cleaned = false;
+      const cleanup = () => {
+        if (cleaned) return;
+        cleaned = true;
+        iframe.remove();
+        URL.revokeObjectURL(url);
+      };
+      w.addEventListener("beforeprint", () => { sawBefore = true; });
+      w.addEventListener("afterprint", () => setTimeout(cleanup, 300));
+      setTimeout(cleanup, 300000);
+      w.focus();
+      w.print();
+      await new Promise((r2) => setTimeout(r2, 2000));
+      return { ok: true, sawBeforeprint: sawBefore, pages: parts.length };
+    } catch (e) {
+      return { ok: false, error: String((e && e.message) || e) };
+    }
+  })();
+}
+
+// وضع صورة في حقل المستندات input[type=file] داخل صفحة المشفى ليكون
+// جاهزاً للحفظ — يبحث عن معالج Angular (مُصغّر الاسم) ويستدعيه مباشرة
+// لضمان تعبئة Patimage/filePreview (مسار resize عبر ng2ImgMax قد يتعطل)
+// مع إرسال change/input كاحتياط.
+function MCR_FillHisFile(dataUrl, fileName) {
+  return (async () => {
+    try {
+      const inp = document.querySelector("input[type=file]");
+      if (!inp) return { ok: false, reason: "no_file_input" };
+      const s = String(dataUrl || "");
+      const comma = s.indexOf(",");
+      if (comma < 0) return { ok: false, reason: "bad_data_url" };
+      const mime = ((/^data:([^;,]+)/.exec(s) || [])[1]) || "image/jpeg";
+      const bin = atob(s.slice(comma + 1));
+      const u8 = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+      const file = new File([u8], fileName || "attachment.jpg", { type: mime });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      inp.files = dt.files;
+
+      // البحث عن مكوّن Angular الذي يملك معالج الملف عبر __ngContext__
+      const findHandler = (lv, depth, seen, wantNoResize) => {
+        if (!lv || depth > 6 || typeof lv !== "object" || seen.has(lv)) return null;
+        seen.add(lv);
+        const check = (v) => {
+          if (!v || typeof v !== "object" || Array.isArray(v) || typeof v.nodeType === "number") return null;
+          const proto = Object.getPrototypeOf(v);
+          if (!proto || proto === Object.prototype) return null;
+          for (const n of Object.getOwnPropertyNames(proto)) {
+            try {
+              if (typeof v[n] !== "function" || n === "constructor") continue;
+              const src = v[n].toString();
+              if (!src.includes("readAsDataURL") || !src.includes("Patimage")) continue;
+              const noResize = !src.includes("resizeImage") && !src.includes("ng2ImgMax");
+              if (wantNoResize ? noResize : src.includes("target.files")) return { comp: v, method: n };
+            } catch (e2) { /* تخطٍ */ }
+          }
+          return null;
+        };
+        if (Array.isArray(lv) || typeof lv.length === "number") {
+          for (let i = 0, lim = Math.min(lv.length || 0, 600); i < lim; i++) {
+            try {
+              const r = check(lv[i]); if (r) return r;
+              if (Array.isArray(lv[i])) { const r2 = findHandler(lv[i], depth + 1, seen, wantNoResize); if (r2) return r2; }
+            } catch (e2) { /* تخطٍ */ }
+          }
+        }
+        return check(lv);
+      };
+
+      const starts = [
+        document.querySelector("app-patient-details"),
+        document.getElementById("divUploadPh"),
+        document.querySelector("form"),
+      ].filter((el) => el && el.__ngContext__);
+
+      let invoked = false;
+      for (const el of starts) {
+        // نُفضّل مسار بلا تحجيم (onFileChangedwithoutresize) لضمان اكتمال التعبئة
+        const h = findHandler(el.__ngContext__, 0, new WeakSet(), true) ||
+                  findHandler(el.__ngContext__, 0, new WeakSet(), false);
+        if (h) {
+          h.comp[h.method]({ target: inp });
+          invoked = true;
+          break;
+        }
+      }
+      if (!invoked) {
+        inp.dispatchEvent(new Event("input", { bubbles: true }));
+        inp.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      return { ok: true, name: file.name, size: file.size, invoked };
+    } catch (e) {
+      return { ok: false, reason: String((e && e.message) || e).slice(0, 120) };
+    }
+  })();
+}
+
+// تحويل أجزاء PDF في الطباعة المجمّعة إلى صور عبر الخادم (Ghostscript):
+// تضمين PDF داخل HTML يُطبع صفحته الأولى فقط في كروم — الصور تُطبع كلها.
+async function pdfPartsToImages(parts) {
+  const out = [];
+  for (const p of parts) {
+    if (p?.type !== "pdf") { out.push(p); continue; }
+    try {
+      const s = String(p.dataUrl || "");
+      const comma = s.indexOf(",");
+      if (comma < 0) throw new Error("bad data url");
+      const res = await insurerRequest("/api/insurer/pdf-to-png", {
+        method: "POST",
+        body: { pdf_b64: s.slice(comma + 1), dpi: 200 },
+        timeoutMs: 60000,
+      });
+      const images = res.images || [];
+      if (!images.length) throw new Error("no_pages");
+      images.forEach((b, i) => out.push({
+        type: "image",
+        dataUrl: `data:image/png;base64,${b}`,
+        label: images.length > 1
+          ? `${p.label || "Document"} ${i + 1}/${images.length}`
+          : (p.label || "Document"),
+        caption: p.caption || "",
+      }));
+      await log("info", "composite: pdf rasterized", `${p.label || "doc"} -> ${images.length} page(s)`);
+    } catch (e) {
+      await log("warn", "composite: pdf rasterize failed", String(e).slice(0, 140));
+      out.push(p); // احتياط: embed (صفحة أولى فقط)
+    }
+  }
+  return out;
+}
+
+// طباعة HTML في تبويب المشفى (احتياط عند فشل الطباعة المجمّعة)
+async function printHtmlInUserTab(html) {
+  const tabs = await chrome.tabs.query({ url: HIS_TAB_PATTERNS }).catch(() => []);
+  const userTab = tabs.find((t) => t.active) || tabs[0];
+  if (!userTab) return false;
+  try {
+    const res = await chrome.scripting.executeScript({
+      target: { tabId: userTab.id },
+      world: "MAIN",
+      args: [html],
+      func: MCR_PrintHtml,
+    });
+    return !!res?.[0]?.result?.ok;
+  } catch (e) {
+    return false;
+  }
 }
 
 async function printDataUrlInUserTab(dataUrl, insurerId = "nextcare") {
@@ -603,44 +831,19 @@ async function printCompositeInTab(tabId, parts, title = "Document + attachments
       target: { tabId },
       world: "MAIN",
       args: [parts, title],
-      func: async (parts, title) => {
-        const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[c]);
-        let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(title)}</title>`;
-        html += `<style>@page{size:A4;margin:7mm 8mm;}*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;margin:0;color:#111;line-height:1.3}.section{page-break-after:always}.section:last-child{page-break-after:auto}h2{font-size:13px;border-bottom:1.2px solid #003057;padding-bottom:4px;margin:0 0 7px;color:#003057;letter-spacing:.4px}.sub{font-size:8px;color:#666;margin-bottom:6px}img{max-width:100%;max-height:88vh;height:auto;display:block;margin:0 auto}embed,iframe{width:100%;height:88vh;display:block;margin:0 auto;border:none;background:#fff}</style></head><body>`;
-        for (const p of parts) {
-          html += `<div class="section"><h2>${esc(p.label || "Document")}</h2>`;
-          if (p.type === "html") {
-            const c = String(p.content || "");
-            if (/<html[\s>]/i.test(c)) {
-              const blob = new Blob([c], { type: "text/html" });
-              const u = URL.createObjectURL(blob);
-              html += `<iframe src="${u}" loading="eager"></iframe>`;
-              setTimeout(() => URL.revokeObjectURL(u), 20000);
-            } else {
-              html += `<div style="font-size:10.5px">${c}</div>`;
-            }
-          } else if (p.type === "pdf") {
-            html += `<embed type="application/pdf" src="${esc(p.dataUrl)}">`;
-          } else if (p.type === "image") {
-            html += `<img src="${esc(p.dataUrl)}" style="max-width:100%;max-height:88vh;height:auto;display:block;margin:0 auto">`;
-            if (p.caption) html += `<div class="sub">${esc(p.caption)}</div>`;
-          }
-          html += `</div>`;
-        }
-        html += `</body></html>`;
-        const blob = new Blob([html], { type: "text/html" });
-        const url = URL.createObjectURL(blob);
-        const iframe = document.createElement("iframe");
-        iframe.style.cssText = "position:fixed;right:0;bottom:0;width:2px;height:2px;opacity:0.01;border:0;";
-        iframe.src = url;
-        document.body.appendChild(iframe);
-        await new Promise((r2) => { iframe.onload = r2; setTimeout(r2, 9000); });
-        iframe.contentWindow.print();
-        setTimeout(() => { iframe.remove(); URL.revokeObjectURL(url); }, 1000);
-        return { ok: true };
-      },
+      func: MCR_PrintComposite,
     });
-    return res?.[0]?.result?.ok === true;
+    const out = res?.[0]?.result;
+    if (!out?.ok) {
+      await log("warn", "composite print failed", out?.error || "no_result");
+      return false;
+    }
+    if (out.sawBeforeprint === false) {
+      // حوار الطباعة لم يُفتح أصلاً — لا نعتبرها نجاحاً
+      await log("warn", "composite print", "dialog did not open (no beforeprint)");
+      return false;
+    }
+    return true;
   } catch (e) {
     await log("warn", "print composite in tab failed", String(e).slice(0, 120));
     return false;
@@ -656,13 +859,12 @@ async function printCompositeInUserTab(parts, insurerId = "nextcare", title = "D
     if (ok) return true;
     await log("warn", "in-tab composite print failed", "");
   }
-  // احتياط: طباعة أول جزء PDF فقط في نافذة منفصلة
+  // احتياط: اطبع أول جزء PDF مباشرة في تبويب المشفى (طريق معروف) — بلا نوافذ
   const pdfPart = parts.find((p) => p.type === "pdf");
   if (pdfPart) {
-    await chrome.storage.session.set({ mcrPrintPdf: pdfPart.dataUrl }).catch(() => {});
-    const userWinId = await userWindowId({ insurerId });
-    await chrome.tabs.create({ windowId: userWinId, url: chrome.runtime.getURL("src/print/print.html"), active: true });
-    return false;
+    const ok = await printDataUrlInUserTab(pdfPart.dataUrl, insurerId);
+    await log("warn", "composite fallback", ok ? "first PDF printed alone" : "fallback failed");
+    return ok;
   }
   return false;
 }
@@ -1031,7 +1233,7 @@ async function finishBrokerPrint(jobId, insurerId) {
   const dataUrl = `data:application/pdf;base64,${pdf.pdf_b64}`;
   const attachments = brokerAttachments.get(insurerId) || [];
   if (attachments.length) {
-    const printParts = [
+    let printParts = [
       { type: "pdf", dataUrl, label: INSURER_NAMES[insurerId] || "Document" },
       ...attachments.map((a) => ({
         type: "image",
@@ -1042,11 +1244,18 @@ async function finishBrokerPrint(jobId, insurerId) {
           : `HIS — ${a.category || "attachment"}`,
       })),
     ];
+    // PDF → صور (كل الصفحات تُطبع) قبل بناء المستند المجمّع
+    printParts = await pdfPartsToImages(printParts);
+    await log("info", "composite print",
+      `${insurerId} parts=${printParts.length} attachments=${attachments.length}`);
     const ok = await printCompositeInUserTab(printParts, insurerId);
+    await log("info", "composite print result", ok ? "dialog opened" : "failed");
     report(null, { step: "print", status: ok ? "ok" : "error" });
     return ok ? { ok: true } : { ok: true, printError: true };
   }
+  await log("info", "direct pdf print", insurerId);
   const ok = await printDataUrlInUserTab(dataUrl, insurerId);
+  await log("info", "direct pdf print result", ok ? "dialog opened" : "failed");
   report(null, { step: "print", status: ok ? "ok" : "error" });
   return ok ? { ok: true } : { ok: true, printError: true };
 }
@@ -1131,7 +1340,7 @@ async function runInsurer({ insurerId, card, serviceType, attachments = [] }) {
       const job = Array.from(jobs.values()).find((j) => j.insurerId === insurerId && !j.reportHandled);
       const attachments = job?.attachments || [];
       if (attachments.length) {
-        const printParts = [
+        let printParts = [
           { type: "pdf", dataUrl: r.dataUrl, label: "NextCare" },
           ...attachments.map((a) => ({
             type: "image",
@@ -1140,6 +1349,7 @@ async function runInsurer({ insurerId, card, serviceType, attachments = [] }) {
             caption: a.source === "whatsapp" ? `WhatsApp${a.chatName ? " — " + a.chatName : ""}` : `HIS — ${a.category || "attachment"}`,
           })),
         ];
+        printParts = await pdfPartsToImages(printParts);
         const ok = await printCompositeInUserTab(printParts, "nextcare");
         report(null, { step: "print", status: ok ? "ok" : "error" });
       } else {
