@@ -78,11 +78,16 @@ async function fetchLastWaImages(limit = 5) {
     /^(data:image|blob:)/.test(el.currentSrc || el.src || ""));
 
   function keyFor(el, idx) {
-    // أولوية: data-id لمُضمِّن الرسالة (ثابت لكل رسالة — يجمع كل نسخ
-    // الدقة/المعاينة الثلاث لصورة واحدة). msgKey غير موثوق في إصدارات واتساب
-    // الحديثة (أحياناً لا يُستخرج)، لذلك data-id أولاً.
+    // أولوية: data-id لمُضمِّن الرسالة — ثابت لكل رسالة ويجمع نسخ
+    // الدقة/المعاينة الثلاث لصورة واحدة. msgKey غير موثوق بإصدارات حديثة.
+    try {
+      if (el.closest) {
+        const host = el.closest("[data-id]");
+        if (host) { const did = host.getAttribute("data-id"); if (did) return "id:" + did; }
+      }
+    } catch (e) { /* نتابع */ }
     let node = el;
-    for (let d = 0; node && d < 20; d++, node = node.parentElement) {
+    for (let d = 0; node && d < 24; d++, node = node.parentElement) {
       const did = node.getAttribute && node.getAttribute("data-id");
       if (did) return "id:" + did;
     }

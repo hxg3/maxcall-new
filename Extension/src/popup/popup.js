@@ -155,6 +155,7 @@ async function runHtmlForm(selectedAttachments = []) {
       html = html.replace(new RegExp(`{{${key}}}`, "g"), String(val ?? ""));
     }
 
+    await fillSelectedWaAttachments();
     if (selectedAttachments.length) {
       dispatchAndClose(send({
         type: "insurer:printComposite",
@@ -214,6 +215,7 @@ async function runGigForm(selectedAttachments = []) {
     for (const [k, v] of Object.entries(data))
       html = html.replace(new RegExp(`{{${k}}}`, "g"), String(v ?? ""));
 
+    await fillSelectedWaAttachments();
     if (selectedAttachments.length) {
       dispatchAndClose(send({
         type: "insurer:printComposite",
@@ -259,15 +261,15 @@ function collectSelectedAttachments() {
 }
 
 function toggleAttachment(id) {
-  if (state.selectedIds.has(id)) {
-    state.selectedIds.delete(id);
-  } else {
-    state.selectedIds.add(id);
-    // صورة واتساب مختارة = تُعبّأ فوراً في حقل المستندات داخل صفحة المشفى
-    const a = state.attachments.find((x) => x.id === id);
-    if (a && a.source === "whatsapp") fillHisFile(a);
-  }
+  if (state.selectedIds.has(id)) state.selectedIds.delete(id);
+  else state.selectedIds.add(id);
   renderAttachments();
+}
+
+// إرفاق مستندات واتساب المختارة في HIS عند الطباعة (Insurance Card)
+async function fillSelectedWaAttachments() {
+  const wa = collectSelectedAttachments().filter((a) => a.source === "whatsapp");
+  for (const a of wa) await fillHisFile(a);
 }
 
 // إرفاق مستند واتساب في HIS (Insurance Card) ليكون جاهزاً للحفظ
@@ -573,6 +575,7 @@ async function runStaticPdf(selectedAttachments = []) {
       fr.onerror = () => reject(fr.error || new Error("read failed"));
       fr.readAsDataURL(blob);
     });
+    await fillSelectedWaAttachments();
     if (selectedAttachments.length) {
       dispatchAndClose(send({
         type: "insurer:printComposite",
@@ -787,6 +790,7 @@ async function startRun(selectedAttachments = []) {
   printBtnBusy("Starting…");
   const serviceType = $("typeSel")?.value || null;
   log("info", "popup: startRun", `insurer=${state.insurer.id} type=${serviceType} attachments=${selectedAttachments.length}`);
+  await fillSelectedWaAttachments();
 
   const res = await send({
     type: "insurer:run",

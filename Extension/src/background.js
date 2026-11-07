@@ -69,7 +69,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           break;
         }
         case "insurer:printComposite": {
-          // طباعة مجمعة في صفحة الموظف: مستند التأمين + صور المرفقات المختارة، كل جزء في صفحة خاصة
+          // طباعة مجمعة (بلا وسائط ضخمة — تُبنى في الخدمة وتُنقل عبر storage)
           const { parts: rawParts = [], title = "Document + attachments" } = msg;
           const tabs = await chrome.tabs.query({ url: HIS_TAB_PATTERNS }).catch(() => []);
           const userTab = tabs.find((t) => t.active) || tabs[0];
@@ -78,20 +78,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           try {
             const parts = await pdfPartsToImages(rawParts);
             await log("info", "composite print", `parts=${parts.length} (popup path)`);
+            const html = buildCompositeHtml(parts, title);
+            await chrome.storage.session.set({ mcrCompositeHtml: html });
             const res = await chrome.scripting.executeScript({
               target: { tabId: userTab.id },
-              world: "MAIN",
-              args: [parts, title],
-              func: MCR_PrintComposite,
+              args: [],
+              func: MCR_PrintStoredHtml,
             });
             const out = res?.[0]?.result;
             const dialogOpened = !!out?.ok && out.sawBeforeprint !== false;
             if (!dialogOpened) {
               await log("warn", "composite print", out?.error || "dialog did not open (no beforeprint)");
-              // احتياط: اطبع الجزء الأول وحده بالطريق المعروف (بلا نوافذ جديدة)
               const first = parts[0];
               const fbOk = first?.type === "html" ? await printHtmlInUserTab(first.content)
-                : first?.type === "pdf" ? await printDataUrlInUserTab(first.dataUrl)
+                : first?.dataUrl ? await printDataUrlInUserTab(first.dataUrl)
                 : false;
               await log("info", "composite fallback", fbOk ? "first part printed alone" : "failed");
               report(null, { step: "print", status: fbOk ? "ok" : "error" });
@@ -618,64 +618,65 @@ function MCR_PrintHtml(htmlStr) {
   })();
 }
 
-// طباعة مجمّعة: كل جزء في صفحة مستقلة (page-break) — نسخة تأمين + مرفقات
-// في حوار طباعة واحد. الصور تُنتظر حتى اكتمالها قبل فتح الحوار.
-function MCR_PrintComposite(parts, title) {
+// بناء HTML الطباعة المجمّعة (بلا عناوين) — يُنفَّذ في الـservice worker لتجنّب
+// تمرير وسائط ضخمة (صور PDF مُحوَّلة) عبر executeScript.
+function buildCompositeHtml(parts, title) {
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[c]);
+  let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(title)}</title>`;
+  html += `<style>@page{size:A4;margin:7mm 8mm;}*{box-sizing:border-box}html,body{margin:0;padding:0}.section{page-break-after:always;break-after:page}.section:last-child{page-break-after:auto;break-after:auto}img{width:100%;height:auto;max-height:277mm;object-fit:contain;display:block;margin:0 auto;page-break-inside:avoid;break-inside:avoid}embed,iframe{width:100%;height:277mm;display:block;margin:0;border:none}</style></head><body>`;
+  for (const p of (parts || [])) {
+    html += `<div class="section">`;
+    if (p.type === "html") {
+      const c = String(p.content || "");
+      if (/<html[\s>]/i.test(c)) {
+        html += `<iframe src="data:text/html;charset=utf-8,${encodeURIComponent(c)}"></iframe>`;
+      } else {
+        html += c;
+      }
+    } else if (p.type === "pdf") {
+      // احتياط: التحويل إلى صور يتم قبل الاستدعاء
+      html += `<embed type="application/pdf" src="${esc(p.dataUrl)}">`;
+    } else if (p.type === "image") {
+      html += `<img src="${esc(p.dataUrl)}" alt="">`;
+    }
+    html += `</div>`;
+  }
+  html += `</body></html>`;
+  return html;
+}
+
+// يُحقن في العالم المعزول (ISOLATED) — يملك DOM + chrome.storage، بلا وسائط كبيرة
+function MCR_PrintStoredHtml() {
   return (async () => {
     try {
-      const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[c]);
-      let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(title)}</title>`;
-      // بلا عناوين/تسميات — كل مستند/صورة يُطبع كما هو في ورقته (تجميع فقط)
-      html += `<style>@page{size:A4;margin:7mm 8mm;}*{box-sizing:border-box}html,body{margin:0;padding:0}.section{page-break-after:always;break-after:page}.section:last-child{page-break-after:auto;break-after:auto}img{max-width:100%;max-height:100vh;width:auto;height:auto;display:block;margin:0 auto;page-break-inside:avoid;break-inside:avoid}embed,iframe{width:100%;height:100vh;display:block;margin:0;border:none}</style></head><body>`;
-      for (const p of parts) {
-        html += `<div class="section">`;
-        if (p.type === "html") {
-          const c = String(p.content || "");
-          if (/<html[\s>]/i.test(c)) {
-            const blob = new Blob([c], { type: "text/html" });
-            const u = URL.createObjectURL(blob);
-            html += `<iframe src="${u}" loading="eager"></iframe>`;
-            setTimeout(() => URL.revokeObjectURL(u), 60000);
-          } else {
-            html += c;
-          }
-        } else if (p.type === "pdf") {
-          // احتياط فقط: يُحوّل PDF إلى صور قبل الوصول إلى هنا (pdfPartsToImages)
-          html += `<embed type="application/pdf" src="${esc(p.dataUrl)}">`;
-        } else if (p.type === "image") {
-          html += `<img src="${esc(p.dataUrl)}" alt="">`;
-        }
-        html += `</div>`;
-      }
-      html += `</body></html>`;
-      const blob = new Blob([html], { type: "text/html" });
+      const bag = await chrome.storage.session.get("mcrCompositeHtml");
+      const htmlStr = bag && bag.mcrCompositeHtml;
+      chrome.storage.session.remove("mcrCompositeHtml").catch(() => {});
+      if (!htmlStr) return { ok: false, error: "no_html" };
+      const blob = new Blob([htmlStr], { type: "text/html" });
       const url = URL.createObjectURL(blob);
       const iframe = document.createElement("iframe");
       iframe.style.cssText =
         "position:fixed;left:-10000px;top:0;width:794px;height:1123px;border:0;";
       iframe.src = url;
       document.body.appendChild(iframe);
-      await new Promise((r2) => { iframe.onload = r2; setTimeout(r2, 9000); });
+      await new Promise((r2) => { iframe.onload = r2; setTimeout(r2, 12000); });
       const w = iframe.contentWindow;
       const imgs = Array.from((w.document && w.document.images) || []);
       await Promise.race([
         Promise.all(imgs.map((im) => im.complete ? null : new Promise((r3) => { im.onload = im.onerror = r3; }))),
-        new Promise((r3) => setTimeout(r3, 4000)),
+        new Promise((r3) => setTimeout(r3, 6000)),
       ]);
       let sawBefore = false, cleaned = false;
       const cleanup = () => {
-        if (cleaned) return;
-        cleaned = true;
-        iframe.remove();
-        URL.revokeObjectURL(url);
+        if (cleaned) return; cleaned = true; iframe.remove(); URL.revokeObjectURL(url);
       };
       w.addEventListener("beforeprint", () => { sawBefore = true; });
       w.addEventListener("afterprint", () => setTimeout(cleanup, 300));
       setTimeout(cleanup, 300000);
-      w.focus();
-      w.print();
+      w.focus(); w.print();
       await new Promise((r2) => setTimeout(r2, 2000));
-      return { ok: true, sawBeforeprint: sawBefore, pages: parts.length };
+      return { ok: true, sawBeforeprint: sawBefore };
     } catch (e) {
       return { ok: false, error: String((e && e.message) || e) };
     }
@@ -863,14 +864,17 @@ async function printDataUrlInUserTab(dataUrl, insurerId = "nextcare") {
   return false;
 }
 
-// طباعة مجمعة (مستند + مرفقات) في صفحة الموظف عبر iframe مخفي + print
+// طباعة مجمعة (مستند + مرفقات) في صفحة الموظف — HTML يُبنى في الخدمة ويُنقل
+// عبر storage.session لتجنّب وسائط executeScript الضخمة (صفحات فارغة)
 async function printCompositeInTab(tabId, parts, title = "Document + attachments") {
   try {
+    const html = buildCompositeHtml(parts, title);
+    await chrome.storage.session.set({ mcrCompositeHtml: html });
     const res = await chrome.scripting.executeScript({
       target: { tabId },
-      world: "MAIN",
-      args: [parts, title],
-      func: MCR_PrintComposite,
+      // ISOLATED: يملك chrome.storage + DOM المشترك
+      args: [],
+      func: MCR_PrintStoredHtml,
     });
     const out = res?.[0]?.result;
     if (!out?.ok) {
@@ -878,7 +882,6 @@ async function printCompositeInTab(tabId, parts, title = "Document + attachments
       return false;
     }
     if (out.sawBeforeprint === false) {
-      // حوار الطباعة لم يُفتح أصلاً — لا نعتبرها نجاحاً
       await log("warn", "composite print", "dialog did not open (no beforeprint)");
       return false;
     }
