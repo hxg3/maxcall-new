@@ -270,14 +270,14 @@ function toggleAttachment(id) {
   renderAttachments();
 }
 
-// وضع الصورة في حقل الملفات (input[type=file]) ليكون جاهزاً للحفظ في HIS
+// إرفاق مستند واتساب في HIS (Insurance Card) ليكون جاهزاً للحفظ
 async function fillHisFile(a) {
-  if (isPdfAttachment(a)) return;
   try {
     const res = await send({ type: "his:fillFile", dataUrl: a.dataUrl, fileName: a.fileName });
-    log(res?.ok ? "info" : "warn", "his file field",
-      res?.ok ? `filled ${a.fileName}` : (res?.reason || "failed"));
-    setStatus(res?.ok ? "Ready to save in HIS" : `HIS field: ${res?.reason || "failed"}`, !res?.ok);
+    const added = res?.filesAfter != null ? (res.filesAfter > (res.filesBefore ?? 0)) : res?.ok;
+    log(added ? "info" : "warn", "his file field",
+      added ? `attached ${a.fileName} (${res.method || ""}, files ${res.filesAfter ?? "?"})` : (res?.reason || "not attached"));
+    setStatus(added ? "Ready to save in HIS (Insurance Card)" : `HIS attach: ${res?.reason || "failed"}`, !added);
   } catch (e) {
     log("warn", "his file field", String(e));
   }
@@ -293,19 +293,25 @@ function clearAllAttachments() {
 }
 
 let previewZoom = 1;
+let previewOpenToken = 0;
 
 function applyPreviewZoom() {
-  $("previewImg").style.transform = previewZoom === 1 ? "" : `scale(${previewZoom})`;
+  const c = $("previewContent");
+  if (c) c.style.transform = previewZoom === 1 ? "" : `scale(${previewZoom})`;
 }
 
-function openPreview(a) {
+async function openPreview(a) {
   const box = $("preview");
+  const pages = $("previewPages");
+  const img = $("previewImg");
   const pdf = isPdfAttachment(a);
+  const token = ++previewOpenToken;
   previewZoom = 1;
   applyPreviewZoom();
-  $("previewImg").style.display = pdf ? "none" : "";
-  $("previewImg").src = pdf ? "" : a.dataUrl;
-  $("previewPdf").style.display = pdf ? "flex" : "none";
+  pages.textContent = "";
+  pages.style.display = "none";
+  img.style.display = "none";
+  img.src = "";
   $("previewCap").textContent =
     `${a.fileName} · ${Math.round(a.size / 1024)} KB · ` +
     (a.source === "whatsapp" ? (a.chatName || "WhatsApp") : "HIS");
@@ -313,11 +319,48 @@ function openPreview(a) {
   box.scrollTop = 0;
   box.scrollLeft = 0;
   box.focus();
+
+  if (!pdf) {
+    img.src = a.dataUrl;
+    img.style.display = "block";
+    return;
+  }
+  // PDF: معاينة كاملة متعددة الصفحات (تحويل عبر الخادم — نفس صور)
+  pages.style.display = "flex";
+  const loading = document.createElement("div");
+  loading.textContent = "Loading PDF…";
+  loading.style.cssText = "color:#cbd5e1;font-size:12px;padding:20px;";
+  pages.appendChild(loading);
+  try {
+    const b64 = (a.dataUrl || "").split(",")[1] || "";
+    const res = await send({ type: "pdf:toPng", pdf_b64: b64, dpi: 170 });
+    if (token !== previewOpenToken) return; // فُتحت معاينة أخرى
+    pages.textContent = "";
+    const imgs = (res && res.ok && res.images) ? res.images : [];
+    if (!imgs.length) {
+      pages.textContent = "PDF preview unavailable";
+      pages.style.color = "#fca5a5";
+      return;
+    }
+    imgs.forEach((b, i) => {
+      const im = document.createElement("img");
+      im.src = `data:image/png;base64,${b}`;
+      im.alt = `${a.fileName} — page ${i + 1}/${imgs.length}`;
+      pages.appendChild(im);
+    });
+    $("previewCap").textContent += ` · ${imgs.length} page(s)`;
+  } catch (e) {
+    if (token !== previewOpenToken) return;
+    pages.textContent = "PDF preview failed";
+    pages.style.color = "#fca5a5";
+  }
 }
 
 function closePreview() {
+  previewOpenToken++;
   $("preview").style.display = "none";
   $("previewImg").src = "";
+  $("previewPages").textContent = "";
   previewZoom = 1;
   applyPreviewZoom();
 }
@@ -353,10 +396,18 @@ function renderAttachments() {
     cb.addEventListener("change", () => toggleAttachment(a.id));
     let thumb;
     if (isPdfAttachment(a)) {
-      thumb = document.createElement("div");
-      thumb.textContent = "PDF";
-      thumb.style.cssText =
-        "width:100%;height:64px;border-radius:6px;background:#eef2f7;color:#003057;font-size:12px;font-weight:800;letter-spacing:1px;display:flex;align-items:center;justify-content:center;margin-bottom:4px;";
+      // صورة مصغّرة للصفحة الأولى (تُولّد مرة واحدة وتُخزّن مؤقتاً)
+      if (a.thumbUrl) {
+        thumb = document.createElement("img");
+        thumb.src = a.thumbUrl;
+        thumb.style.cssText = "width:100%;height:64px;object-fit:cover;object-position:top;border-radius:6px;display:block;margin-bottom:4px;background:#fff;";
+      } else {
+        thumb = document.createElement("div");
+        thumb.textContent = "PDF";
+        thumb.style.cssText =
+          "width:100%;height:64px;border-radius:6px;background:#eef2f7;color:#003057;font-size:12px;font-weight:800;letter-spacing:1px;display:flex;align-items:center;justify-content:center;margin-bottom:4px;";
+        ensurePdfThumb(a, thumb);
+      }
     } else {
       thumb = document.createElement("img");
       thumb.src = a.dataUrl;
@@ -467,6 +518,28 @@ async function loadWaImages() {
 
 function isPdfAttachment(a) {
   return /pdf/i.test(a.mime || "") || /\.pdf$/i.test(a.fileName || "");
+}
+
+async function ensurePdfThumb(a, placeholder) {
+  if (a.thumbUrl || a._thumbLoading) return;
+  a._thumbLoading = true;
+  try {
+    const b64 = (a.dataUrl || "").split(",")[1] || "";
+    if (!b64) return;
+    const res = await send({ type: "pdf:toPng", pdf_b64: b64, dpi: 96, pages: 1 });
+    const img0 = res && res.ok && res.images && res.images[0];
+    if (!img0) return;
+    a.thumbUrl = `data:image/png;base64,${img0}`;
+    // استبدال العنصر النائب بصورة مصغّرة (إن كان ما يزال في الـDOM)
+    if (placeholder && placeholder.isConnected) {
+      const im = document.createElement("img");
+      im.src = a.thumbUrl;
+      im.style.cssText = "width:100%;height:64px;object-fit:cover;object-position:top;border-radius:6px;display:block;margin-bottom:4px;background:#fff;";
+      im.addEventListener("click", (e) => { e.stopPropagation(); openPreview(a); });
+      placeholder.replaceWith(im);
+    }
+  } catch (e) { /* صورة مصغّرة اختيارية — نتجاهل الفشل */ }
+  finally { a._thumbLoading = false; }
 }
 
 function attachmentsParts() {
@@ -783,14 +856,27 @@ $("manualId").addEventListener("keydown", (e) => {
 $("attachFromWa").addEventListener("click", (e) => { e.preventDefault(); loadWaImages(); });
 $("clearAttach").addEventListener("click", clearAllAttachments);
 $("preview").addEventListener("click", closePreview);
-// تكبير/تصغير المعاينة بعجلة الماوس (التمرير يسحب الصورة عند التكبير)
+// تكبير/تصغير نحو موضع الماوس (لا المركز) — مع تعويض تمرير الحاوية
 $("preview").addEventListener("wheel", (e) => {
   if ($("preview").style.display === "none") return;
   e.preventDefault();
   e.stopPropagation();
-  const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
-  previewZoom = Math.min(5, Math.max(0.4, previewZoom * factor));
+  const box = $("preview");
+  const content = $("previewContent");
+  if (!content) return;
+  const z = previewZoom;
+  const rect = content.getBoundingClientRect();
+  // موضع المؤشر بإحداثيات المحتوى غير المُكبّر
+  const lx = (e.clientX - rect.left) / (z || 1);
+  const ly = (e.clientY - rect.top) / (z || 1);
+  const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+  const z2 = Math.min(6, Math.max(0.4, z * factor));
+  if (z2 === z) return;
+  previewZoom = z2;
   applyPreviewZoom();
+  // أبقِ النقطة تحت المؤشر ثابتة
+  box.scrollLeft += lx * (z2 - z);
+  box.scrollTop += ly * (z2 - z);
 }, { passive: false });
 $("openOptions").addEventListener("click", (e) => {
   e.preventDefault();

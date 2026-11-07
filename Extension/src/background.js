@@ -107,17 +107,33 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           break;
         }
         case "his:fillFile": {
-          // وضع صورة الواتساب في حقل المستندات داخل صفحة المشفى (جاهزة للحفظ)
+          // إرفاق مستند واتساب في HIS (Insurance Card) — الجاهز للحفظ
           const tabs = await chrome.tabs.query({ url: HIS_TAB_PATTERNS }).catch(() => []);
           const hisTab = tabs.find((t) => t.active) || tabs[0];
           if (!hisTab) { sendResponse({ ok: false, reason: "no_his_tab" }); break; }
           try {
             const res = await chrome.scripting.executeScript({
               target: { tabId: hisTab.id },
+              world: "MAIN",
               args: [msg.dataUrl || "", msg.fileName || "attachment.jpg"],
               func: MCR_FillHisFile,
             });
             sendResponse(res?.[0]?.result || { ok: false, reason: "no_result" });
+          } catch (e) {
+            sendResponse({ ok: false, reason: String(e).slice(0, 120) });
+          }
+          break;
+        }
+        case "pdf:toPng": {
+          // تحويل PDF→صور (معاينة/مصغرات) عبر الخادم المحلي
+          try {
+            const body = { pdf_b64: msg.pdf_b64 || "", dpi: msg.dpi || 170 };
+            if (msg.pages) body.pages = msg.pages;
+            // حدّ الصفحات للمعاينة الكاملة يُدار بالخادم (≤24)؛ للمصغرات نمرر pages=1
+            const r = await insurerRequest("/api/insurer/pdf-to-png", {
+              method: "POST", body, timeoutMs: 60000,
+            });
+            sendResponse(r && r.ok ? r : { ok: false, reason: r?.error || "convert_failed" });
           } catch (e) {
             sendResponse({ ok: false, reason: String(e).slice(0, 120) });
           }
@@ -609,9 +625,10 @@ function MCR_PrintComposite(parts, title) {
     try {
       const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[c]);
       let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(title)}</title>`;
-      html += `<style>@page{size:A4;margin:7mm 8mm;}*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;margin:0;color:#111;line-height:1.3}.section{page-break-after:always}.section:last-child{page-break-after:auto}h2{font-size:13px;border-bottom:1.2px solid #003057;padding-bottom:4px;margin:0 0 7px;color:#003057;letter-spacing:.4px}.sub{font-size:8px;color:#666;margin-bottom:6px}img{max-width:100%;max-height:88vh;height:auto;display:block;margin:0 auto}embed,iframe{width:100%;height:88vh;display:block;margin:0 auto;border:none;background:#fff}</style></head><body>`;
+      // بلا عناوين/تسميات — كل مستند/صورة يُطبع كما هو في ورقته (تجميع فقط)
+      html += `<style>@page{size:A4;margin:7mm 8mm;}*{box-sizing:border-box}html,body{margin:0;padding:0}.section{page-break-after:always;break-after:page}.section:last-child{page-break-after:auto;break-after:auto}img{max-width:100%;max-height:100vh;width:auto;height:auto;display:block;margin:0 auto;page-break-inside:avoid;break-inside:avoid}embed,iframe{width:100%;height:100vh;display:block;margin:0;border:none}</style></head><body>`;
       for (const p of parts) {
-        html += `<div class="section"><h2>${esc(p.label || "Document")}</h2>`;
+        html += `<div class="section">`;
         if (p.type === "html") {
           const c = String(p.content || "");
           if (/<html[\s>]/i.test(c)) {
@@ -620,15 +637,13 @@ function MCR_PrintComposite(parts, title) {
             html += `<iframe src="${u}" loading="eager"></iframe>`;
             setTimeout(() => URL.revokeObjectURL(u), 60000);
           } else {
-            html += `<div style="font-size:10.5px">${c}</div>`;
+            html += c;
           }
         } else if (p.type === "pdf") {
-          // احتياط فقط: PDF داخل HTML يُطبع صفحته الأولى — المسار الأساسي
-          // يُحوّل PDF إلى صور قبل الوصول إلى هنا (pdfPartsToImages)
+          // احتياط فقط: يُحوّل PDF إلى صور قبل الوصول إلى هنا (pdfPartsToImages)
           html += `<embed type="application/pdf" src="${esc(p.dataUrl)}">`;
         } else if (p.type === "image") {
-          html += `<img src="${esc(p.dataUrl)}" alt="${esc(p.label || "attachment")}">`;
-          if (p.caption) html += `<div class="sub">${esc(p.caption)}</div>`;
+          html += `<img src="${esc(p.dataUrl)}" alt="">`;
         }
         html += `</div>`;
       }
@@ -667,81 +682,105 @@ function MCR_PrintComposite(parts, title) {
   })();
 }
 
-// وضع صورة في حقل المستندات input[type=file] داخل صفحة المشفى ليكون
-// جاهزاً للحفظ — يبحث عن معالج Angular (مُصغّر الاسم) ويستدعيه مباشرة
-// لضمان تعبئة Patimage/filePreview (مسار resize عبر ng2ImgMax قد يتعطل)
-// مع إرسال change/input كاحتياط.
+// إرفاق مستند واتساب في قسم «Attach Documents» بتسجيل المريض (Insurance Card)
+// — التدفق الصحيح: مكوّن vt (عبر __ngContext__ من #txtDoctype) يملك
+// Doctype_id/Fileslist/GetSelectefiles؛ نضبط النوع=Insurance Card ونستدعي
+// GetSelectefiles مباشرة (يتجاوز غياب #txtChoosefile وشرط *ngIf والحقل المعطّل)
+// فيُضاف المستند إلى Fileslist ⇒ جاهز للحفظ.
 function MCR_FillHisFile(dataUrl, fileName) {
   return (async () => {
     try {
-      const inp = document.querySelector("input[type=file]");
-      if (!inp) return { ok: false, reason: "no_file_input" };
       const s = String(dataUrl || "");
       const comma = s.indexOf(",");
       if (comma < 0) return { ok: false, reason: "bad_data_url" };
-      const mime = ((/^data:([^;,]+)/.exec(s) || [])[1]) || "image/jpeg";
+      const mime = ((/^data:([^;,]+)/.exec(s) || [])[1]) || "application/octet-stream";
       const bin = atob(s.slice(comma + 1));
       const u8 = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
       const file = new File([u8], fileName || "attachment.jpg", { type: mime });
-      const dt = new DataTransfer();
-      dt.items.add(file);
-      inp.files = dt.files;
 
-      // البحث عن مكوّن Angular الذي يملك معالج الملف عبر __ngContext__
-      const findHandler = (lv, depth, seen, wantNoResize) => {
-        if (!lv || depth > 6 || typeof lv !== "object" || seen.has(lv)) return null;
-        seen.add(lv);
-        const check = (v) => {
-          if (!v || typeof v !== "object" || Array.isArray(v) || typeof v.nodeType === "number") return null;
-          const proto = Object.getPrototypeOf(v);
-          if (!proto || proto === Object.prototype) return null;
-          for (const n of Object.getOwnPropertyNames(proto)) {
-            try {
-              if (typeof v[n] !== "function" || n === "constructor") continue;
-              const src = v[n].toString();
-              if (!src.includes("readAsDataURL") || !src.includes("Patimage")) continue;
-              const noResize = !src.includes("resizeImage") && !src.includes("ng2ImgMax");
-              if (wantNoResize ? noResize : src.includes("target.files")) return { comp: v, method: n };
-            } catch (e2) { /* تخطٍ */ }
-          }
-          return null;
-        };
-        if (Array.isArray(lv) || typeof lv.length === "number") {
-          for (let i = 0, lim = Math.min(lv.length || 0, 600); i < lim; i++) {
-            try {
-              const r = check(lv[i]); if (r) return r;
-              if (Array.isArray(lv[i])) { const r2 = findHandler(lv[i], depth + 1, seen, wantNoResize); if (r2) return r2; }
-            } catch (e2) { /* تخطٍ */ }
+      // 1) العثور على مكوّن تسجيل المريض (vt) بالوظيفة — الاسم مُصغّر
+      function findVt() {
+        let el = document.getElementById("txtDoctype");
+        for (let c = el, i = 0; c && i < 90; i++, c = c.parentElement) {
+          const ctx = c.__ngContext__;
+          if (!Array.isArray(ctx)) continue;
+          for (let j = ctx.length - 1; j >= 0; j--) {
+            const v = ctx[j];
+            if (v && typeof v === "object" && !v.nodeType &&
+                typeof v.GetSelectefiles === "function" && "Fileslist" in v && "Doctype_id" in v) return v;
           }
         }
-        return check(lv);
-      };
-
-      const starts = [
-        document.querySelector("app-patient-details"),
-        document.getElementById("divUploadPh"),
-        document.querySelector("form"),
-      ].filter((el) => el && el.__ngContext__);
-
-      let invoked = false;
-      for (const el of starts) {
-        // نُفضّل مسار بلا تحجيم (onFileChangedwithoutresize) لضمان اكتمال التعبئة
-        const h = findHandler(el.__ngContext__, 0, new WeakSet(), true) ||
-                  findHandler(el.__ngContext__, 0, new WeakSet(), false);
-        if (h) {
-          h.comp[h.method]({ target: inp });
-          invoked = true;
-          break;
+        // مسح أوسع كاحتياط
+        for (const root of [document.querySelector("app-patient-details"), document.querySelector("form"), document.body]) {
+          if (!root || !root.__ngContext__) continue;
+          const stack = [root.__ngContext__]; const seen = new WeakSet();
+          while (stack.length) {
+            const lv = stack.pop();
+            if (!lv || typeof lv !== "object" || seen.has(lv)) continue; seen.add(lv);
+            if (!Array.isArray(lv) && !lv.nodeType) {
+              if (typeof lv.GetSelectefiles === "function" && "Fileslist" in lv && "Doctype_id" in lv) return lv;
+            }
+            if (Array.isArray(lv) || typeof lv.length === "number") {
+              for (let k = 0, lim = Math.min(lv.length || 0, 600); k < lim; k++) {
+                try { if (lv[k] && typeof lv[k] === "object") stack.push(lv[k]); } catch (e2) {}
+              }
+            }
+          }
         }
+        return null;
       }
-      if (!invoked) {
-        inp.dispatchEvent(new Event("input", { bubbles: true }));
-        inp.dispatchEvent(new Event("change", { bubbles: true }));
+
+      const vt = findVt();
+      if (vt) {
+        // 2) Insurance Card (FileType_Id = 1)
+        vt.Doctype_id = "1";
+        const sel = document.getElementById("txtDoctype");
+        if (sel) {
+          sel.value = "1";
+          try { sel.dispatchEvent(new Event("change", { bubbles: true })); } catch (e2) {}
+          try { sel.dispatchEvent(new Event("input", { bubbles: true })); } catch (e2) {}
+        }
+        // سياق المريض لحفظ الملفات (SaveDocsFile يتطلب Pat_id)
+        try {
+          const patId = (vt.Patient && (vt.Patient.controls?.PAT_ID?.value ?? vt.Patient.PAT_ID)) ||
+                        (vt.PatHistForm && vt.PatHistForm.PH_No) || null;
+          if (vt._patimgservice && !vt._patimgservice.Pat_id && patId) vt._patimgservice.Pat_id = patId;
+          if (vt._patimgservice && !vt._patimgservice.Ph_no && vt.PatHistForm && vt.PatHistForm.PH_No)
+            vt._patimgservice.Ph_no = vt.PatHistForm.PH_No;
+        } catch (e2) { /* غير حرج */ }
+
+        if (Array.isArray(vt.FileCatList) && !vt.FileCatList.length) {
+          // FileCatList فارغة — أعد تحميلها إن أمكن
+          try { if (typeof vt.GetFilesType === "function") vt.GetFilesType(); } catch (e2) {}
+        }
+
+        const before = Array.isArray(vt.Fileslist) ? vt.Fileslist.length : 0;
+        vt.GetSelectefiles({ target: { files: [file] } }); // FileReader غير متزامن ⇒ Fileslist يُحدَّث
+        await new Promise((r) => setTimeout(r, 600)); // مهلة لالتقاط قراءة الملف
+        const after = Array.isArray(vt.Fileslist) ? vt.Fileslist.length : 0;
+        return { ok: true, name: file.name, size: file.size, method: "vt.GetSelectefiles", doctype: "Insurance Card", filesBefore: before, filesAfter: after };
       }
-      return { ok: true, name: file.name, size: file.size, invoked };
+
+      // 3) احتياط: إن وُجد #txtChoosefile فعلاً، اضبط النوع وضع الملف فيه
+      const sel2 = document.getElementById("txtDoctype");
+      if (sel2) { sel2.value = "1"; try { sel2.dispatchEvent(new Event("change", { bubbles: true })); } catch (e2) {} }
+      const choose = document.getElementById("txtChoosefile");
+      if (choose) {
+        const dt = new DataTransfer(); dt.items.add(file); choose.files = dt.files;
+        choose.dispatchEvent(new Event("change", { bubbles: true }));
+        return { ok: true, name: file.name, size: file.size, method: "txtChoosefile" };
+      }
+
+      // 4) آخر احتياط: أي file input (السلوك القديم لصورة الملف الشخصي)
+      const inp = document.querySelector("input[type=file]");
+      if (!inp) return { ok: false, reason: "no_upload_target" };
+      const dt = new DataTransfer(); dt.items.add(file); inp.files = dt.files;
+      inp.dispatchEvent(new Event("input", { bubbles: true }));
+      inp.dispatchEvent(new Event("change", { bubbles: true }));
+      return { ok: true, name: file.name, size: file.size, method: "generic" };
     } catch (e) {
-      return { ok: false, reason: String((e && e.message) || e).slice(0, 120) };
+      return { ok: false, reason: String((e && e.message) || e).slice(0, 140) };
     }
   })();
 }

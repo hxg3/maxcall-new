@@ -78,18 +78,23 @@ async function fetchLastWaImages(limit = 5) {
     /^(data:image|blob:)/.test(el.currentSrc || el.src || ""));
 
   function keyFor(el, idx) {
+    // أولوية: data-id لمُضمِّن الرسالة (ثابت لكل رسالة — يجمع كل نسخ
+    // الدقة/المعاينة الثلاث لصورة واحدة). msgKey غير موثوق في إصدارات واتساب
+    // الحديثة (أحياناً لا يُستخرج)، لذلك data-id أولاً.
+    let node = el;
+    for (let d = 0; node && d < 20; d++, node = node.parentElement) {
+      const did = node.getAttribute && node.getAttribute("data-id");
+      if (did) return "id:" + did;
+    }
     try {
       const p = reactProps(el);
       const child = p && p.children && p.children[0];
       const mk = child && child.props && child.props.msgKey;
       if (mk) return "mk:" + JSON.stringify(mk);
-    } catch (e) { /* نكمل بالمفاتيح البديلة */ }
-    let node = el;
-    for (let d = 0; node && d < 14; d++, node = node.parentElement) {
-      const did = node.getAttribute && node.getAttribute("data-id");
-      if (did) return "id:" + did;
-    }
-    return "src:" + (el.currentSrc || el.src || idx);
+    } catch (e) { /* نكمل بالمفتاح الاحتياطي */ }
+    // احتياط أخير: بصمة المصدر (بدون فهرس الموقع قدر الإمكان)
+    const src = el.currentSrc || el.src || "";
+    return src ? "src:" + src.slice(0, 48) + "#" + src.slice(-48) : "idx:" + idx;
   }
 
   // التجميع: مفتاح الرسالة → أنشط الصور فيها (بترتيب الظهور في DOM)

@@ -474,15 +474,20 @@ def insurer_pdf_to_png():
             subprocess.run(cmd, check=True, capture_output=True, timeout=90)
         except Exception as e:
             return jsonify({"ok": False, "error": f"gs_failed:{e}"}), 500
-        pages = sorted(glob.glob(os.path.join(td, "p-*.png")))
-        if not pages:
+        all_pages = sorted(glob.glob(os.path.join(td, "p-*.png")))
+        if not all_pages:
             return jsonify({"ok": False, "error": "no_pages"}), 500
-        pages = pages[:24]  # سقف أمان لعدد الصفحات
+        try:
+            max_pages = int(d.get("pages") or 0)
+        except Exception:
+            max_pages = 0
+        limit_pages = max_pages if 1 <= max_pages <= 24 else 24
+        pages = all_pages[:limit_pages]
         images = []
         for p in pages:
             with open(p, "rb") as f:
                 images.append(_b64.b64encode(f.read()).decode("ascii"))
-    return jsonify({"ok": True, "images": images, "pages": len(images)})
+    return jsonify({"ok": True, "images": images, "pages": len(images), "total": len(all_pages)})
 
 
 @app.route("/api/agent/login", methods=["POST"])
