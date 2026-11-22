@@ -421,7 +421,11 @@ LRESULT CmainDlg::onCallState(WPARAM wParam, LPARAM lParam)
 	}
 
 	if (call_info->role == PJSIP_ROLE_UAC) {
-		if (call_info->last_status == 180 && !call_info->media_cnt) {
+		// Local ringback is only for short internal extensions (e.g. 101).
+		// For external numbers the PBX supplies ringing in-band, so playing
+		// our own wav would duplicate it.
+		BOOL isInternalNumber = !sipuri.user.IsEmpty() && sipuri.user.GetLength() <= 3;
+		if (isInternalNumber && call_info->last_status == 180 && !call_info->media_cnt) {
 			if (toneCalls.IsEmpty()) {
 				PostMessage(WM_TIMER, IDT_TIMER_TONE, NULL);
 				SetTimer(IDT_TIMER_TONE, 4500, NULL);

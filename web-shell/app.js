@@ -51,6 +51,10 @@ let _contacts = [];
 const _callMeta = new Map();
 /** @type {string} Last dialed number (marks direction=out on ended). */
 let _lastDialed = '';
+/** @type {boolean} Whether the outbound call confirmation dialog is open. */
+let _callConfirmOpen = false;
+/** @type {string} Number waiting for confirmation. */
+let _callConfirmNumber = '';
 
 /**
  * Format seconds as m:ss.
@@ -850,12 +854,46 @@ function _applyLogFilter(query) {
   });
 }
 
+/** Open the outbound-call confirmation (Enter, then Enter again to call). */
+function _openCallConfirm(number) {
+  const n = String(number || '').trim();
+  if (!n) return;
+  const dlg = document.getElementById('callConfirmDialog');
+  if (!dlg) { MaxCallBridge.makeCall(n); return; }
+  _callConfirmNumber = n;
+  const label = document.getElementById('callConfirmNumber');
+  if (label) label.textContent = n;
+  dlg.classList.remove('hidden');
+  dlg.classList.add('flex');
+  _callConfirmOpen = true;
+  // Focus the panel, not the button, so a second Enter is handled once by
+  // the document listener instead of also triggering a native button click.
+  document.getElementById('callConfirmPanel')?.focus();
+}
+
+function _closeCallConfirm() {
+  const dlg = document.getElementById('callConfirmDialog');
+  if (dlg) { dlg.classList.add('hidden'); dlg.classList.remove('flex'); }
+  _callConfirmOpen = false;
+  _callConfirmNumber = '';
+  document.getElementById('dialInput')?.focus();
+}
+
+/** Place the call through the same bridge path used by the Call button. */
+function _confirmCall() {
+  if (!_callConfirmOpen) return;
+  const n = _callConfirmNumber;
+  _closeCallConfirm();
+  if (n) MaxCallBridge.makeCall(n);
+}
+
 /**
  * Switch visible tab panel.
  * @param {string} id Panel id: tabDial|tabContacts|tabLog.
  * @returns {void}
  */
 function _switchTab(id) {
+  if (_callConfirmOpen) _closeCallConfirm();
   ['tabDial', 'tabContacts', 'tabLog', 'tabFeedback'].forEach((t) => document.getElementById(t)?.classList.add('hidden'));
   document.getElementById(id)?.classList.remove('hidden');
   document.querySelectorAll('.tab-btn').forEach((b) => {
@@ -901,6 +939,53 @@ function _wireUI() {
     b.addEventListener('click', () => _switchTab(b.dataset.tab)));
 
   const input = document.getElementById('dialInput');
+
+  /** Bring the dial pad forward and focus its input before typing a number. */
+  function _startDialTyping() {
+    if (document.getElementById('tabDial')?.classList.contains('hidden')) _switchTab('tabDial');
+    input?.focus();
+  }
+
+  // Keyboard-first dialing: type a number anywhere in the window, Enter to
+  // review, Enter again to confirm. Modal dialogs always own the keyboard.
+  document.addEventListener('keydown', (e) => {
+    if (_callConfirmOpen) {
+      if (e.key === 'Enter') { e.preventDefault(); _confirmCall(); }
+      else if (e.key === 'Escape') { e.preventDefault(); _closeCallConfirm(); }
+      return;
+    }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (!document.getElementById('fbDialog')?.classList.contains('hidden')) return;
+    const ae = document.activeElement;
+    const inField = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable);
+
+    if (e.key === 'Enter') {
+      if (ae === input && input?.value.trim()) {
+        e.preventDefault();
+        _openCallConfirm(input.value.trim());
+      }
+      return;
+    }
+    if (e.key === 'Escape') {
+      if (ae === input && input) { input.value = ''; input.blur(); }
+      return;
+    }
+    if (_inCall) return;
+    if (/^[0-9+*#]$/.test(e.key)) {
+      if (inField && ae !== input) return;
+      e.preventDefault();
+      _startDialTyping();
+      if (input) input.value += e.key;
+      return;
+    }
+    if (e.key === 'Backspace') {
+      if (inField && ae !== input) return;
+      e.preventDefault();
+      _startDialTyping();
+      if (input) input.value = input.value.slice(0, -1);
+    }
+  });
+
   let zeroTimer = null;
   let zeroLong = false;
   const zeroBtn = document.querySelector('[data-digit="0"]');
@@ -935,8 +1020,12 @@ function _wireUI() {
     if (input) input.value = input.value.slice(0, -1);
   });
 
-  document.getElementById('btnCall')?.addEventListener('click', () =>
-    MaxCallBridge.makeCall(input?.value.trim()));
+  document.getElementById('btnCall')?.addEventListener('click', () => {
+    const n = input?.value.trim() || '';
+    if (n) _openCallConfirm(n);
+  });
+  document.getElementById('callConfirmCancel')?.addEventListener('click', _closeCallConfirm);
+  document.getElementById('callConfirmCall')?.addEventListener('click', _confirmCall);
   document.getElementById('btnHangup')?.addEventListener('click', () => MaxCallBridge.hangup(undefined));
   document.getElementById('btnPopup')?.addEventListener('click', () =>
     MaxCallBridge.openPopup(input?.value.trim() || _callMeta.get(_currentCallId)?.number));

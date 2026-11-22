@@ -268,6 +268,24 @@
         </div>
       </div>
     </div>
+
+    <!-- Outbound call confirmation: Enter once to review, Enter again to call -->
+    <div id="callConfirmDialog" class="fixed inset-0 z-[60] hidden items-center justify-center bg-slate-900/50 p-4" role="dialog" aria-modal="true" aria-labelledby="callConfirmTitle">
+      <div id="callConfirmPanel" tabindex="-1" class="w-full max-w-[260px] rounded-2xl bg-white p-4 shadow-2xl outline-none">
+        <div class="flex items-start gap-2">
+          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-600"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L8 10a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2Z"/></svg></span>
+          <div class="min-w-0">
+            <p id="callConfirmTitle" class="text-xs font-bold">Confirm call</p>
+            <p id="callConfirmNumber" class="truncate text-base font-bold text-slate-800" dir="ltr"></p>
+          </div>
+        </div>
+        <p class="mt-2 text-[11px] text-slate-400">Enter again to call · Esc to cancel</p>
+        <div class="mt-3 flex gap-2">
+          <button id="callConfirmCancel" class="flex-1 rounded-xl bg-slate-100 py-1.5 text-xs font-bold text-slate-600 active:scale-95">Cancel</button>
+          <button id="callConfirmCall" class="flex-1 rounded-xl bg-emerald-500 py-1.5 text-xs font-bold text-white active:scale-95">Call</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script src="./app.js"></script>

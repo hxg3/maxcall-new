@@ -210,6 +210,7 @@ Check your Browserslist config to be sure that your targets are set up correctly
       <button id="tabBtnDial" role="tab" aria-controls="tabDial" data-tab="tabDial" class="tab-btn flex flex-1 items-center justify-center gap-1 rounded-full bg-brand px-2 py-1.5 text-xs font-bold text-white"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L8 10a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2Z"/></svg><span>Dial</span></button>
       <button id="tabBtnContacts" role="tab" aria-controls="tabContacts" data-tab="tabContacts" class="tab-btn flex flex-1 items-center justify-center gap-1 rounded-full px-2 py-1.5 text-xs font-medium text-slate-400 hover:text-slate-600"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/></svg><span>Contacts</span></button>
       <button id="tabBtnLog" role="tab" aria-controls="tabLog" data-tab="tabLog" class="tab-btn flex flex-1 items-center justify-center gap-1 rounded-full px-2 py-1.5 text-xs font-medium text-slate-400 hover:text-slate-600"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg><span>Log</span></button>
+      <button id="tabBtnFeedback" role="tab" aria-controls="tabFeedback" data-tab="tabFeedback" class="tab-btn flex flex-1 items-center justify-center gap-1 rounded-full px-2 py-1.5 text-xs font-medium text-slate-400 hover:text-slate-600"><span class="relative inline-flex"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2m-6 7h6m-6 4h4"/></svg><span id="feedbackCountBadge" class="hidden absolute -top-1.5 -right-2 min-w-[15px] rounded-full bg-rose-500 px-1 text-center text-[9px] font-bold leading-[15px] text-white ring-2 ring-white">0</span></span><span>Tasks</span></button>
     </nav>
 
     <main class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
@@ -301,10 +302,74 @@ Check your Browserslist config to be sure that your targets are set up correctly
         <div id="logList" class="h-[248px] max-h-[248px] space-y-1.5 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"></div>
         <p id="logEmpty" class="rounded-2xl border border-dashed border-slate-200 px-3 py-6 text-center text-xs text-slate-400">No calls logged yet.</p>
       </section>
+
+      <!-- 6. Feedback / Tasks -->
+      <section id="tabFeedback" role="tabpanel" class="hidden space-y-2">
+        <div class="flex gap-0.5 rounded-full bg-slate-100 p-0.5" role="tablist" aria-label="Task views">
+          <button id="fbSubNew" role="tab" aria-controls="fbPaneNew" class="flex flex-1 items-center justify-center gap-1 rounded-full px-2 py-1 text-[11px] font-bold text-slate-800 shadow-sm"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3 w-3"><path stroke-linecap="round" stroke-linejoin="round" d="M13 19 21 12l-8-7M21 12H9a6 6 0 0 0-6 6v2"/></svg><span>New</span><span id="fbNewCount" class="font-medium text-slate-400">0</span></button>
+          <button id="fbSubMy" role="tab" aria-controls="fbPaneMy" class="flex flex-1 items-center justify-center gap-1 rounded-full px-2 py-1 text-[11px] font-medium text-slate-400"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3 w-3"><path stroke-linecap="round" stroke-linejoin="round" d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="m16 11 2 2 4-4"/></svg><span>My</span><span id="fbMyCount" class="font-medium text-slate-400">0</span></button>
+        </div>
+        <div id="fbPaneNew" role="tabpanel">
+          <div id="feedbackList" class="h-[300px] max-h-[300px] space-y-1.5 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"></div>
+          <p id="feedbackEmpty" class="rounded-2xl border border-dashed border-slate-200 px-3 py-6 text-center text-xs text-slate-400">No tasks due right now.</p>
+        </div>
+        <div id="fbPaneMy" role="tabpanel" class="hidden">
+          <div id="myList" class="h-[300px] max-h-[300px] space-y-1.5 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"></div>
+          <p id="myEmpty" class="rounded-2xl border border-dashed border-slate-200 px-3 py-6 text-center text-xs text-slate-400">Nothing here. Call a task from New and it moves to My.</p>
+        </div>
+        <div id="feedbackError" class="hidden rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 flex items-center gap-2">
+          <span>Failed to load list</span>
+          <button id="feedbackRetry" type="button" class="underline hover:text-rose-900">Retry</button>
+        </div>
+      </section>
     </main>
 
     <div id="msgToast" class="fixed bottom-3 left-1/2 hidden w-[280px] max-w-[calc(100%-1.5rem)] -translate-x-1/2 rounded-xl bg-slate-900 px-3 py-2 shadow-xl">
       <p id="msgText" class="text-xs text-white"></p>
+    </div>
+
+    <!-- Feedback recording dialog (opened from a My task) -->
+    <div id="fbDialog" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/40 p-4">
+      <div class="w-full max-w-[260px] rounded-2xl bg-white p-4 shadow-2xl">
+        <div class="flex items-start gap-2">
+          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-teal-50 text-teal-700"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4"><path stroke-linecap="round" stroke-linejoin="round" d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M10.3 21a2 2 0 0 0 3.4 0"/></svg></span>
+          <div class="min-w-0">
+            <p class="text-xs font-bold">Record feedback</p>
+            <p id="fbDialogWho" class="truncate text-[11px] text-slate-400" dir="ltr"></p>
+          </div>
+        </div>
+        <p class="mt-3 text-[10px] font-medium uppercase tracking-wide text-slate-400">Satisfaction</p>
+        <div id="fbScoreRow" class="mt-1 flex gap-1">
+          <button data-score="1" class="h-7 flex-1 rounded-lg bg-slate-100 text-xs font-bold text-slate-500 active:scale-95">1</button>
+          <button data-score="2" class="h-7 flex-1 rounded-lg bg-slate-100 text-xs font-bold text-slate-500 active:scale-95">2</button>
+          <button data-score="3" class="h-7 flex-1 rounded-lg bg-slate-100 text-xs font-bold text-slate-500 active:scale-95">3</button>
+          <button data-score="4" class="h-7 flex-1 rounded-lg bg-slate-100 text-xs font-bold text-slate-500 active:scale-95">4</button>
+          <button data-score="5" class="h-7 flex-1 rounded-lg bg-slate-100 text-xs font-bold text-slate-500 active:scale-95">5</button>
+        </div>
+        <textarea id="fbComment" rows="2" placeholder="Comment (optional)…" class="mt-2 w-full resize-none rounded-xl bg-slate-50 px-2.5 py-1.5 text-xs outline-none ring-1 ring-slate-200 placeholder:text-slate-400 focus:ring-teal-500"></textarea>
+        <div class="mt-3 flex gap-2">
+          <button id="fbDialogCancel" class="flex-1 rounded-xl bg-slate-100 py-1.5 text-xs font-bold text-slate-600 active:scale-95">Cancel</button>
+          <button id="fbDialogSubmit" class="flex-1 rounded-xl bg-brand py-1.5 text-xs font-bold text-white active:scale-95">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Outbound call confirmation: Enter once to review, Enter again to call -->
+    <div id="callConfirmDialog" class="fixed inset-0 z-[60] hidden items-center justify-center bg-slate-900/50 p-4" role="dialog" aria-modal="true" aria-labelledby="callConfirmTitle">
+      <div id="callConfirmPanel" tabindex="-1" class="w-full max-w-[260px] rounded-2xl bg-white p-4 shadow-2xl outline-none">
+        <div class="flex items-start gap-2">
+          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-600"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L8 10a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2Z"/></svg></span>
+          <div class="min-w-0">
+            <p id="callConfirmTitle" class="text-xs font-bold">Confirm call</p>
+            <p id="callConfirmNumber" class="truncate text-base font-bold text-slate-800" dir="ltr"></p>
+          </div>
+        </div>
+        <p class="mt-2 text-[11px] text-slate-400">Enter again to call · Esc to cancel</p>
+        <div class="mt-3 flex gap-2">
+          <button id="callConfirmCancel" class="flex-1 rounded-xl bg-slate-100 py-1.5 text-xs font-bold text-slate-600 active:scale-95">Cancel</button>
+          <button id="callConfirmCall" class="flex-1 rounded-xl bg-emerald-500 py-1.5 text-xs font-bold text-white active:scale-95">Call</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -362,6 +427,10 @@ let _contacts = [];
 const _callMeta = new Map();
 /** @type {string} Last dialed number (marks direction=out on ended). */
 let _lastDialed = '';
+/** @type {boolean} Whether the outbound call confirmation dialog is open. */
+let _callConfirmOpen = false;
+/** @type {string} Number waiting for confirmation. */
+let _callConfirmNumber = '';
 
 /**
  * Format seconds as m:ss.
@@ -644,6 +713,43 @@ const MaxCallBridge = {
     _postToNative({ action: 'dismissUpdate' });
     _emit('update-dismissed', { state: _updateState, dismissed: true });
   },
+
+  /**
+   * Request the feedback task queue from C++ (via the bridge → server).
+   * @returns {void}
+   */
+  feedbackQueue() { _postToNative({ action: 'feedbackQueue' }); },
+
+  /**
+   * Request this agent's claimed (in-progress) feedback tasks from C++.
+   * @returns {void}
+   */
+  feedbackMy() { _postToNative({ action: 'feedbackMy' }); },
+
+  /**
+   * Claim a feedback task.
+   * @param {number|string} taskId Task id.
+   * @returns {void}
+   */
+  feedbackClaim(taskId) { _postToNative({ action: 'feedbackClaim', taskId: String(taskId) }); },
+
+  /**
+   * Respond to a feedback task.
+   * @param {number|string} taskId Task id.
+   * @param {string} outcome One of done|no_answer|refused|wrong_number|callback_later|not_applicable.
+   * @param {object} [fields] Extra fields (score, categories, comment, duration_sec, next_attempt_at).
+   * @returns {void}
+   */
+  feedbackRespond(taskId, outcome, fields = {}) {
+    _postToNative({ action: 'feedbackRespond', taskId: String(taskId), outcome, ...fields });
+  },
+
+  /**
+   * Skip a feedback task.
+   * @param {number|string} taskId Task id.
+   * @returns {void}
+   */
+  feedbackSkip(taskId) { _postToNative({ action: 'feedbackSkip', taskId: String(taskId) }); },
 
   // ---------- Receivers: C++ -> JS (called via ExecuteScript) ----------
 
@@ -1124,13 +1230,47 @@ function _applyLogFilter(query) {
   });
 }
 
+/** Open the outbound-call confirmation (Enter, then Enter again to call). */
+function _openCallConfirm(number) {
+  const n = String(number || '').trim();
+  if (!n) return;
+  const dlg = document.getElementById('callConfirmDialog');
+  if (!dlg) { MaxCallBridge.makeCall(n); return; }
+  _callConfirmNumber = n;
+  const label = document.getElementById('callConfirmNumber');
+  if (label) label.textContent = n;
+  dlg.classList.remove('hidden');
+  dlg.classList.add('flex');
+  _callConfirmOpen = true;
+  // Focus the panel, not the button, so a second Enter is handled once by
+  // the document listener instead of also triggering a native button click.
+  document.getElementById('callConfirmPanel')?.focus();
+}
+
+function _closeCallConfirm() {
+  const dlg = document.getElementById('callConfirmDialog');
+  if (dlg) { dlg.classList.add('hidden'); dlg.classList.remove('flex'); }
+  _callConfirmOpen = false;
+  _callConfirmNumber = '';
+  document.getElementById('dialInput')?.focus();
+}
+
+/** Place the call through the same bridge path used by the Call button. */
+function _confirmCall() {
+  if (!_callConfirmOpen) return;
+  const n = _callConfirmNumber;
+  _closeCallConfirm();
+  if (n) MaxCallBridge.makeCall(n);
+}
+
 /**
  * Switch visible tab panel.
  * @param {string} id Panel id: tabDial|tabContacts|tabLog.
  * @returns {void}
  */
 function _switchTab(id) {
-  ['tabDial', 'tabContacts', 'tabLog'].forEach((t) => document.getElementById(t)?.classList.add('hidden'));
+  if (_callConfirmOpen) _closeCallConfirm();
+  ['tabDial', 'tabContacts', 'tabLog', 'tabFeedback'].forEach((t) => document.getElementById(t)?.classList.add('hidden'));
   document.getElementById(id)?.classList.remove('hidden');
   document.querySelectorAll('.tab-btn').forEach((b) => {
     const active = b.dataset.tab === id;
@@ -1143,6 +1283,28 @@ function _switchTab(id) {
   if (id === 'tabDial') document.getElementById('dialInput')?.focus();
   else if (id === 'tabContacts') document.getElementById('contactSearch')?.focus();
   else if (id === 'tabLog') document.getElementById('logSearch')?.focus();
+  else if (id === 'tabFeedback') { _fetchFeedbackQueue(); _fetchFeedbackMy(); }
+}
+
+/**
+ * Switch between the New and My panes inside the Tasks section.
+ * @param {string} which 'new' or 'my'.
+ * @returns {void}
+ */
+function _switchFeedbackSub(which) {
+  const isNew = which !== 'my';
+  [['fbSubNew', true], ['fbSubMy', false]].forEach(([id, cond]) => {
+    const b = document.getElementById(id);
+    if (!b) return;
+    const on = cond === isNew;
+    b.classList.toggle('shadow-sm', on);
+    b.classList.toggle('font-bold', on);
+    b.classList.toggle('text-slate-800', on);
+    b.classList.toggle('font-medium', !on);
+    b.classList.toggle('text-slate-400', !on);
+  });
+  document.getElementById('fbPaneNew')?.classList.toggle('hidden', !isNew);
+  document.getElementById('fbPaneMy')?.classList.toggle('hidden', isNew);
 }
 
 /** Wire up all DOM controls. */
@@ -1153,6 +1315,53 @@ function _wireUI() {
     b.addEventListener('click', () => _switchTab(b.dataset.tab)));
 
   const input = document.getElementById('dialInput');
+
+  /** Bring the dial pad forward and focus its input before typing a number. */
+  function _startDialTyping() {
+    if (document.getElementById('tabDial')?.classList.contains('hidden')) _switchTab('tabDial');
+    input?.focus();
+  }
+
+  // Keyboard-first dialing: type a number anywhere in the window, Enter to
+  // review, Enter again to confirm. Modal dialogs always own the keyboard.
+  document.addEventListener('keydown', (e) => {
+    if (_callConfirmOpen) {
+      if (e.key === 'Enter') { e.preventDefault(); _confirmCall(); }
+      else if (e.key === 'Escape') { e.preventDefault(); _closeCallConfirm(); }
+      return;
+    }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (!document.getElementById('fbDialog')?.classList.contains('hidden')) return;
+    const ae = document.activeElement;
+    const inField = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable);
+
+    if (e.key === 'Enter') {
+      if (ae === input && input?.value.trim()) {
+        e.preventDefault();
+        _openCallConfirm(input.value.trim());
+      }
+      return;
+    }
+    if (e.key === 'Escape') {
+      if (ae === input && input) { input.value = ''; input.blur(); }
+      return;
+    }
+    if (_inCall) return;
+    if (/^[0-9+*#]$/.test(e.key)) {
+      if (inField && ae !== input) return;
+      e.preventDefault();
+      _startDialTyping();
+      if (input) input.value += e.key;
+      return;
+    }
+    if (e.key === 'Backspace') {
+      if (inField && ae !== input) return;
+      e.preventDefault();
+      _startDialTyping();
+      if (input) input.value = input.value.slice(0, -1);
+    }
+  });
+
   let zeroTimer = null;
   let zeroLong = false;
   const zeroBtn = document.querySelector('[data-digit="0"]');
@@ -1187,8 +1396,12 @@ function _wireUI() {
     if (input) input.value = input.value.slice(0, -1);
   });
 
-  document.getElementById('btnCall')?.addEventListener('click', () =>
-    MaxCallBridge.makeCall(input?.value.trim()));
+  document.getElementById('btnCall')?.addEventListener('click', () => {
+    const n = input?.value.trim() || '';
+    if (n) _openCallConfirm(n);
+  });
+  document.getElementById('callConfirmCancel')?.addEventListener('click', _closeCallConfirm);
+  document.getElementById('callConfirmCall')?.addEventListener('click', _confirmCall);
   document.getElementById('btnHangup')?.addEventListener('click', () => MaxCallBridge.hangup(undefined));
   document.getElementById('btnPopup')?.addEventListener('click', () =>
     MaxCallBridge.openPopup(input?.value.trim() || _callMeta.get(_currentCallId)?.number));
@@ -1225,6 +1438,36 @@ function _wireUI() {
 
   document.getElementById('logSearch')?.addEventListener('input', (e) =>
     _applyLogFilter(e.target.value));
+
+  document.getElementById('feedbackRetry')?.addEventListener('click', () => {
+    _fetchFeedbackQueue();
+    _fetchFeedbackMy();
+  });
+
+  /* feedback section: New/My sub-tabs + outcome dialog */
+  document.getElementById('fbSubNew')?.addEventListener('click', () => _switchFeedbackSub('new'));
+  document.getElementById('fbSubMy')?.addEventListener('click', () => _switchFeedbackSub('my'));
+
+  const dlg = document.getElementById('fbDialog');
+  dlg?.querySelectorAll('[data-score]').forEach((b) =>
+    b.addEventListener('click', () => {
+      dlg.querySelectorAll('[data-score]').forEach((x) => {
+        x.classList.remove('bg-brand', 'text-white');
+        x.classList.add('bg-slate-100', 'text-slate-500');
+      });
+      b.classList.remove('bg-slate-100', 'text-slate-500');
+      b.classList.add('bg-brand', 'text-white');
+    }));
+  document.getElementById('fbDialogCancel')?.addEventListener('click', _closeFeedbackDialog);
+  document.getElementById('fbDialogSubmit')?.addEventListener('click', () => {
+    if (!_fbDialogTask) return;
+    const sel = dlg?.querySelector('[data-score].bg-brand');
+    const score = sel ? parseInt(sel.dataset.score, 10) : null;
+    const comment = document.getElementById('fbComment')?.value.trim() || '';
+    MaxCallBridge.feedbackRespond(_fbDialogTask.id, 'done', { score, comment });
+    _closeFeedbackDialog();
+    // The native side refetches queue + my list once the server confirms.
+  });
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -1241,9 +1484,219 @@ window.onMessage = (...a) => MaxCallBridge.onMessage(...a);
 window.onContacts = (...a) => MaxCallBridge.onContacts(...a);
 window.onAccount = (...a) => MaxCallBridge.onAccount(...a);
 window.onPinState = (...a) => MaxCallBridge.onPinState(...a);
-window.onCallHistory = (...a) => MaxCallBridge.onCallHistory(...a);
-window.onUpdateState = (...a) => MaxCallBridge.onUpdateState(...a);
-window.MaxCallBridge = MaxCallBridge;
+  window.onCallHistory = (...a) => MaxCallBridge.onCallHistory(...a);
+  window.onUpdateState = (...a) => MaxCallBridge.onUpdateState(...a);
+
+  /* ---------- feedback queue (via C++ bridge) ---------- */
+  /** @type {Array<{id:number,phone:string,patient_name:string,visit_date:string,doctor:string,payer:string,visit_amount:number,status:string,attempts:number,max_attempts:number}>} */
+  let _feedbackTasks = [];
+  /** @type {Array<object>} Claimed tasks waiting for an outcome (My pane). */
+  let _myTasks = [];
+  /** Task id currently open in the feedback dialog. */
+  let _fbDialogTask = null;
+
+  /** Update the notification bubble on the Tasks tab icon + pane counters. */
+  function _setFeedbackCounts() {
+    const newCount = _feedbackTasks.length;
+    const myCount = _myTasks.length;
+    const navBadge = document.getElementById('feedbackCountBadge');
+    if (navBadge) {
+      navBadge.textContent = newCount > 99 ? '99+' : String(newCount);
+      navBadge.classList.toggle('hidden', newCount === 0);
+    }
+    const n = document.getElementById('fbNewCount');
+    const m = document.getElementById('fbMyCount');
+    if (n) n.textContent = String(newCount);
+    if (m) m.textContent = String(myCount);
+  }
+
+  /** Ask C++ to fetch the due feedback task queue from the server (New pane). */
+  function _fetchFeedbackQueue() {
+    const err = document.getElementById('feedbackError');
+    if (err) err.classList.add('hidden');
+    MaxCallBridge.feedbackQueue();
+  }
+
+  /** Ask C++ to fetch the agent's claimed tasks (My pane). */
+  function _fetchFeedbackMy() {
+    MaxCallBridge.feedbackMy();
+  }
+
+  /** Shared task card shell (name + chips + meta, actions right). */
+  function _taskCard() {
+    const row = document.createElement('div');
+    row.className = 'rounded-2xl border border-slate-100 bg-white p-2.5';
+    row.innerHTML =
+      '<div class="flex items-center justify-between gap-2">' +
+      '<div class="min-w-0"><p class="truncate text-xs font-bold select-text" dir="ltr"></p></div></div>' +
+      '<div data-chips class="mt-1.5 flex flex-wrap items-center gap-1"></div>' +
+      '<p data-meta class="mt-1 truncate text-[10px] text-slate-400 select-text" dir="ltr"></p>';
+    return row;
+  }
+
+  /** Small high-signal chip. */
+  function _chip(text, cls) {
+    return '<span class="rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ' + (cls || 'bg-slate-50 text-slate-500') + '">' + text.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</span>';
+  }
+
+  /**
+   * Quick-glance chips: age/gender, nationality, visit recency, cash/insurance.
+   * @param {object} t Task row from the server.
+   * @returns {string} HTML for the chips container.
+   */
+  function _chipsHtml(t) {
+    const parts = [];
+    const rawAge = String(t.pat_age || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    const sex = String(t.pat_sex || '').toUpperCase().charAt(0);
+    if (rawAge) {
+      // Formats: '40Y' simple years, or like '11M 15D' for infants — we
+      // abbreviate simply: '11m15d'. The gender joins only simple years.
+      const simple = /^(\d+)\s*y(?:r|rs|ear[s]?)?(?![a-z])/.exec(rawAge);
+      parts.push(_chip(simple
+        ? simple[1] + 'y' + (sex === 'M' || sex === 'F' ? ' ' + sex.toLowerCase() : '')
+        : rawAge));
+    }
+    if (t.pat_nationality) parts.push(_chip(String(t.pat_nationality).slice(0, 12)));
+    const vd = String(t.visit_date || '').slice(0, 10);
+    if (vd) {
+      const days = Math.max(0, Math.round((Date.now() - new Date(vd + 'T00:00:00').getTime()) / 86400000));
+      parts.push(_chip(days <= 0 ? 'today' : days + 'd', 'bg-slate-900 text-white'));
+    }
+    const code = String(t.pat_payer_code || '').toUpperCase();
+    if (code) {
+      parts.push(code === 'CSH' ? _chip('cash', 'bg-amber-50 text-amber-600') : _chip(code, 'bg-teal-50 text-teal-700'));
+    }
+    return parts.join('');
+  }
+
+  /** Compact icon button used in task cards. */
+  function _taskBtn(action, title, cls, svg) {
+    return '<button data-act="' + action + '" title="' + title + '" aria-label="' + title + '" class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full ' + cls + ' active:scale-95">' + svg + '</button>';
+  }
+
+  const CALL_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5"><path stroke-linecap="round" stroke-linejoin="round" d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L8 10a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2Z"/></svg>';
+  const INFO_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>';
+  const NOANSWER_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5"><path stroke-linecap="round" d="M10.7 13.3a16 16 0 0 1-2.7-2.7l1.3-1.3a2 2 0 0 0 .5-2.1c-.3-.9-.6-1.9-.7-2.9a2 2 0 0 0-2-1.7H4.1a2 2 0 0 0-2 2.1c.1 1.4.5 2.8 1 4.1m6.6 9.6c1.3.5 2.7.9 4.1 1a2 2 0 0 0 2.1-2v-2.9a2 2 0 0 0-1.7-2c-1-.1-2-.4-2.9-.7a2 2 0 0 0-2.1.5l-.5.5"/><path d="m2 2 20 20"/></svg>';
+  const DONE_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5"><path stroke-linecap="round" stroke-linejoin="round" d="m5 13 4 4L19 7"/></svg>';
+
+  /** Render the due-task list (New pane): the only in-place action is Call. */
+  function _renderFeedback(jsonText) {
+    let arr = [];
+    try { arr = JSON.parse(String(jsonText || '[]')); } catch { arr = []; }
+    if (!Array.isArray(arr)) arr = (arr && arr.data) || [];
+    _feedbackTasks = arr;
+    const list = document.getElementById('feedbackList');
+    const empty = document.getElementById('feedbackEmpty');
+    const err = document.getElementById('feedbackError');
+    if (!list) return;
+    list.innerHTML = '';
+    if (err) err.classList.add('hidden');
+    if (arr.length === 0) {
+      if (empty) empty.classList.remove('hidden');
+      _setFeedbackCounts();
+      return;
+    }
+    if (empty) empty.classList.add('hidden');
+    arr.forEach((t) => {
+      const row = _taskCard();
+      const attempts = String(t.attempts || 0) + '/' + String(t.max_attempts || 3);
+      row.innerHTML +=
+        '<div class="flex shrink-0 items-center gap-1.5">' +
+        _taskBtn('call', 'Call', 'bg-emerald-500 text-white', CALL_SVG) +
+        _taskBtn('popup', 'Caller details', 'bg-slate-100 text-slate-500', INFO_SVG) +
+        '</div>';
+      row.querySelector('p').textContent = t.patient_name || '—';
+      row.querySelector('[data-chips]').innerHTML = _chipsHtml(t);
+      row.querySelector('[data-meta]').textContent = (t.phone || '') + ' · ' + attempts;
+      row.querySelector('[data-act="call"]').addEventListener('click', () => {
+        // ادعاء + اتصال: المهمة تنتقل فوراً إلى My والموظف يتصل بالمريض.
+        MaxCallBridge.feedbackClaim(t.id);
+        MaxCallBridge.makeCall(t.phone);
+        _switchTab('tabDial');
+      });
+      row.querySelector('[data-act="popup"]').addEventListener('click', () => { MaxCallBridge.openPopup(t.phone); });
+      list.appendChild(row);
+    });
+    _setFeedbackCounts();
+    _emit('feedback-queue', { count: arr.length });
+  }
+
+  /** Render the agent's claimed tasks (My pane): record outcome here. */
+  function _renderMy(jsonText) {
+    let arr = [];
+    try { arr = JSON.parse(String(jsonText || '[]')); } catch { arr = []; }
+    if (!Array.isArray(arr)) arr = (arr && arr.data) || [];
+    _myTasks = arr;
+    const list = document.getElementById('myList');
+    const empty = document.getElementById('myEmpty');
+    if (!list) return;
+    list.innerHTML = '';
+    if (arr.length === 0) {
+      if (empty) empty.classList.remove('hidden');
+      _setFeedbackCounts();
+      return;
+    }
+    if (empty) empty.classList.add('hidden');
+    arr.forEach((t) => {
+      const row = _taskCard();
+      row.innerHTML +=
+        '<div class="flex shrink-0 items-center gap-1.5">' +
+        _taskBtn('noanswer', 'No answer', 'bg-amber-50 text-amber-600', NOANSWER_SVG) +
+        _taskBtn('done', 'Feedback received', 'bg-emerald-500 text-white', DONE_SVG) +
+        '</div>';
+      row.querySelector('p').textContent = t.patient_name || '—';
+      row.querySelector('[data-chips]').innerHTML = _chipsHtml(t);
+      row.querySelector('[data-meta]').textContent = (t.phone || '') + ' · feedback pending';
+      row.querySelector('[data-act="noanswer"]').addEventListener('click', () => {
+        MaxCallBridge.feedbackRespond(t.id, 'no_answer');
+      });
+      row.querySelector('[data-act="done"]').addEventListener('click', () => {
+        _openFeedbackDialog(t);
+      });
+      list.appendChild(row);
+    });
+    _setFeedbackCounts();
+  }
+
+  /* ---------- feedback recording dialog ---------- */
+
+  /** Open the outcome dialog for a claimed task. */
+  function _openFeedbackDialog(task) {
+    _fbDialogTask = task;
+    const dlg = document.getElementById('fbDialog');
+    const who = document.getElementById('fbDialogWho');
+    const comment = document.getElementById('fbComment');
+    if (!dlg) return;
+    if (who) who.textContent = (task.patient_name || '') + (task.phone ? ' · ' + task.phone : '');
+    if (comment) comment.value = '';
+    dlg.querySelectorAll('[data-score]').forEach((b) => {
+      b.classList.remove('bg-brand', 'text-white');
+      b.classList.add('bg-slate-100', 'text-slate-500');
+    });
+    dlg.classList.remove('hidden');
+    dlg.classList.add('flex');
+  }
+
+  /** Close the outcome dialog without saving. */
+  function _closeFeedbackDialog() {
+    const dlg = document.getElementById('fbDialog');
+    if (!dlg) return;
+    dlg.classList.add('hidden');
+    dlg.classList.remove('flex');
+    _fbDialogTask = null;
+  }
+
+  /** Called by C++ via ExecuteScript when the due-task queue arrives from the server. */
+  window.onFeedbackQueue = (jsonText) => {
+    _renderFeedback(jsonText);
+  };
+
+  /** Called by C++ via ExecuteScript when the claimed-task list arrives. */
+  window.onFeedbackMy = (jsonText) => {
+    _renderMy(jsonText);
+  };
+
+  window.MaxCallBridge = MaxCallBridge;
 
 </script>
 <script>window.addEventListener("DOMContentLoaded",function(){if(window.MaxCallBridge&&window.MaxCallBridge.ready)window.MaxCallBridge.ready();});</script></body>
