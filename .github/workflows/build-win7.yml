@@ -1,0 +1,135 @@
+name: Build MaxCall (Windows 7 compatible)
+
+# Separate build track: pins WebView2 SDK 1.0.1518.46 (last version supporting
+# Win7) and links the dynamic loader DLL instead of the static loader, whose
+# TraceLogging code imports EventSetInformation from ADVAPI32 (Windows 8+).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - uses: microsoft/setup-msbuild@v2
+    - uses: nuget/setup-nuget@v2
+
+    - name: Pin WebView2 SDK to the last Win7-compatible release
+      shell: pwsh
+      run: |
+        $cfg = Get-Content packages.config -Raw
+        $cfg = $cfg.Replace('1.0.2739.15', '1.0.1518.46')
+        Set-Content packages.config $cfg -NoNewline
+        $proj = Get-Content microsip.vcxproj -Raw
+        $proj = $proj.Replace('1.0.2739.15', '1.0.1518.46')
+        # Dynamic loader keeps Win8-only ETW imports out of MaxCall.exe.
+        $proj = $proj.Replace('WebView2LoaderStatic.lib', 'WebView2Loader.dll.lib')
+        Set-Content microsip.vcxproj $proj -NoNewline
+        Select-String -Path packages.config, microsip.vcxproj -Pattern 'WebView2|1.0.1518'
+
+    - name: Restore NuGet Packages
+      shell: pwsh
+      run: nuget restore microsip.sln
+
+    - name: Download and Prepare PJSIP
+      shell: pwsh
+      run: |
+        $url = "https://github.com/pjsip/pjproject/archive/refs/tags/2.14.1.tar.gz"
+        Invoke-WebRequest -Uri $url -OutFile pjsip.tar.gz -UseBasicParsing
+        tar -xzf pjsip.tar.gz
+        Rename-Item pjproject-2.14.1 pjproject
+        Remove-Item pjsip.tar.gz
+
+        $lines = @("#define PJMEDIA_HAS_VIDEO 1", "#include <pj/config_site_sample.h>")
+        $path = "pjproject/pjlib/include/pj/config_site.h"
+        $lines | Set-Content -Path $path -Encoding UTF8
+
+        foreach ($d in @("pjlib", "pjsip", "pjmedia", "pjnath", "pjlib-util")) {
+          if (Test-Path "pjproject/$d") {
+            Copy-Item "pjproject/$d" "$d" -Recurse -Force
+            $target = "$d/include/pj/config_site.h"
+            $dir = Split-Path $target
+            if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+            $lines | Set-Content -Path $target -Encoding UTF8
+          }
+        }
+        New-Item -ItemType Directory -Path "lib" -Force | Out-Null
+
+    - name: Build PJSIP
+      shell: pwsh
+      run: |
+        msbuild pjproject/pjproject-vs14.sln `
+          /p:Configuration=Release-Static /p:Platform=Win32 /p:PlatformToolset=v143 `
+          /verbosity:minimal /nologo
+        if ($LASTEXITCODE -ne 0) { throw "PJSIP build failed" }
+
+    - name: Collect PJSIP Libraries
+      shell: pwsh
+      run: |
+        Get-ChildItem "pjproject/lib/*.lib" -ErrorAction SilentlyContinue |
+          Where-Object { $_.Length -gt 1024 } |
+          ForEach-Object { Copy-Item $_.FullName "lib/" -Force }
+        Get-ChildItem "pjproject" -Recurse -Filter "*.lib" |
+          Where-Object { $_.Length -gt 1024 -and $_.DirectoryName -match "(build|lib)$" } |
+          ForEach-Object {
+            if (-not (Test-Path "lib/$($_.Name)")) { Copy-Item $_.FullName "lib/" -Force }
+          }
+
+    - name: Build Web Shell bundle
+      shell: pwsh
+      run: |
+        python tools/build_shell_bin.py
+        if ($LASTEXITCODE -ne 0) { throw "Web shell bundle failed" }
+
+    - name: Build MaxCall
+      shell: pwsh
+      run: |
+        msbuild microsip.sln `
+          /p:Configuration=Release /p:Platform=Win32 /p:PlatformToolset=v143 `
+          /verbosity:minimal /nologo
+        if ($LASTEXITCODE -ne 0) { throw "MaxCall build failed" }
+
+    - name: Package Win7 build
+      shell: pwsh
+      run: |
+        $exe = Get-ChildItem "." -Recurse -Filter "MaxCall.exe" |
+          Where-Object { $_.FullName -notmatch "pjproject" } | Select-Object -First 1
+        $loader = Get-ChildItem "packages" -Recurse -Filter "WebView2Loader.dll" |
+          Where-Object { $_.FullName -match "build\\native\\x86" } | Select-Object -First 1
+        if (-not $exe -or -not $loader) { throw "Missing exe or x86 WebView2Loader.dll" }
+
+        New-Item -ItemType Directory -Path "MaxCallWin7" -Force | Out-Null
+        Copy-Item $exe.FullName "MaxCallWin7/MaxCall-win7.exe" -Force
+        Copy-Item $loader.FullName "MaxCallWin7/WebView2Loader.dll" -Force
+        Get-ChildItem MaxCallWin7 | ForEach-Object { Write-Host "$($_.Name) $($_.Length)" }
+
+    - name: Verify Win7 import table
+      shell: pwsh
+      run: |
+        $bytes = [IO.File]::ReadAllBytes("MaxCallWin7/MaxCall-win7.exe")
+        $text = [Text.Encoding]::ASCII.GetString($bytes)
+        if ($text.Contains("EventSetInformation")) { throw "Win8-only import still present" }
+        if (-not $text.Contains("WebView2Loader.dll")) { throw "Dynamic loader DLL import missing" }
+        Write-Host "OK: no EventSetInformation import, dynamic loader present"
+
+    - name: Publish Win7 build
+      uses: softprops/action-gh-release@v2
+      with:
+        name: MaxCall for Windows 7
+        tag_name: win7
+        prerelease: true
+        make_latest: false
+        files: |
+          MaxCallWin7/MaxCall-win7.exe
+          MaxCallWin7/WebView2Loader.dll
+        body: |
+          Windows 7 compatible build. Pinned to WebView2 SDK 1.0.1518.46 with
+          the dynamic loader DLL, and intended for use with WebView2 Runtime 109.
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
