@@ -37,8 +37,12 @@ if not errorlevel 1 (
 )
 
 echo.
-echo Downloading SP1 from the local mirror (538 MB)...
-powershell -NoProfile -Command "(New-Object Net.WebClient).DownloadFile('%MIRROR%/Windows6.1-KB976932-X86.exe', '%TEMP%\Windows6.1-KB976932-X86.exe')"
+if exist "%TEMP%\Windows6.1-KB976932-X86.exe" (
+  echo Reusing the file downloaded on the previous attempt.
+) else (
+  echo Downloading SP1 from the local mirror (538 MB)...
+  powershell -NoProfile -Command "(New-Object Net.WebClient).DownloadFile('%MIRROR%/Windows6.1-KB976932-X86.exe', '%TEMP%\Windows6.1-KB976932-X86.exe')"
+)
 if not exist "%TEMP%\Windows6.1-KB976932-X86.exe" (
   echo ERROR: download failed.
   exit /b 1
