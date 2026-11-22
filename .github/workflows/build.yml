@@ -238,9 +238,7 @@ jobs:
         Copy-Item packages.config packages.config.main -Force
         (Get-Content packages.config -Raw).Replace('1.0.2739.15', '1.0.1518.46') |
           Set-Content packages.config -NoNewline
-        $proj = (Get-Content microsip.vcxproj -Raw)
-          .Replace('1.0.2739.15', '1.0.1518.46')
-          .Replace('WebView2LoaderStatic.lib', 'WebView2Loader.dll.lib')
+        $proj = (Get-Content microsip.vcxproj -Raw).Replace('1.0.2739.15', '1.0.1518.46').Replace('WebView2LoaderStatic.lib', 'WebView2Loader.dll.lib')
         Set-Content microsip.vcxproj $proj -NoNewline
         nuget restore microsip.sln
         msbuild microsip.sln `
