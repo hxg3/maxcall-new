@@ -71,6 +71,8 @@ public:
 	void* m_controller;
 	void* m_webView;
 	void* m_env;
+	int m_webInitAttempts;
+	void RetryWebView();
 
 private:
 	bool m_pageReady;

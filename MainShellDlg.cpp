@@ -143,6 +143,7 @@ MainShellDlg::MainShellDlg(CWnd* pParent)
 	m_controller = nullptr;
 	m_webView = nullptr;
 	m_env = nullptr;
+	m_webInitAttempts = 0;
 	m_pageReady = false;
 	m_minPin = false;
 	m_lastCallId = PJSUA_INVALID_ID;
@@ -219,6 +220,20 @@ BOOL MainShellDlg::OnInitDialog()
 	return TRUE;
 }
 
+void MainShellDlg::RetryWebView()
+{
+	if (m_webInitAttempts >= 5) {
+		return;
+	}
+	m_webInitAttempts++;
+	if (m_env) {
+		static_cast<ICoreWebView2Environment*>(m_env)->Release();
+		m_env = nullptr;
+	}
+	Sleep(600);
+	InitWebView2();
+}
+
 void MainShellDlg::InitWebView2()
 {
 	ShellEnvCallback* cb = new ShellEnvCallback(this);
@@ -293,6 +308,9 @@ HRESULT ShellCtrlCallback::Invoke(HRESULT result, ICoreWebView2Controller* contr
 			}
 			// لا نرسل WM_SHELL_READY هنا — ShellNavHandler هو من يرسله بعد اكتمال التحميل
 		}
+	}
+	else if (result == E_ABORT) {
+		m_dlg->RetryWebView();
 	}
 	return S_OK;
 }

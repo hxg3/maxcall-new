@@ -144,6 +144,7 @@ CrmPopupDlg::CrmPopupDlg(CWnd* pParent)
 	m_controller = nullptr;
 	m_webView = nullptr;
 	m_env = nullptr;
+	m_webInitAttempts = 0;
 }
 
 CrmPopupDlg::~CrmPopupDlg(void)
@@ -211,6 +212,20 @@ BOOL CrmPopupDlg::OnInitDialog()
 	InitWebView2();
 
 	return TRUE;
+}
+
+void CrmPopupDlg::RetryWebView()
+{
+	if (m_webInitAttempts >= 5) {
+		return;
+	}
+	m_webInitAttempts++;
+	if (m_env) {
+		static_cast<ICoreWebView2Environment*>(m_env)->Release();
+		m_env = nullptr;
+	}
+	Sleep(600);
+	InitWebView2();
 }
 
 void CrmPopupDlg::InitWebView2()
@@ -288,6 +303,9 @@ HRESULT CtrlCallback::Invoke(HRESULT result, ICoreWebView2Controller* controller
 			}
 			// لا نرسل WM_WEBVIEW_READY هنا — NavCompletedHandler هو من يرسله بعد اكتمال التحميل
 		}
+	}
+	else if (result == E_ABORT) {
+		m_dlg->RetryWebView();
 	}
 	return S_OK;
 }

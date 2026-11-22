@@ -256,6 +256,7 @@ LoginWebDlg::LoginWebDlg(CWnd* pParent)
 	m_webView = nullptr;
 	m_env = nullptr;
 	m_webReady = false;
+	m_webInitAttempts = 0;
 }
 
 LoginWebDlg::~LoginWebDlg(void)
@@ -439,6 +440,21 @@ HRESULT LoginCtrlCallback::Invoke(HRESULT result, ICoreWebView2Controller* contr
 		}
 	}
 	else {
+		// WebView2 documents E_ABORT as a transient controller failure and
+		// recommends retrying from a fresh environment. Do that a few times
+		// before giving up, so a slow or busy browser process does not leave
+		// the agent staring at a white login window.
+		if (result == E_ABORT && m_dlg->m_webInitAttempts < 5) {
+			m_dlg->m_webInitAttempts++;
+			LoginDiag(_T("controller aborted - retrying with a new environment"), result);
+			if (m_dlg->m_env) {
+				((ICoreWebView2Environment*)m_dlg->m_env)->Release();
+				m_dlg->m_env = nullptr;
+			}
+			Sleep(600);
+			m_dlg->InitWebView2();
+			return S_OK;
+		}
 		LoginFail(m_dlg->m_hWnd, _T("the WebView2 controller could not be created"));
 	}
 	return S_OK;

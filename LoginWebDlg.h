@@ -63,6 +63,7 @@ private:
 	void InitWebView2();
 	void ReportWebViewTimeout();
 	bool m_webReady;
+	int m_webInitAttempts;   // WebView2 recommends retrying a failed controller creation with a fresh environment
 	void ExecuteLoginScript(const CString& js);
 	void ProcessLoginMessage(CString& message);
 	void PushLoginBusy(bool busy);
