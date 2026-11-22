@@ -95,13 +95,13 @@ echo OK.
 echo.
 echo [6b/7] Checking the WebView2 109 runtime files...
 set "RT="
-for /f "delims=" %%F in ('dir /s /b "C:\WebView2-109\msedgewebview2.exe" 2^>nul') do set "RT=%%~dpF"
+for /f "delims=" %%F in ('dir /s /b "C:\WV2Clean\msedgewebview2.exe" 2^>nul') do set "RT=%%~dpF"
 if not defined RT (
   echo Runtime missing - downloading from the mirror...
   powershell -NoProfile -Command "(New-Object Net.WebClient).DownloadFile('%MIRROR%/Microsoft.WebView2.FixedVersionRuntime.109.0.1518.78.x86.cab', '%TEMP%\wv2.cab')"
   if exist "%TEMP%\wv2.cab" (
-    if not exist "C:\WebView2-109" mkdir "C:\WebView2-109" >nul
-    expand "%TEMP%\wv2.cab" -F:* "C:\WebView2-109" >nul
+    if not exist "C:\WV2Clean" mkdir "C:\WV2Clean" >nul
+    expand "%TEMP%\wv2.cab" -F:* "C:\WV2Clean" >nul
     echo Extracted.
   )
 ) else (

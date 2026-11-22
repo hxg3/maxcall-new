@@ -6,9 +6,9 @@ rem Double-click this script, or drag your existing MaxCall.exe onto it.
 rem It installs the Win7 build, its loader DLL, the WebView2 109 runtime
 rem policy and the maxcall.local hosts entry in one pass.
 
-set "MIRROR=http://192.168.1.32:3001/updates"
+set "MIRROR=http://maxcall.local:3001/updates"
 set "CAB=%~dp0Microsoft.WebView2.FixedVersionRuntime.109.0.1518.78.x86.cab"
-set "DEST=C:\WebView2-109"
+set "DEST=C:\WV2Clean"
 set "KEY=HKLM\SOFTWARE\Policies\Microsoft\Edge\WebView2\BrowserExecutableFolder"
 set "KEY32=HKLM\SOFTWARE\Wow6432Node\Policies\Microsoft\Edge\WebView2\BrowserExecutableFolder"
 set "HOSTS=%WINDIR%\System32\drivers\etc\hosts"
@@ -91,11 +91,17 @@ echo OK: %RUNTIME_DIR%
 echo.
 echo [6/7] Setting maxcall.local and the WebView2 policy...
 attrib -r "%HOSTS%" >nul 2>&1
-findstr /C:"maxcall.local" "%HOSTS%" >nul 2>&1
-if errorlevel 1 (
-  echo.>> "%HOSTS%"
-  echo 192.168.1.32    maxcall.local>> "%HOSTS%"
+rem Never bake a number: refresh the alias with the server's current address.
+rem Optional second argument = current server IP when mDNS is unavailable.
+powershell -NoProfile -Command "$h='%HOSTS%'; if (Test-Path $h) { $lines = @(Get-Content $h | Where-Object { $_ -notmatch 'maxcall\.local' }); Set-Content -Path $h -Value $lines -Encoding ASCII }"
+set "MCIP="
+if not "%~2"=="" set "MCIP=%~2"
+if not defined MCIP for /f "delims=" %%I in ('powershell -NoProfile -Command "try { [Net.Dns]::GetHostAddresses('maxcall.local') ^| Where-Object { $_.AddressFamily -eq 'InterNetwork' } ^| Select-Object -First 1 -ExpandProperty IPAddressToString } catch { '' }"') do set "MCIP=%%I"
+if defined MCIP (
+  echo %MCIP%    maxcall.local>> "%HOSTS%"
   if errorlevel 1 goto :hostsfail
+) else (
+  echo WARNING: maxcall.local did not resolve. Re-run with the server's current IP as the second argument.
 )
 ipconfig /flushdns >nul 2>&1
 reg add "%KEY%" /v * /t REG_SZ /d "%RUNTIME_DIR%" /f >nul
