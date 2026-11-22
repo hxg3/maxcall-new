@@ -55,7 +55,7 @@ set "HASH="
 for /f "skip=1 tokens=*" %%H in ('type "%TEMP%\sp1hash.txt"') do if not defined HASH set "HASH=%%H"
 set "HASH=%HASH: =%"
 echo   %HASH%
-if /I not "%HASH%"=="e5449839955a22fc4dd596291a" goto :badhash
+if /I not "%HASH%"=="e5449839955a22fc4dd596291aff1433b998f9797e1c784232226aba1f8abd97" goto :badhash
 echo Checksum OK.
 
 echo.
