@@ -261,6 +261,17 @@ jobs:
         if ($text.Contains("EventSetInformation")) { throw "Win8-only import present in Win7 build" }
         Write-Host "OK: Win7 build has no EventSetInformation import"
 
+        # The Win7 link overwrote Release\MaxCall.exe. Rebuild the standard
+        # binary so the Package step below publishes the right one.
+        nuget restore microsip.sln
+        msbuild microsip.sln `
+          /p:Configuration=Release /p:Platform=Win32 /p:PlatformToolset=v143 `
+          /verbosity:minimal /nologo
+        if ($LASTEXITCODE -ne 0) { throw "standard rebuild failed" }
+        $again = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes("Release/MaxCall.exe"))
+        if (-not $again.Contains("EventSetInformation")) { throw "standard build was not restored" }
+        Write-Host "OK: standard build restored"
+
     - name: Package
       shell: pwsh
       run: |
