@@ -54,16 +54,16 @@ protected:
 public:
 	// Driven from the WebView2 callback objects, which are not members.
 	void ArmWebViewWatchdog();
+	void InitWebView2();
+	int m_webInitAttempts;   // WebView2 recommends retrying a failed controller creation with a fresh environment
 
 	void* m_controller;
 	void* m_webView;
 	void* m_env;
 
 private:
-	void InitWebView2();
 	void ReportWebViewTimeout();
 	bool m_webReady;
-	int m_webInitAttempts;   // WebView2 recommends retrying a failed controller creation with a fresh environment
 	void ExecuteLoginScript(const CString& js);
 	void ProcessLoginMessage(CString& message);
 	void PushLoginBusy(bool busy);
