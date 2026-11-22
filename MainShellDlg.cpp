@@ -600,15 +600,41 @@ void MainShellDlg::PushRegState(bool registered, const CString& message)
 
 void MainShellDlg::BringToFront()
 {
-	// رفع النافذة بدل فتح نافذة بيانات المتصل: المستخدم يرى أن هناك مكالمة
-	// ويختار من شريط المكالمة الوارد أي رقم يريد الرد عليه.
+	// رفع النافذة بدل فتح نافذة بيانات المتصل. SetForegroundWindow وحده يفشل
+	// عندما تكون العملية في الخلفية (قفل التركيز في ويندوز)، لذلك نمرّر بطقتين
+	// موثّقتين على Win7: topmost مؤقت ثم AttachThreadInput مع نافذة التركيز.
 	if (IsIconic()) {
 		ShowWindow(SW_RESTORE);
 	}
 	else {
 		ShowWindow(SW_SHOWNORMAL);
 	}
-	SetForegroundWindow();
+	SetWindowPos(&wndTopMost, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+	SetWindowPos(&wndNoTopMost, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+
+	HWND foreground = ::GetForegroundWindow();
+	DWORD foregroundThread = foreground ? ::GetWindowThreadProcessId(foreground, NULL) : 0;
+	DWORD currentThread = ::GetCurrentThreadId();
+	bool attached = false;
+	if (foregroundThread && foregroundThread != currentThread) {
+		attached = ::AttachThreadInput(currentThread, foregroundThread, TRUE) != FALSE;
+	}
+	::BringWindowToTop(m_hWnd);
+	::SetForegroundWindow(m_hWnd);
+	if (attached) {
+		::AttachThreadInput(currentThread, foregroundThread, FALSE);
+	}
+
+	// إن لم ينجح التركيز فليومض زر النافذة في شريط المهام حتى يُنتبه للمكالمة.
+	if (::GetForegroundWindow() != m_hWnd) {
+		FLASHWINFO flash;
+		flash.cbSize = sizeof(flash);
+		flash.hwnd = m_hWnd;
+		flash.dwFlags = FLASHW_ALL | FLASHW_TIMERNOFG;
+		flash.uCount = 0;
+		flash.dwTimeout = 0;
+		::FlashWindowEx(&flash);
+	}
 }
 
 void MainShellDlg::PushIncomingCall(const CString& number, const CString& name, pjsua_call_id call_id)
@@ -617,9 +643,14 @@ void MainShellDlg::PushIncomingCall(const CString& number, const CString& name, 
 	js.Format(_T("onIncomingCall('%s', '%s', %d)"),
 		EscapeJs(number), EscapeJs(name), call_id);
 	ExecuteShellScript(js);
-
-	BringToFront();
 	FetchCallerInfo(call_id, number);
+}
+
+void MainShellDlg::SendIncomingInfo(pjsua_call_id call_id, const CString& json)
+{
+	CString js;
+	js.Format(_T("onIncomingInfo(%d, '%s')"), call_id, EscapeJs(json));
+	ExecuteShellScript(js);
 }
 
 void MainShellDlg::FetchCallerInfo(pjsua_call_id call_id, const CString& number)
@@ -634,12 +665,14 @@ void MainShellDlg::FetchCallerInfo(pjsua_call_id call_id, const CString& number)
 		}
 	}
 	if (digits.GetLength() < 4) {
+		SendIncomingInfo(call_id, _T("{}"));
 		return;
 	}
 	CString username = accountSettings.agentLoginName;
 	if (username.IsEmpty()) username = accountSettings.account.username;
 	CString password = accountSettings.account.password;
 	if (username.IsEmpty() || password.IsEmpty()) {
+		SendIncomingInfo(call_id, _T("{}"));
 		return;
 	}
 
@@ -659,11 +692,16 @@ LRESULT MainShellDlg::OnShellCallerInfo(WPARAM wParam, LPARAM lParam)
 			wchar_t* ucs2 = NULL;
 			Utf8DecodeCP((char*)(LPCSTR)result->body, CP_UTF8, &ucs2);
 			if (ucs2) {
-				CString js;
-				js.Format(_T("onIncomingInfo(%d, '%s')"), call_id, EscapeJs(CString(ucs2)));
+				CString info(ucs2);
 				free(ucs2);
-				ExecuteShellScript(js);
+				SendIncomingInfo(call_id, info);
 			}
+			else {
+				SendIncomingInfo(call_id, _T("{}"));
+			}
+		}
+		else {
+			SendIncomingInfo(call_id, _T("{}"));
 		}
 		delete result;
 	}

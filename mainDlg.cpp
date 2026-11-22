@@ -1072,10 +1072,14 @@ LRESULT CmainDlg::onIncomingCall(WPARAM wParam, LPARAM lParam)
 		onPlayerPlay(MSIP_SOUND_RINGIN2, 0);
 	}
 
-	//-- modern shell: incoming banner
-	if (mainShellDlg && IsWindow(mainShellDlg->m_hWnd) && mainShellDlg->IsWebViewReady()) {
-		CString shellNumber = !sipuri.user.IsEmpty() ? sipuri.user : sipuri.domain;
-		mainShellDlg->PushIncomingCall(shellNumber, user_data->name, call_info->id);
+	//-- modern shell: raise the window first, then paint the incoming bar.
+	// الرفع هنا وليس داخل PushIncomingCall حتى يحدث حتى لو لم تكن القشرة جاهزة بعد.
+	if (mainShellDlg && IsWindow(mainShellDlg->m_hWnd)) {
+		mainShellDlg->BringToFront();
+		if (mainShellDlg->IsWebViewReady()) {
+			CString shellNumber = !sipuri.user.IsEmpty() ? sipuri.user : sipuri.domain;
+			mainShellDlg->PushIncomingCall(shellNumber, user_data->name, call_info->id);
+		}
 	}
 
 	user_data->CS.Unlock();

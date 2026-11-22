@@ -37,6 +37,7 @@ public:
 	void PushRegState(bool registered, const CString& message);
 	void PushIncomingCall(const CString& number, const CString& name, pjsua_call_id call_id);
 	void FetchCallerInfo(pjsua_call_id call_id, const CString& number);
+	void SendIncomingInfo(pjsua_call_id call_id, const CString& json);
 	void PushCallState(pjsua_call_id call_id, const CString& state, const CString& number, const CString& name);
 	void PushMessage(const CString& from, const CString& text);
 	void PushContacts();

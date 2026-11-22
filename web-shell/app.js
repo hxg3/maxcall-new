@@ -127,8 +127,10 @@ function _removeIncomingBar(callId) {
 const _PHONE_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L8 10a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2Z"/></svg>';
 const _HANGUP_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4"><path d="M10.7 13.3a16 16 0 0 1-2.7-2.7l1.3-1.3a2 2 0 0 0 .5-2.1c-.3-.9-.6-1.9-.7-2.9a2 2 0 0 0-2-1.7H4.1a2 2 0 0 0-2 2.1c.1 1.4.5 2.8 1 4.1m6.6 9.6c1.3.5 2.7.9 4.1 1a2 2 0 0 0 2.1-2v-2.9a2 2 0 0 0-1.7-2c-1-.1-2-.4-2.9-.7a2 2 0 0 0-2.1.5l-.5.5"/><path d="m2 2 20 20"/></svg>';
 
+const _CALL_SPINNER = '<span data-loading role="status" aria-label="Loading caller info" class="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-slate-300 border-t-brand"></span>';
+
 /** Paint one bar; `snoozed` is the compact strip that restoring reveals. */
-function _renderIncomingBar(bar, id, meta) {
+function _renderIncomingBar(bar, meta) {
   const num = String(meta.number || '');
   const nm = String(meta.name || '');
   const displayName = (meta.info && meta.info.name) || nm;
@@ -139,25 +141,23 @@ function _renderIncomingBar(bar, id, meta) {
         '<span class="flex h-6 w-6 shrink-0 animate-pulse items-center justify-center rounded-full bg-brand text-white">' +
           '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3 w-3"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L8 10a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2Z"/></svg>' +
         '</span>' +
-        '<span class="truncate text-xs font-semibold text-amber-900" dir="ltr">Incoming call ' + _esc(num) + '</span>' +
+        '<span class="truncate text-xs font-semibold text-amber-900" dir="ltr">' + _esc(num) + '</span>' +
       '</span>' +
       '<span class="shrink-0 text-[11px] font-bold text-amber-800">Answer</span>';
     return;
   }
-  bar.className = 'flex items-center justify-between gap-2 border-b border-amber-200 bg-amber-50 px-3 py-2';
+  bar.className = 'flex items-center justify-between gap-2 border-b border-amber-200 bg-amber-50 px-3 py-1.5';
   bar.innerHTML =
-    '<div class="flex min-w-0 items-center gap-2">' +
-      '<span class="flex h-8 w-8 shrink-0 animate-pulse items-center justify-center rounded-full bg-brand text-white">' + _PHONE_SVG + '</span>' +
-      '<div class="min-w-0">' +
-        '<p class="text-xs font-bold">Incoming call</p>' +
-        '<p class="truncate text-[11px] font-semibold text-slate-700" dir="ltr" data-name>' + _esc(displayName) + '</p>' +
-        '<p class="truncate text-[11px] text-slate-500" dir="ltr" data-number>' + _esc(num) + '</p>' +
-        '<div class="mt-1 flex flex-wrap gap-1" data-info>' + _incomingChips(meta.info) + '</div>' +
-      '</div>' +
+    '<div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">' +
+      '<span class="flex h-7 w-7 shrink-0 animate-pulse items-center justify-center rounded-full bg-brand text-white">' + _PHONE_SVG + '</span>' +
+      (displayName ? '<span class="max-w-[46%] truncate text-[11px] font-semibold text-slate-700" dir="ltr" data-name>' + _esc(displayName) + '</span>' : '<span data-name></span>') +
+      '<span class="shrink-0 text-[11px] text-slate-500" dir="ltr" data-number>' + _esc(num) + '</span>' +
+      (meta.infoPending ? _CALL_SPINNER : '') +
+      '<span class="flex shrink-0 flex-wrap gap-1" data-info>' + _incomingChips(meta.info) + '</span>' +
     '</div>' +
     '<div class="flex shrink-0 gap-1.5">' +
-      '<button type="button" data-incoming-action="answer" title="Answer" aria-label="Answer" class="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500 text-white active:scale-95">' + _PHONE_SVG + '</button>' +
-      '<button type="button" data-incoming-action="hide" title="Hide" aria-label="Hide" class="flex h-8 w-8 items-center justify-center rounded-full bg-rose-500 text-white active:scale-95">' + _HANGUP_SVG + '</button>' +
+      '<button type="button" data-incoming-action="answer" title="Answer" aria-label="Answer" class="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-500 text-white active:scale-95">' + _PHONE_SVG + '</button>' +
+      '<button type="button" data-incoming-action="hide" title="Hide" aria-label="Hide" class="flex h-7 w-7 items-center justify-center rounded-full bg-rose-500 text-white active:scale-95">' + _HANGUP_SVG + '</button>' +
     '</div>';
 }
 
@@ -546,7 +546,7 @@ const MaxCallBridge = {
     const host = document.getElementById('incomingBars');
     if (!host) return;
 
-    const meta = _callMeta.get(id) || { wasActive: false, info: null, snoozed: false };
+    const meta = _callMeta.get(id) || { wasActive: false, info: null, snoozed: false, infoPending: true };
     meta.number = num;
     meta.name = nm;
     meta.direction = 'in';
@@ -559,7 +559,7 @@ const MaxCallBridge = {
       host.appendChild(bar);
       _incomingBars.set(id, bar);
     }
-    _renderIncomingBar(bar, id, meta);
+    _renderIncomingBar(bar, meta);
 
     _hideOutgoing();
     _emit('incoming-call', { number: num, name: nm, callId: id });
@@ -571,10 +571,13 @@ const MaxCallBridge = {
     let info = null;
     try { info = infoJson ? JSON.parse(infoJson) : null; } catch (err) { info = null; }
     const meta = _callMeta.get(id);
-    if (meta) meta.info = info;
+    if (meta) {
+      meta.info = info;
+      meta.infoPending = false;
+    }
     const bar = _incomingBars.get(id);
     if (!bar || !info) return;
-    _renderIncomingBar(bar, id, meta);
+    _renderIncomingBar(bar, meta);
     _emit('incoming-info', { callId: id, info: info });
   },
 
@@ -1142,12 +1145,12 @@ function _wireUI() {
     // brings the full bar back for that call only.
     if (action === 'hide') {
       meta.snoozed = true;
-      _renderIncomingBar(barEl, id, meta);
+      _renderIncomingBar(barEl, meta);
       return;
     }
     if (meta.snoozed) {
       meta.snoozed = false;
-      _renderIncomingBar(barEl, id, meta);
+      _renderIncomingBar(barEl, meta);
     }
   });
   document.getElementById('btnOutgoingCancel')?.addEventListener('click', () => MaxCallBridge.hangup(undefined));
