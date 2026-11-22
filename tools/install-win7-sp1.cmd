@@ -45,8 +45,11 @@ if not exist "%TEMP%\Windows6.1-KB976932-X86.exe" (
 )
 
 echo Verifying checksum...
-certutil -hashfile "%TEMP%\Windows6.1-KB976932-X86.exe" SHA256 2>nul | find /I "e5449839955a22fc4dd596291a"
-if errorlevel 1 (
+set "HASH="
+for /f "tokens=*" %%H in ('certutil -hashfile "%TEMP%\Windows6.1-KB976932-X86.exe" SHA256 2^>nul ^| find /V "hash" ^| find /V "SHA256"') do set "HASH=%%H"
+set "HASH=%HASH: =%"
+echo   %HASH%
+if /I not "%HASH%"=="e5449839955a22fc4dd596291a" (
   echo ERROR: checksum mismatch - aborting.
   exit /b 1
 )
