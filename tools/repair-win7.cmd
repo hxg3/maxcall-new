@@ -6,7 +6,7 @@ rem Cleans stale WebView2 processes and interrupted-update leftovers,
 rem then reinstalls the current Win7 build from the mirror.
 rem It does NOT remove the maxcall.local hosts entry.
 
-set "MIRROR=http://192.168.1.32:3001/updates"
+set "MIRROR=http://maxcall.local:3001/updates"
 set "KEY=HKLM\SOFTWARE\Policies\Microsoft\Edge\WebView2\BrowserExecutableFolder"
 set "KEY32=HKLM\SOFTWARE\Wow6432Node\Policies\Microsoft\Edge\WebView2\BrowserExecutableFolder"
 set "HOSTS=%WINDIR%\System32\drivers\etc\hosts"
@@ -62,6 +62,21 @@ if not exist "%TEMP%\WebView2Loader.dll" goto :downloadfail
 copy /Y "%TEMP%\MaxCall-win7.exe" "%TARGET%" >nul
 copy /Y "%TEMP%\WebView2Loader.dll" "%APPDIR%\WebView2Loader.dll" >nul
 echo OK.
+
+echo.
+echo [5b/6] Checking the WebView2 109 runtime files...
+set "RT="
+for /f "delims=" %%F in ('dir /s /b "C:\WebView2-109\msedgewebview2.exe" 2^>nul') do set "RT=%%~dpF"
+if not defined RT (
+  echo Runtime missing - downloading it from the mirror (may take a while)...
+  powershell -NoProfile -Command "(New-Object Net.WebClient).DownloadFile('%MIRROR%/Microsoft.WebView2.FixedVersionRuntime.109.0.1518.78.x86.cab', '%TEMP%\wv2.cab')"
+  if exist "%TEMP%\wv2.cab" (
+    if not exist "C:\WebView2-109" mkdir "C:\WebView2-109" >nul
+    expand "%TEMP%\wv2.cab" -F:* "C:\WebView2-109" >nul
+  )
+) else (
+  echo OK: %RT%
+)
 
 echo.
 echo [6/6] Verification:
