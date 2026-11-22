@@ -69,9 +69,13 @@ struct SManifest
 	CString url;
 	CString sha256;
 	CString notes;
+	// Alternate payload for Windows 7 (pinned WebView2 loader). The signed
+	// manifest carries both checksums; the client picks one at runtime.
+	CString win7_sha256;
 	long long size;
+	long long win7_size;
 
-	SManifest() : size(0) {}
+	SManifest() : size(0), win7_size(0) {}
 	void Reset();
 	bool IsValid() const;
 };

@@ -126,7 +126,9 @@ void SManifest::Reset()
 	url.Empty();
 	sha256.Empty();
 	notes.Empty();
+	win7_sha256.Empty();
 	size = 0;
+	win7_size = 0;
 }
 
 bool SManifest::IsValid() const
@@ -1179,6 +1181,18 @@ CString ResolveHostToIpv4(const CString& url)
 	return url.Left(hostAt) + address + url.Mid(hostEnd);
 }
 
+static bool IsWin7OrOlder()
+{
+	OSVERSIONINFOEX osvi;
+	ZeroMemory(&osvi, sizeof(osvi));
+	osvi.dwOSVersionInfoSize = sizeof(osvi);
+	if (!GetVersionEx((OSVERSIONINFO*)&osvi)) {
+		return false;
+	}
+	return osvi.dwMajorVersion < 6
+		|| (osvi.dwMajorVersion == 6 && osvi.dwMinorVersion < 2);
+}
+
 bool FetchManifest(EUpdateChannel channel, SManifest& manifest, CString& error)
 {
 	manifest.Reset();
@@ -1254,6 +1268,22 @@ bool FetchManifest(EUpdateChannel channel, SManifest& manifest, CString& error)
 	m.sha256.MakeLower();
 	m.sha256.Trim();
 	m.size = root.isMember("size") ? (long long)root["size"].asDouble() : 0;
+	m.win7_sha256 = JsonToUni(root["win7_sha256"]);
+	m.win7_sha256.MakeLower();
+	m.win7_sha256.Trim();
+	m.win7_size = root.isMember("win7_size") ? (long long)root["win7_size"].asDouble() : 0;
+
+	// One signed manifest, two payloads. On Windows 7 the standard build cannot
+	// even load (WebView2LoaderStatic imports EventSetInformation from
+	// ADVAPI32), so select the alternate binary and its matching checksum.
+	// GetVersionEx without a compatibility manifest reports 6.1 on Win7 and
+	// 6.2+ on newer systems, which is exactly the boundary we need here.
+	if (IsWin7OrOlder() && !m.win7_sha256.IsEmpty()) {
+		m.url.Replace(_T("MaxCall.exe"), _T("MaxCall-win7.exe"));
+		m.sha256 = m.win7_sha256;
+		m.size = m.win7_size;
+		HttpDiag(_T("win7 mode: payload switched to the Win7 build"));
+	}
 
 	if (!m.IsValid()) {
 		error = _T("The update manifest is incomplete.");
@@ -1275,9 +1305,17 @@ bool FetchManifest(EUpdateChannel channel, SManifest& manifest, CString& error)
 			// One payload file cannot serve both channels: the beta and stable
 			// manifests point at different builds with different hashes, so each
 			// channel gets its own file on the mirror.
-			CString payload = (channel == ChannelBeta)
-				? _T("/MaxCall-beta.exe")
-				: _T("/MaxCall.exe");
+			bool win7 = IsWin7OrOlder() && !m.win7_sha256.IsEmpty();
+			CString payload;
+			if (win7) {
+				payload = (channel == ChannelBeta)
+					? _T("/MaxCall-win7-beta.exe")
+					: _T("/MaxCall-win7.exe");
+			} else {
+				payload = (channel == ChannelBeta)
+					? _T("/MaxCall-beta.exe")
+					: _T("/MaxCall.exe");
+			}
 			CString swapped = g_mirrorBase + payload;
 			HttpDiag(_T("mirror mode: payload from ") + swapped);
 			m.url = swapped;

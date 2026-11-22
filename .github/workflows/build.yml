@@ -231,6 +231,38 @@ jobs:
           /nologo
         if ($LASTEXITCODE -ne 0) { throw "MaxCall build failed" }
 
+    - name: Build Win7 variant (same source, Win7-compatible WebView2 loader)
+      shell: pwsh
+      run: |
+        Copy-Item microsip.vcxproj microsip.vcxproj.main -Force
+        Copy-Item packages.config packages.config.main -Force
+        (Get-Content packages.config -Raw).Replace('1.0.2739.15', '1.0.1518.46') |
+          Set-Content packages.config -NoNewline
+        $proj = (Get-Content microsip.vcxproj -Raw)
+          .Replace('1.0.2739.15', '1.0.1518.46')
+          .Replace('WebView2LoaderStatic.lib', 'WebView2Loader.dll.lib')
+        Set-Content microsip.vcxproj $proj -NoNewline
+        nuget restore microsip.sln
+        msbuild microsip.sln `
+          /p:Configuration=Release /p:Platform=Win32 /p:PlatformToolset=v143 `
+          /verbosity:minimal /nologo
+        if ($LASTEXITCODE -ne 0) { throw "Win7 build failed" }
+
+        $exe = Get-ChildItem "." -Recurse -Filter "MaxCall.exe" |
+          Where-Object { $_.FullName -notmatch "pjproject" } | Select-Object -First 1
+        $loader = Get-ChildItem "packages" -Recurse -Filter "WebView2Loader.dll" |
+          Where-Object { $_.FullName -match "build\\native\\x86" } | Select-Object -First 1
+        if (-not $exe -or -not $loader) { throw "Win7 artifacts missing" }
+        Copy-Item $exe.FullName "MaxCall-win7.exe" -Force
+        Copy-Item $loader.FullName "WebView2Loader.dll" -Force
+        Copy-Item microsip.vcxproj.main microsip.vcxproj -Force
+        Copy-Item packages.config.main packages.config -Force
+        Remove-Item microsip.vcxproj.main, packages.config.main -Force
+
+        $text = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes("MaxCall-win7.exe"))
+        if ($text.Contains("EventSetInformation")) { throw "Win8-only import present in Win7 build" }
+        Write-Host "OK: Win7 build has no EventSetInformation import"
+
     - name: Package
       shell: pwsh
       run: |
@@ -265,6 +297,8 @@ jobs:
 
         $bytes = [System.IO.File]::ReadAllBytes("MaxCall/MaxCall.exe")
         $sha256 = (Get-FileHash -Path "MaxCall/MaxCall.exe" -Algorithm SHA256).Hash.ToLower()
+        $bytes7 = [System.IO.File]::ReadAllBytes("MaxCall-win7.exe")
+        $sha256_7 = (Get-FileHash -Path "MaxCall-win7.exe" -Algorithm SHA256).Hash.ToLower()
 
         # The URL is derived here and never taken from the payload. The client
         # additionally pins the host to GitHub's release infrastructure
@@ -281,9 +315,11 @@ jobs:
           version = $env:VERSION
           channel = $env:CHANNEL
           url     = $url
-          size    = $bytes.Length
-          sha256  = $sha256
-          notes   = $notes
+          size       = $bytes.Length
+          sha256     = $sha256
+          win7_sha256 = $sha256_7
+          win7_size   = $bytes7.Length
+          notes      = $notes
         }
         $json = $manifest | ConvertTo-Json -Compress
 
@@ -349,8 +385,12 @@ jobs:
         make_latest: ${{ needs.resolve-version.outputs.make_latest }}
         files: |
           MaxCall/MaxCall.exe
+          MaxCall-win7.exe
+          WebView2Loader.dll
         body: |
           Download **MaxCall.exe**, put it in a folder named `MaxCall` and run it.
+          `MaxCall-win7.exe` + `WebView2Loader.dll` are selected automatically by
+          the in-app updater on Windows 7; no action is needed there.
           No installer and no companion files - future versions install themselves.
 
           Current version: **${{ needs.resolve-version.outputs.version }}**
