@@ -4,6 +4,11 @@ name: Build MaxCall (Windows 7 compatible)
 # Win7) and links the dynamic loader DLL instead of the static loader, whose
 # TraceLogging code imports EventSetInformation from ADVAPI32 (Windows 8+).
 on:
+  # Rebuild the Win7 variant automatically after every successful normal build,
+  # so the two tracks never drift apart.
+  workflow_run:
+    workflows: [ "Build MaxCall" ]
+    types: [ completed ]
   workflow_dispatch:
 
 permissions:
@@ -11,6 +16,7 @@ permissions:
 
 jobs:
   build:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: windows-2022
     steps:
     - uses: actions/checkout@v4
