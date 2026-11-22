@@ -15,6 +15,7 @@ struct ICoreWebView2Environment;
 #define WM_SHELL_FEEDBACK_RESULT (WM_USER + 115)
 #define WM_SHELL_FEEDBACK_MY (WM_USER + 117)
 #define WM_SHELL_FEEDBACK_ACTION (WM_USER + 116)
+#define WM_SHELL_CALLER_INFO (WM_USER + 118)
 
 // MainShellDlg — النافذة الرئيسية الحديثة (WebView2 Shell).
 // تستضيف web-shell/ المضمّنة (IDR_MAIN_SHELL_HTML) بملء العميل،
@@ -30,10 +31,12 @@ public:
 	enum { IDD = IDD_MAIN_SHELL };
 
 	void Restore();
+	void BringToFront();
 
 	// دفع الأحداث من CmainDlg (تعمل على خيط الواجهة دائماً)
 	void PushRegState(bool registered, const CString& message);
 	void PushIncomingCall(const CString& number, const CString& name, pjsua_call_id call_id);
+	void FetchCallerInfo(pjsua_call_id call_id, const CString& number);
 	void PushCallState(pjsua_call_id call_id, const CString& state, const CString& number, const CString& name);
 	void PushMessage(const CString& from, const CString& text);
 	void PushContacts();
@@ -64,6 +67,7 @@ protected:
 	afx_msg LRESULT OnShellFeedbackResult(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnShellFeedbackMy(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnShellFeedbackAction(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnShellCallerInfo(WPARAM wParam, LPARAM lParam);
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
 	DECLARE_MESSAGE_MAP()
 

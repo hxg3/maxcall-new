@@ -183,6 +183,7 @@ BEGIN_MESSAGE_MAP(MainShellDlg, CBaseDialog)
 	ON_MESSAGE(WM_SHELL_FEEDBACK_RESULT, &MainShellDlg::OnShellFeedbackResult)
 	ON_MESSAGE(WM_SHELL_FEEDBACK_MY, &MainShellDlg::OnShellFeedbackMy)
 	ON_MESSAGE(WM_SHELL_FEEDBACK_ACTION, &MainShellDlg::OnShellFeedbackAction)
+	ON_MESSAGE(WM_SHELL_CALLER_INFO, &MainShellDlg::OnShellCallerInfo)
 END_MESSAGE_MAP()
 
 // The version belongs on screen: beta and stable builds sit side by side during
@@ -597,12 +598,76 @@ void MainShellDlg::PushRegState(bool registered, const CString& message)
 	ExecuteShellScript(js);
 }
 
+void MainShellDlg::BringToFront()
+{
+	// رفع النافذة بدل فتح نافذة بيانات المتصل: المستخدم يرى أن هناك مكالمة
+	// ويختار من شريط المكالمة الوارد أي رقم يريد الرد عليه.
+	if (IsIconic()) {
+		ShowWindow(SW_RESTORE);
+	}
+	else {
+		ShowWindow(SW_SHOWNORMAL);
+	}
+	SetForegroundWindow();
+}
+
 void MainShellDlg::PushIncomingCall(const CString& number, const CString& name, pjsua_call_id call_id)
 {
 	CString js;
 	js.Format(_T("onIncomingCall('%s', '%s', %d)"),
 		EscapeJs(number), EscapeJs(name), call_id);
 	ExecuteShellScript(js);
+
+	BringToFront();
+	FetchCallerInfo(call_id, number);
+}
+
+void MainShellDlg::FetchCallerInfo(pjsua_call_id call_id, const CString& number)
+{
+	// نفس بيانات Tasks: الاسم بعد norm_name والعمر/الجنس/الجنسية المخزّنة.
+	// الطلب غير متزامن حتى لا يتجمّد صوت الرنين أو الواجهة.
+	CString digits;
+	for (int i = 0; i < number.GetLength(); ++i) {
+		TCHAR ch = number[i];
+		if (ch >= _T('0') && ch <= _T('9')) {
+			digits += ch;
+		}
+	}
+	if (digits.GetLength() < 4) {
+		return;
+	}
+	CString username = accountSettings.agentLoginName;
+	if (username.IsEmpty()) username = accountSettings.account.username;
+	CString password = accountSettings.account.password;
+	if (username.IsEmpty() || password.IsEmpty()) {
+		return;
+	}
+
+	CString url;
+	url.Format(_T("http://maxcall.local:3001/api/his/caller-brief/%s"), (LPCTSTR)digits);
+	CString headers = _T("Authorization: ") + MakeBasicAuthHeader(username, password);
+	URLGetAsync(url, m_hWnd, WM_SHELL_CALLER_INFO, false, _T(""), headers,
+		_T(""), _T(""), (void*)(INT_PTR)call_id);
+}
+
+LRESULT MainShellDlg::OnShellCallerInfo(WPARAM wParam, LPARAM lParam)
+{
+	URLGetAsyncData* result = (URLGetAsyncData*)wParam;
+	if (result) {
+		pjsua_call_id call_id = (pjsua_call_id)(INT_PTR)result->userData;
+		if (result->statusCode >= 200 && result->statusCode < 300 && !result->body.IsEmpty()) {
+			wchar_t* ucs2 = NULL;
+			Utf8DecodeCP((char*)(LPCSTR)result->body, CP_UTF8, &ucs2);
+			if (ucs2) {
+				CString js;
+				js.Format(_T("onIncomingInfo(%d, '%s')"), call_id, EscapeJs(CString(ucs2)));
+				free(ucs2);
+				ExecuteShellScript(js);
+			}
+		}
+		delete result;
+	}
+	return 0;
 }
 
 void MainShellDlg::PushCallState(pjsua_call_id call_id, const CString& state, const CString& number, const CString& name)

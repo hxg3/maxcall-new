@@ -82,10 +82,46 @@ function _startTimer() {
   _timerId = setInterval(_tickTimer, 500);
 }
 
-/** Hide the incoming-call banner. */
-function _hideIncoming() {
-  document.getElementById('incomingBanner')?.classList.add('hidden');
-  document.getElementById('incomingBanner')?.classList.remove('flex');
+/** @type {Map<number,HTMLElement>} One independent bar per ringing call id. */
+const _incomingBars = new Map();
+/** @type {Set<number>} Calls that reached active/held state. */
+const _activeCallIds = new Set();
+
+/** Escape user-supplied text before placing it in a bar's innerHTML. */
+function _esc(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/** Compact enriched chips for an incoming caller — same fields as the Tasks tab. */
+function _incomingChips(info) {
+  if (!info) return '';
+  const parts = [];
+  const age = String(info.age || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  const sex = String(info.sex || '').toUpperCase().charAt(0);
+  if (age) {
+    const simple = /^(\d+)\s*y(?:r|rs|ear[s]?)?(?![a-z])/.exec(age);
+    let label = simple ? simple[1] + 'y' : age.slice(0, 10);
+    if (simple && (sex === 'M' || sex === 'F')) label += ' ' + sex.toLowerCase();
+    parts.push(_chip(_esc(label), 'bg-slate-50 text-slate-500'));
+  } else if (sex === 'M' || sex === 'F') {
+    parts.push(_chip(_esc(sex.toLowerCase()), 'bg-slate-50 text-slate-500'));
+  }
+  if (info.nationality) {
+    parts.push(_chip(_esc(String(info.nationality).slice(0, 12)), 'bg-slate-50 text-slate-500'));
+  }
+  return parts.join('');
+}
+
+/** Remove only the bar belonging to one call id. */
+function _removeIncomingBar(callId) {
+  const id = Number(callId);
+  const el = _incomingBars.get(id);
+  if (el) {
+    el.remove();
+    _incomingBars.delete(id);
+  }
 }
 
 /** Show the outgoing-call banner with a number. */
@@ -102,31 +138,6 @@ function _showOutgoing(number, name) {
 function _hideOutgoing() {
   document.getElementById('outgoingBanner')?.classList.add('hidden');
   document.getElementById('outgoingBanner')?.classList.remove('flex');
-}
-
-/** Show the snoozed-incoming mini strip. */
-function _showSnooze(number, name) {
-  const strip = document.getElementById('incomingSnooze');
-  const txt = document.getElementById('incomingSnoozeText');
-  if (txt) {
-    const num = String(number || '');
-    txt.textContent = 'Incoming call ' + num + ' — tap to answer';
-  }
-  if (strip) { strip.classList.remove('hidden'); strip.classList.add('flex'); }
-  void name;
-}
-
-/** Hide the snoozed-incoming mini strip. */
-function _hideSnooze() {
-  document.getElementById('incomingSnooze')?.classList.add('hidden');
-  document.getElementById('incomingSnooze')?.classList.remove('flex');
-}
-
-/** Restore the full incoming banner (from snooze). */
-function _restoreIncoming() {
-  const banner = document.getElementById('incomingBanner');
-  if (banner) { banner.classList.remove('hidden'); banner.classList.add('flex'); }
-  _hideSnooze();
 }
 
 /** Stop the JS-side duration counter. */
@@ -431,14 +442,15 @@ const MaxCallBridge = {
 
     if (state === 'active') {
       meta.wasActive = true;
+      _activeCallIds.add(_currentCallId);
       _inCall = true;
       bar?.classList.remove('hidden');
       _setHoldUI(false);
-      _hideIncoming();
+      _removeIncomingBar(_currentCallId);
       _hideOutgoing();
-      _hideSnooze();
       _startTimer();
     } else if (state === 'held') {
+      _activeCallIds.add(_currentCallId);
       _inCall = true;
       bar?.classList.remove('hidden');
       _setHoldUI(true);
@@ -446,27 +458,38 @@ const MaxCallBridge = {
     } else if (state === 'calling') {
       _inCall = true;
       bar?.classList.add('hidden');
-      _hideIncoming();
       _showOutgoing(meta.number || num, meta.name || nm);
     } else if (state === 'ringing') {
       _inCall = true;
       if (meta.direction === 'out') {
         bar?.classList.add('hidden');
-        _hideIncoming();
         _showOutgoing(meta.number || num, meta.name || nm);
       } else {
         bar?.classList.add('hidden');
         _hideOutgoing();
       }
     } else if (state === 'ended' || state === 'idle') {
-      _inCall = false;
-      _stopTimer();
-      bar?.classList.add('hidden');
-      _hideIncoming();
-      _hideOutgoing();
-      _hideSnooze();
+      _activeCallIds.delete(Number(callId));
+      _removeIncomingBar(Number(callId));
       if (state === 'ended') _appendLog(meta);
-      if (!_inCall) { _currentCallId = -1; _lastDialed = ''; }
+      if (_activeCallIds.size) {
+        // Another answered call is still up — keep the active bar, switch to it.
+        _inCall = true;
+        _currentCallId = Array.from(_activeCallIds)[_activeCallIds.size - 1];
+        const other = _callMeta.get(_currentCallId);
+        if (other) {
+          if (acNum) acNum.textContent = other.number || '—';
+          if (acName) acName.textContent = other.name || 'Unknown';
+          if (acState) acState.textContent = 'active';
+        }
+      } else {
+        _inCall = false;
+        _stopTimer();
+        bar?.classList.add('hidden');
+        _hideOutgoing();
+        _currentCallId = -1;
+        _lastDialed = '';
+      }
       _callMeta.delete(Number(callId));
     }
     _emit('call-state', { callId: _currentCallId, state, number: meta.number, name: meta.name });
@@ -480,17 +503,66 @@ const MaxCallBridge = {
    * @returns {void}
    */
   onIncomingCall(number, name, callId) {
-    _currentCallId = Number(callId);
-    _callMeta.set(_currentCallId, { number: String(number || ''), name: String(name || ''), direction: 'in', wasActive: false });
-    const banner = document.getElementById('incomingBanner');
-    const numEl = document.getElementById('incomingNumber');
-    const nameEl = document.getElementById('incomingName');
-    if (numEl) numEl.textContent = String(number || '');
-    if (nameEl) nameEl.textContent = String(name || '');
+    const id = Number(callId);
+    const num = String(number || '');
+    const nm = String(name || '');
+    const host = document.getElementById('incomingBars');
+    if (!host) return;
+
+    const meta = _callMeta.get(id) || { wasActive: false, info: null };
+    meta.number = num;
+    meta.name = nm;
+    meta.direction = 'in';
+    _callMeta.set(id, meta);
+
+    let bar = _incomingBars.get(id);
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.setAttribute('data-call-id', String(id));
+      bar.className = 'flex items-center justify-between gap-2 border-b border-amber-200 bg-amber-50 px-3 py-2';
+      host.appendChild(bar);
+      _incomingBars.set(id, bar);
+    }
+    const displayName = (meta.info && meta.info.name) || nm;
+    bar.innerHTML =
+      '<div class="flex min-w-0 items-center gap-2">' +
+        '<span class="flex h-8 w-8 shrink-0 animate-pulse items-center justify-center rounded-full bg-brand text-white">' +
+          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L8 10a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2Z"/></svg>' +
+        '</span>' +
+        '<div class="min-w-0">' +
+          '<p class="text-xs font-bold">Incoming call</p>' +
+          '<p class="truncate text-[11px] font-semibold text-slate-700" dir="ltr" data-name>' + _esc(displayName) + '</p>' +
+          '<p class="truncate text-[11px] text-slate-500" dir="ltr" data-number>' + _esc(num) + '</p>' +
+          '<div class="mt-1 flex flex-wrap gap-1" data-info>' + _incomingChips(meta.info) + '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="flex shrink-0 gap-1.5">' +
+        '<button type="button" data-incoming-action="answer" title="Answer" aria-label="Answer" class="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500 text-white active:scale-95">' +
+          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L8 10a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2Z"/></svg>' +
+        '</button>' +
+        '<button type="button" data-incoming-action="decline" title="Decline" aria-label="Decline" class="flex h-8 w-8 items-center justify-center rounded-full bg-rose-500 text-white active:scale-95">' +
+          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4"><path d="M10.7 13.3a16 16 0 0 1-2.7-2.7l1.3-1.3a2 2 0 0 0 .5-2.1c-.3-.9-.6-1.9-.7-2.9a2 2 0 0 0-2-1.7H4.1a2 2 0 0 0-2 2.1c.1 1.4.5 2.8 1 4.1m6.6 9.6c1.3.5 2.7.9 4.1 1a2 2 0 0 0 2.1-2v-2.9a2 2 0 0 0-1.7-2c-1-.1-2-.4-2.9-.7a2 2 0 0 0-2.1.5l-.5.5"/><path d="m2 2 20 20"/></svg>' +
+        '</button>' +
+      '</div>';
+
     _hideOutgoing();
-    _hideSnooze();
-    if (banner) { banner.classList.remove('hidden'); banner.classList.add('flex'); }
-    _emit('incoming-call', { number: String(number || ''), name: String(name || ''), callId: _currentCallId });
+    _emit('incoming-call', { number: num, name: nm, callId: id });
+  },
+
+  /** Enriched caller info (name/age/sex/nationality) pushed from C++. */
+  onIncomingInfo(callId, infoJson) {
+    const id = Number(callId);
+    let info = null;
+    try { info = infoJson ? JSON.parse(infoJson) : null; } catch (err) { info = null; }
+    const meta = _callMeta.get(id);
+    if (meta) meta.info = info;
+    const bar = _incomingBars.get(id);
+    if (!bar || !info) return;
+    const nameEl = bar.querySelector('[data-name]');
+    if (nameEl && info.name) nameEl.textContent = String(info.name);
+    const infoEl = bar.querySelector('[data-info]');
+    if (infoEl) infoEl.innerHTML = _incomingChips(info);
+    _emit('incoming-info', { callId: id, info: info });
   },
 
   /**
@@ -1040,13 +1112,19 @@ function _wireUI() {
   document.getElementById('btnTransfer')?.addEventListener('click', () =>
     MaxCallBridge.transfer(undefined, document.getElementById('transferTarget')?.value));
 
-  document.getElementById('btnIncomingAnswer')?.addEventListener('click', () => MaxCallBridge.answer(undefined));
-  document.getElementById('btnIncomingReject')?.addEventListener('click', () => {
-    const meta = _callMeta.get(_currentCallId);
-    _hideIncoming();
-    _showSnooze(meta?.number || document.getElementById('incomingNumber')?.textContent || '', meta?.name || '');
+  // One listener for every incoming bar — each button carries its own call id.
+  document.getElementById('incomingBars')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-incoming-action]');
+    if (!btn) return;
+    const id = Number(btn.closest('[data-call-id]')?.getAttribute('data-call-id'));
+    if (!Number.isFinite(id)) return;
+    if (btn.getAttribute('data-incoming-action') === 'answer') {
+      MaxCallBridge.answer(id);
+    } else {
+      MaxCallBridge.hangup(id);
+    }
+    _removeIncomingBar(id);
   });
-  document.getElementById('incomingSnooze')?.addEventListener('click', _restoreIncoming);
   document.getElementById('btnOutgoingCancel')?.addEventListener('click', () => MaxCallBridge.hangup(undefined));
 
   document.getElementById('btnMinimize')?.addEventListener('click', () => MaxCallBridge.minimizeApp());
@@ -1104,6 +1182,7 @@ document.addEventListener('DOMContentLoaded', () => {
 window.onRegState = (...a) => MaxCallBridge.onRegState(...a);
 window.onCallState = (...a) => MaxCallBridge.onCallState(...a);
 window.onIncomingCall = (...a) => MaxCallBridge.onIncomingCall(...a);
+window.onIncomingInfo = (...a) => MaxCallBridge.onIncomingInfo(...a);
 window.onMessage = (...a) => MaxCallBridge.onMessage(...a);
 window.onContacts = (...a) => MaxCallBridge.onContacts(...a);
 window.onAccount = (...a) => MaxCallBridge.onAccount(...a);

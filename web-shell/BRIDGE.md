@@ -64,7 +64,8 @@ window.chrome.webview.postMessage({ action: 'hold', callId: -1, on: true });
 
 | الدالة | التوقيع | الوصف |
 |---|---|---|
-| `onIncomingCall` | `(number: string, name: string, callId: number)` | إظهار بانر الواردة |
+| `onIncomingCall` | `(number: string, name: string, callId: number)` | إضافة شريط وارد مستقل لهذا الـ callId (تبقى كل الشرائط الأخرى ظاهرة) |
+| `onIncomingInfo` | `(callId: number, jsonText: string)` | تحديث شريط وارد ببيانات المريض المثراة: `{ok,name,age,sex,nationality,payer}` — تُجلب من `/api/his/caller-brief/<phone>` في لحظة الرنين |
 | `onCallState` | `(callId: number, state: 'idle' \| 'calling' \| 'ringing' \| 'active' \| 'held' \| 'ended', number: string, name: string)` | تحديث شريط المكالمة (الرقم/الاسم فارغان في أحداث التعليق — تُعاد القيم المخزنة) |
 | `onRegState` | `(registered: boolean, message: string)` | تحديث `#regDot` / `#regText` + إخفاء بانر المحرك |
 | `onMessage` | `(from: string, text: string)` | تنبيه / رسالة نصية |

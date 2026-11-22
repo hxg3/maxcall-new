@@ -571,6 +571,19 @@ LRESULT CmainDlg::onCallState(WPARAM wParam, LPARAM lParam)
 	//-- modern shell: call state (call_info still valid here)
 	PushCallToShell(call_info);
 
+	//-- caller details only once the incoming call is actually answered
+	if (call_info->state == PJSIP_INV_STATE_CONFIRMED
+		&& call_info->role == PJSIP_ROLE_UAS) {
+		CString crmNumber = !sipuri.user.IsEmpty() ? sipuri.user : sipuri.domain;
+		if (!crmNumber.IsEmpty()) {
+			CString crmName = pageContacts ? pageContacts->GetNameByNumber(crmNumber) : _T("");
+			if (crmName.IsEmpty()) {
+				crmName = sipuri.name;
+			}
+			ShowCrmPopup(crmNumber, crmName, call_info->id);
+		}
+	}
+
 	// --delete user data
 	if (call_info->state == PJSIP_INV_STATE_DISCONNECTED) {
 		if (user_data) {
@@ -2582,22 +2595,9 @@ void CmainDlg::MainPopupMenu(bool isMenuButton)
 
 LRESULT CmainDlg::onCreateRingingDlg(WPARAM wParam, LPARAM lParam)
 {
-	// الوضع الحديث: بطاقة CRM فقط (البانر في القشرة) — بلا نافذة رنين أصلية
+	// الوضع الحديث: شريط المكالمة الوارد في القشرة يكفي — بلا نافذة رنين ولا
+	// نافذة بيانات متصل. بطاقة المتصل تُفتح بعد الرد فقط (CONFIRMED).
 	if (IsModernShellActive()) {
-		pjsua_call_info shellInfo;
-		if (pjsua_var.state == PJSUA_STATE_RUNNING
-			&& pjsua_call_get_info((pjsua_call_id)wParam, &shellInfo) == PJ_SUCCESS) {
-			SIPURI shellUri;
-			MSIP::ParseSIPURI(MSIP::PjToStr(&shellInfo.remote_info, TRUE), &shellUri);
-			CString shellNum = !shellUri.user.IsEmpty() ? shellUri.user : shellUri.domain;
-			CString shellName = pageContacts ? pageContacts->GetNameByNumber(shellNum) : _T("");
-			if (shellName.IsEmpty() && !shellUri.name.IsEmpty()) {
-				shellName = shellUri.name;
-			}
-			if (!shellNum.IsEmpty()) {
-				ShowCrmPopup(shellNum, shellName, shellInfo.id);
-			}
-		}
 		return 0;
 	}
 	pjsua_call_id call_id = wParam;
@@ -2655,10 +2655,7 @@ LRESULT CmainDlg::onCreateRingingDlg(WPARAM wParam, LPARAM lParam)
 	ringinDlg->GetDlgItem(IDC_CALLER_NAME)->SetWindowText(displayName);
 	ringinDlg->GetDlgItem(IDC_RINGIN_NAME_BLIND)->SetWindowText(displayName);
 
-	// نعرض بطاقة بيانات المتصل للمكالمات الواردة حتى لو كان الاسم غير معروف.
-	if (!number.IsEmpty()) {
-		ShowCrmPopup(number, callerName, call_info.id);
-	}
+	// بطاقة بيانات المتصل لا تُفتح عند الرنين — فقط بعد الرد (CONFIRMED).
 
 	str = number;
 	if (str == displayName) {
