@@ -241,7 +241,12 @@ jobs:
         $proj = (Get-Content microsip.vcxproj -Raw).Replace('1.0.2739.15', '1.0.1518.46').Replace('WebView2LoaderStatic.lib', 'WebView2Loader.dll.lib')
         Set-Content microsip.vcxproj $proj -NoNewline
         nuget restore microsip.sln
+        # Rebuild, not just Build: the objects currently on disk were compiled
+        # against SDK 1.0.2739.15 headers. Reusing them with the 1.0.1518.46
+        # import lib produces a binary whose environment can be created but
+        # whose WebView2 controller fails with E_ABORT.
         msbuild microsip.sln `
+          /t:Rebuild `
           /p:Configuration=Release /p:Platform=Win32 /p:PlatformToolset=v143 `
           /verbosity:minimal /nologo
         if ($LASTEXITCODE -ne 0) { throw "Win7 build failed" }
@@ -265,6 +270,7 @@ jobs:
         # binary so the Package step below publishes the right one.
         nuget restore microsip.sln
         msbuild microsip.sln `
+          /t:Rebuild `
           /p:Configuration=Release /p:Platform=Win32 /p:PlatformToolset=v143 `
           /verbosity:minimal /nologo
         if ($LASTEXITCODE -ne 0) { throw "standard rebuild failed" }
