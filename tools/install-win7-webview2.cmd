@@ -12,6 +12,7 @@ set "DEST=C:\WebView2-109"
 set "KEY=HKLM\SOFTWARE\Policies\Microsoft\Edge\WebView2\BrowserExecutableFolder"
 set "KEY32=HKLM\SOFTWARE\Wow6432Node\Policies\Microsoft\Edge\WebView2\BrowserExecutableFolder"
 set "HOSTS=%WINDIR%\System32\drivers\etc\hosts"
+set "RUNTIME_DIR="
 
 net session >nul 2>&1
 if errorlevel 1 (
@@ -57,22 +58,28 @@ if not exist "%CAB%" (
 echo OK: "%CAB%"
 
 echo.
-echo [3/5] Extracting to %DEST%  (may take a few minutes on a slow PC)...
-if not exist "%DEST%" mkdir "%DEST%" >nul
-if not exist "%DEST%\msedgewebview2.exe" expand "%CAB%" -F:* "%DEST%" >nul
-if not exist "%DEST%\msedgewebview2.exe" (
-  echo ERROR: extraction failed. Try manually:
+echo [3/5] Extracting / locating the runtime...
+for /f "delims=" %%F in ('dir /s /b "%DEST%\msedgewebview2.exe" 2^>nul') do set "RUNTIME_DIR=%%~dpF"
+if not defined RUNTIME_DIR (
+  if not exist "%DEST%" mkdir "%DEST%" >nul
+  expand "%CAB%" -F:* "%DEST%" >nul
+  for /f "delims=" %%F in ('dir /s /b "%DEST%\msedgewebview2.exe" 2^>nul') do set "RUNTIME_DIR=%%~dpF"
+)
+if not defined RUNTIME_DIR (
+  echo ERROR: msedgewebview2.exe was not found after extraction.
+  echo Try manually:
   echo   expand "%CAB%" -F:* "%DEST%"
   echo.
   pause
   exit /b 1
 )
-echo OK.
+set "RUNTIME_DIR=%RUNTIME_DIR:~0,-1%"
+echo OK: %RUNTIME_DIR%
 
 echo.
 echo [4/5] Setting the WebView2 policy...
-reg add "%KEY%" /v * /t REG_SZ /d "%DEST%" /f >nul
-reg add "%KEY32%" /v * /t REG_SZ /d "%DEST%" /f >nul
+reg add "%KEY%" /v * /t REG_SZ /d "%RUNTIME_DIR%" /f >nul
+reg add "%KEY32%" /v * /t REG_SZ /d "%RUNTIME_DIR%" /f >nul
 echo OK.
 
 echo.
