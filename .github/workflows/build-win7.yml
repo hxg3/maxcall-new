@@ -33,6 +33,18 @@ jobs:
         Set-Content microsip.vcxproj $proj -NoNewline
         Select-String -Path packages.config, microsip.vcxproj -Pattern 'WebView2|1.0.1518'
 
+    - name: Disable self-update in the Win7 build
+      shell: pwsh
+      run: |
+        # This build must never be replaced by the standard (static-loader)
+        # binary, which cannot start on Windows 7.
+        $path = "const.h"
+        $text = Get-Content $path -Raw
+        $text = $text.Replace('_GLOBAL_UPDATE_BASE_URL "https://github.com/" _GLOBAL_UPDATE_REPO "/releases"', '_GLOBAL_UPDATE_BASE_URL "http://127.0.0.1:1/maxcall-no-update"')
+        $text = $text.Replace('_GLOBAL_UPDATE_MIRROR_URL "http://maxcall.local:3001/updates"', '_GLOBAL_UPDATE_MIRROR_URL "http://127.0.0.1:1/maxcall-no-update"')
+        Set-Content $path $text -NoNewline
+        Select-String -Path $path -Pattern 'UPDATE_BASE_URL|UPDATE_MIRROR_URL'
+
     - name: Restore NuGet Packages
       shell: pwsh
       run: nuget restore microsip.sln
