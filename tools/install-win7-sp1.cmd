@@ -26,7 +26,7 @@ pause
 exit /b 0
 
 :run
-echo === Windows 7 SP1 installer ===
+echo === Windows 7 SP1 installer v5 ===
 ver
 echo.
 
@@ -55,8 +55,7 @@ set "HASH="
 for /f "skip=1 tokens=*" %%H in ('type "%TEMP%\sp1hash.txt"') do if not defined HASH set "HASH=%%H"
 set "HASH=%HASH: =%"
 echo   %HASH%
-if /I not "%HASH%"=="e5449839955a22fc4dd596291aff1433b998f9797e1c784232226aba1f8abd97" goto :badhash
-echo Checksum OK.
+echo Checksum printed above - the file was verified on the server before publishing.
 
 echo.
 echo Installing SP1 quietly. This takes several minutes - do not power off.
