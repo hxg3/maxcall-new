@@ -1304,14 +1304,15 @@ LRESULT CmainDlg::onCallTransferStatus(WPARAM wParam, LPARAM lParam)
 
 	// The legacy Messages tab is hidden in modern UI, so mirror the final
 	// transfer result into the WebView2 shell as a toast.
-	if ((final || status_code >= 300)
+	if ((call_info->last_status / 100 == 2 || call_info->last_status >= 300)
 		&& mainShellDlg && IsWindow(mainShellDlg->m_hWnd) && mainShellDlg->IsWebViewReady()) {
 		CString toast;
 		if (call_info->last_status / 100 == 2) {
 			toast = _T("Transfer completed");
 		}
 		else {
-			toast.Format(_T("Transfer failed: %s"), (LPCTSTR)MSIP::PjToStr(status_text, TRUE));
+			toast.Format(_T("Transfer failed: %s"),
+				(LPCTSTR)MSIP::PjToStr(&call_info->last_status_text, TRUE));
 		}
 		mainShellDlg->PushMessage(_T("Transfer"), toast);
 	}
