@@ -147,6 +147,7 @@ MainShellDlg::MainShellDlg(CWnd* pParent)
 	m_pageReady = false;
 	m_minPin = false;
 	m_lastCallId = PJSUA_INVALID_ID;
+	m_feedbackOffset = 0;
 }
 
 MainShellDlg::~MainShellDlg(void)
@@ -551,7 +552,7 @@ void MainShellDlg::ProcessShellMessage(CString& message)
 		return;
 	}
 	if (action == _T("feedbackQueue")) {
-		FetchFeedbackQueue();
+		FetchFeedbackQueue(JsInt(root["offset"], 0));
 		return;
 	}
 	if (action == _T("feedbackMy")) {
@@ -906,11 +907,12 @@ LRESULT MainShellDlg::OnShellHistory(WPARAM wParam, LPARAM lParam)
 	return 0;
 }
 
-void MainShellDlg::FetchFeedbackQueue()
+void MainShellDlg::FetchFeedbackQueue(int offset)
 {
 	if (!IsWindow(m_hWnd)) {
 		return;
 	}
+	m_feedbackOffset = offset < 0 ? 0 : offset;
 	// نفس بيانات دخول الموظف التي توثّق نداءات HIS: agentLoginName هو الاسم
 	// الذي كتبه الموظف عند الدخول (قد يختلف عن داخلة SIP)، وكلمة المرور هي
 	// نفسها التي تحقّقها نقطة /api/agent/login.
@@ -926,7 +928,9 @@ void MainShellDlg::FetchFeedbackQueue()
 		return;
 	}
 
-	CString url = _T("http://maxcall.local:3001/api/feedback/queue?limit=50");
+	CString url;
+	url.Format(_T("http://maxcall.local:3001/api/feedback/queue?limit=200&offset=%d"),
+		m_feedbackOffset);
 	CString headers = _T("Authorization: ") + MakeBasicAuthHeader(username, password);
 	URLGetAsync(url, m_hWnd, WM_SHELL_FEEDBACK_RESULT, false, _T(""), headers);
 }
@@ -965,11 +969,25 @@ LRESULT MainShellDlg::OnShellFeedbackResult(WPARAM wParam, LPARAM lParam)
 				Utf8DecodeCP((char*)(LPCSTR)bodyA, CP_UTF8, &ucs2);
 				if (ucs2) {
 					CString js;
-					js.Format(_T("onFeedbackQueue('%s')"), EscapeJs(CString(ucs2)));
+					js.Format(_T("onFeedbackQueue('%s', %s)"), EscapeJs(CString(ucs2)),
+						m_feedbackOffset > 0 ? _T("true") : _T("false"));
 					free(ucs2);
 					ExecuteShellScript(js);
 				}
 			}
+			else {
+				// Keep the spinner/load-more honest even when the request fails.
+				CString fail;
+				fail.Format(_T("onFeedbackQueue('{\"ok\":false,\"data\":[]}', %s)"),
+					m_feedbackOffset > 0 ? _T("true") : _T("false"));
+				ExecuteShellScript(fail);
+			}
+		}
+		else {
+			CString fail;
+			fail.Format(_T("onFeedbackQueue('{\"ok\":false,\"data\":[]}', %s)"),
+				m_feedbackOffset > 0 ? _T("true") : _T("false"));
+			ExecuteShellScript(fail);
 		}
 		delete result;
 	}

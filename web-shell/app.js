@@ -390,7 +390,7 @@ const MaxCallBridge = {
    * Request the feedback task queue from C++ (via the bridge → server).
    * @returns {void}
    */
-  feedbackQueue() { _postToNative({ action: 'feedbackQueue' }); },
+  feedbackQueue(offset = 0) { _postToNative({ action: 'feedbackQueue', offset }); },
 
   /**
    * Request this agent's claimed (in-progress) feedback tasks from C++.
@@ -1201,6 +1201,10 @@ function _wireUI() {
     _fetchFeedbackQueue();
     _fetchFeedbackMy();
   });
+  document.getElementById('feedbackLoadMore')?.addEventListener('click', () => {
+    if (_feedbackLoading) return;
+    _fetchFeedbackQueue(_feedbackTasks.length);
+  });
 
   /* feedback section: New/My sub-tabs + outcome dialog */
   document.getElementById('fbSubNew')?.addEventListener('click', () => _switchFeedbackSub('new'));
@@ -1249,6 +1253,10 @@ window.onPinState = (...a) => MaxCallBridge.onPinState(...a);
   /* ---------- feedback queue (via C++ bridge) ---------- */
   /** @type {Array<{id:number,phone:string,patient_name:string,visit_date:string,doctor:string,payer:string,visit_amount:number,status:string,attempts:number,max_attempts:number}>} */
   let _feedbackTasks = [];
+  /** @type {number} Total due tasks reported by the server (can exceed loaded rows). */
+  let _feedbackTotal = 0;
+  /** @type {boolean} Whether a queue page request is in flight. */
+  let _feedbackLoading = false;
   /** @type {Array<object>} Claimed tasks waiting for an outcome (My pane). */
   let _myTasks = [];
   /** Task id currently open in the feedback dialog. */
@@ -1256,7 +1264,7 @@ window.onPinState = (...a) => MaxCallBridge.onPinState(...a);
 
   /** Update the notification bubble on the Tasks tab icon + pane counters. */
   function _setFeedbackCounts() {
-    const newCount = _feedbackTasks.length;
+    const newCount = Math.max(_feedbackTotal, _feedbackTasks.length);
     const myCount = _myTasks.length;
     const navBadge = document.getElementById('feedbackCountBadge');
     if (navBadge) {
@@ -1269,11 +1277,24 @@ window.onPinState = (...a) => MaxCallBridge.onPinState(...a);
     if (m) m.textContent = String(myCount);
   }
 
-  /** Ask C++ to fetch the due feedback task queue from the server (New pane). */
-  function _fetchFeedbackQueue() {
+  /** Reflect loaded/total counts on the "Load more" control. */
+  function _updateFeedbackLoadMore(hasMore) {
+    const info = document.getElementById('feedbackLoadInfo');
+    if (info) info.textContent = _feedbackTasks.length + ' / ' + (_feedbackTotal || _feedbackTasks.length);
+    const btn = document.getElementById('feedbackLoadMore');
+    if (btn) {
+      btn.classList.toggle('hidden', !hasMore);
+      btn.disabled = _feedbackLoading;
+    }
+  }
+
+  /** Ask C++ to fetch a page of due tasks; offset 0 replaces the whole list. */
+  function _fetchFeedbackQueue(offset = 0) {
     const err = document.getElementById('feedbackError');
     if (err) err.classList.add('hidden');
-    MaxCallBridge.feedbackQueue();
+    _feedbackLoading = true;
+    _updateFeedbackLoadMore(false);
+    MaxCallBridge.feedbackQueue(offset);
   }
 
   /** Ask C++ to fetch the agent's claimed tasks (My pane). */
@@ -1338,46 +1359,63 @@ window.onPinState = (...a) => MaxCallBridge.onPinState(...a);
   const NOANSWER_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5"><path stroke-linecap="round" d="M10.7 13.3a16 16 0 0 1-2.7-2.7l1.3-1.3a2 2 0 0 0 .5-2.1c-.3-.9-.6-1.9-.7-2.9a2 2 0 0 0-2-1.7H4.1a2 2 0 0 0-2 2.1c.1 1.4.5 2.8 1 4.1m6.6 9.6c1.3.5 2.7.9 4.1 1a2 2 0 0 0 2.1-2v-2.9a2 2 0 0 0-1.7-2c-1-.1-2-.4-2.9-.7a2 2 0 0 0-2.1.5l-.5.5"/><path d="m2 2 20 20"/></svg>';
   const DONE_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5"><path stroke-linecap="round" stroke-linejoin="round" d="m5 13 4 4L19 7"/></svg>';
 
-  /** Render the due-task list (New pane): the only in-place action is Call. */
-  function _renderFeedback(jsonText) {
-    let arr = [];
-    try { arr = JSON.parse(String(jsonText || '[]')); } catch { arr = []; }
-    if (!Array.isArray(arr)) arr = (arr && arr.data) || [];
-    _feedbackTasks = arr;
+  /** Build one task card and wire its actions. */
+  function _appendTaskRow(t, list) {
+    const row = _taskCard();
+    const attempts = String(t.attempts || 0) + '/' + String(t.max_attempts || 3);
+    row.innerHTML +=
+      '<div class="flex shrink-0 items-center gap-1.5">' +
+      _taskBtn('call', 'Call', 'bg-emerald-500 text-white', CALL_SVG) +
+      _taskBtn('popup', 'Caller details', 'bg-slate-100 text-slate-500', INFO_SVG) +
+      '</div>';
+    row.querySelector('p').textContent = t.patient_name || '—';
+    row.querySelector('[data-chips]').innerHTML = _chipsHtml(t);
+    row.querySelector('[data-meta]').textContent = (t.phone || '') + ' · ' + attempts;
+    row.querySelector('[data-act="call"]').addEventListener('click', () => {
+      MaxCallBridge.feedbackClaim(t.id);
+      MaxCallBridge.makeCall(t.phone);
+      _switchTab('tabDial');
+    });
+    row.querySelector('[data-act="popup"]').addEventListener('click', () => { MaxCallBridge.openPopup(t.phone); });
+    list.appendChild(row);
+  }
+
+  /** Render a queue page. `append` keeps earlier pages and only adds new rows. */
+  function _renderFeedback(jsonText, append) {
+    let payload = null;
+    try { payload = JSON.parse(String(jsonText || '[]')); } catch { payload = []; }
+    const arr = Array.isArray(payload) ? payload : ((payload && payload.data) || []);
+    const ok = Array.isArray(payload) || payload.ok !== false;
+    if (typeof payload.total === 'number') _feedbackTotal = payload.total;
+    else if (!append) _feedbackTotal = arr.length;
+    _feedbackLoading = false;
+
     const list = document.getElementById('feedbackList');
     const empty = document.getElementById('feedbackEmpty');
     const err = document.getElementById('feedbackError');
     if (!list) return;
-    list.innerHTML = '';
-    if (err) err.classList.add('hidden');
-    if (arr.length === 0) {
+    if (!ok && err) {
+      err.textContent = 'Could not load tasks. Check the connection and retry.';
+      err.classList.remove('hidden');
+    } else if (err) {
+      err.classList.add('hidden');
+    }
+    if (!append) {
+      _feedbackTasks = [];
+      list.innerHTML = '';
+    }
+    if (arr.length === 0 && !append) {
       if (empty) empty.classList.remove('hidden');
+      _updateFeedbackLoadMore(false);
       _setFeedbackCounts();
       return;
     }
     if (empty) empty.classList.add('hidden');
-    arr.forEach((t) => {
-      const row = _taskCard();
-      const attempts = String(t.attempts || 0) + '/' + String(t.max_attempts || 3);
-      row.innerHTML +=
-        '<div class="flex shrink-0 items-center gap-1.5">' +
-        _taskBtn('call', 'Call', 'bg-emerald-500 text-white', CALL_SVG) +
-        _taskBtn('popup', 'Caller details', 'bg-slate-100 text-slate-500', INFO_SVG) +
-        '</div>';
-      row.querySelector('p').textContent = t.patient_name || '—';
-      row.querySelector('[data-chips]').innerHTML = _chipsHtml(t);
-      row.querySelector('[data-meta]').textContent = (t.phone || '') + ' · ' + attempts;
-      row.querySelector('[data-act="call"]').addEventListener('click', () => {
-        // ادعاء + اتصال: المهمة تنتقل فوراً إلى My والموظف يتصل بالمريض.
-        MaxCallBridge.feedbackClaim(t.id);
-        MaxCallBridge.makeCall(t.phone);
-        _switchTab('tabDial');
-      });
-      row.querySelector('[data-act="popup"]').addEventListener('click', () => { MaxCallBridge.openPopup(t.phone); });
-      list.appendChild(row);
-    });
+    arr.forEach((t) => _appendTaskRow(t, list));
+    _feedbackTasks = _feedbackTasks.concat(arr);
+    _updateFeedbackLoadMore(Boolean(payload.has_more));
     _setFeedbackCounts();
-    _emit('feedback-queue', { count: arr.length });
+    _emit('feedback-queue', { count: _feedbackTasks.length, total: _feedbackTotal });
   }
 
   /** Render the agent's claimed tasks (My pane): record outcome here. */
@@ -1446,8 +1484,8 @@ window.onPinState = (...a) => MaxCallBridge.onPinState(...a);
   }
 
   /** Called by C++ via ExecuteScript when the due-task queue arrives from the server. */
-  window.onFeedbackQueue = (jsonText) => {
-    _renderFeedback(jsonText);
+  window.onFeedbackQueue = (jsonText, append) => {
+    _renderFeedback(jsonText, append === true);
   };
 
   /** Called by C++ via ExecuteScript when the claimed-task list arrives. */

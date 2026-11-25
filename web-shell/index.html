@@ -197,6 +197,10 @@
         </div>
         <div id="fbPaneNew" role="tabpanel">
           <div id="feedbackList" class="h-[300px] max-h-[300px] space-y-1.5 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"></div>
+          <div class="mt-1.5 flex items-center justify-between gap-2">
+            <span id="feedbackLoadInfo" class="text-[10px] text-slate-400" dir="ltr"></span>
+            <button id="feedbackLoadMore" type="button" class="hidden shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold text-slate-600 active:scale-95 disabled:opacity-50">Load more</button>
+          </div>
           <p id="feedbackEmpty" class="rounded-2xl border border-dashed border-slate-200 px-3 py-6 text-center text-xs text-slate-400">No tasks due right now.</p>
         </div>
         <div id="fbPaneMy" role="tabpanel" class="hidden">

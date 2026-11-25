@@ -45,7 +45,7 @@ public:
 	void PushPinState(bool on);
 	void PushUpdateState(int state, const CString& version, int percent, const CString& message);
 	void FetchHistory();
-	void FetchFeedbackQueue();
+	void FetchFeedbackQueue(int offset = 0);
 	void FetchFeedbackMy();
 	void PushSnapshot();
 
@@ -83,6 +83,7 @@ private:
 	bool m_pageReady;
 	bool m_minPin;
 	pjsua_call_id m_lastCallId;
+	int m_feedbackOffset;
 	CString m_lastNumber;
 	CString m_lastName;
 
