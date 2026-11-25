@@ -208,7 +208,7 @@ Check your Browserslist config to be sure that your targets are set up correctly
             </button>
           </div>
           <div class="mt-1.5 flex gap-1.5">
-            <input id="transferTarget" dir="ltr" inputmode="tel" placeholder="Transfer to…" class="w-full rounded-xl bg-white px-2.5 py-1.5 text-xs outline-none ring-1 ring-slate-200 placeholder:text-slate-400 focus:ring-teal-500" />
+            <input id="transferTarget" dir="ltr" inputmode="tel" placeholder="Transfer to…" class="w-full select-text rounded-xl bg-white px-2.5 py-1.5 text-xs outline-none ring-1 ring-slate-200 placeholder:text-slate-400 focus:ring-teal-500" />
             <button id="btnTransfer" title="Transfer" aria-label="Transfer" class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-800 text-white active:scale-95">
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7Z"/></svg>
             </button>
@@ -218,7 +218,7 @@ Check your Browserslist config to be sure that your targets are set up correctly
         <div class="rounded-2xl border border-slate-100 bg-slate-50 p-3">
           <div class="flex items-center gap-1.5">
             <input id="dialInput" dir="ltr" inputmode="tel" autocomplete="off" placeholder="Enter number"
-              class="w-full bg-transparent text-center text-xl font-bold tracking-widest text-slate-800 outline-none placeholder:text-slate-300" />
+              class="w-full select-text bg-transparent text-center text-xl font-bold tracking-widest text-slate-800 outline-none placeholder:text-slate-300" />
             <button id="btnBackspace" title="Delete" aria-label="Delete digit" class="shrink-0 rounded-full p-1.5 text-slate-400 hover:bg-slate-200 active:scale-95">
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4"><path d="M21 5H8l-5 7 5 7h13a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1Z"/><path d="m12 9 6 6M18 9l-6 6"/></svg>
             </button>
@@ -254,7 +254,7 @@ Check your Browserslist config to be sure that your targets are set up correctly
       <section id="tabContacts" role="tabpanel" class="hidden space-y-2">
         <div class="flex items-center gap-2 rounded-2xl bg-slate-50 px-3 py-2">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4 shrink-0 text-slate-400"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-          <input id="contactSearch" placeholder="Search contacts…" class="w-full bg-transparent text-xs outline-none placeholder:text-slate-400" />
+          <input id="contactSearch" placeholder="Search contacts…" class="w-full select-text bg-transparent text-xs outline-none placeholder:text-slate-400" />
           <span id="contactCount" class="shrink-0 text-[11px] text-slate-400">0</span>
         </div>
         <div id="contactList" class="h-[248px] max-h-[248px] divide-y divide-slate-100 overflow-y-auto rounded-2xl border border-slate-100 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"></div>
@@ -268,7 +268,7 @@ Check your Browserslist config to be sure that your targets are set up correctly
         </div>
         <div class="flex items-center gap-2 rounded-2xl bg-slate-50 px-3 py-2">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4 shrink-0 text-slate-400"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-          <input id="logSearch" placeholder="Search log…" class="w-full bg-transparent text-xs outline-none placeholder:text-slate-400" />
+          <input id="logSearch" placeholder="Search log…" class="w-full select-text bg-transparent text-xs outline-none placeholder:text-slate-400" />
         </div>
         <div id="logList" class="h-[248px] max-h-[248px] space-y-1.5 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"></div>
         <p id="logEmpty" class="rounded-2xl border border-dashed border-slate-200 px-3 py-6 text-center text-xs text-slate-400">No calls logged yet.</p>
@@ -317,7 +317,7 @@ Check your Browserslist config to be sure that your targets are set up correctly
           <button data-score="4" class="h-7 flex-1 rounded-lg bg-slate-100 text-xs font-bold text-slate-500 active:scale-95">4</button>
           <button data-score="5" class="h-7 flex-1 rounded-lg bg-slate-100 text-xs font-bold text-slate-500 active:scale-95">5</button>
         </div>
-        <textarea id="fbComment" rows="2" placeholder="Comment (optional)…" class="mt-2 w-full resize-none rounded-xl bg-slate-50 px-2.5 py-1.5 text-xs outline-none ring-1 ring-slate-200 placeholder:text-slate-400 focus:ring-teal-500"></textarea>
+        <textarea id="fbComment" rows="2" placeholder="Comment (optional)…" class="mt-2 w-full select-text resize-none rounded-xl bg-slate-50 px-2.5 py-1.5 text-xs outline-none ring-1 ring-slate-200 placeholder:text-slate-400 focus:ring-teal-500"></textarea>
         <div class="mt-3 flex gap-2">
           <button id="fbDialogCancel" class="flex-1 rounded-xl bg-slate-100 py-1.5 text-xs font-bold text-slate-600 active:scale-95">Cancel</button>
           <button id="fbDialogSubmit" class="flex-1 rounded-xl bg-brand py-1.5 text-xs font-bold text-white active:scale-95">Save</button>
@@ -1368,7 +1368,11 @@ function _switchFeedbackSub(which) {
 
 /** Wire up all DOM controls. */
 function _wireUI() {
-  document.addEventListener('contextmenu', (e) => e.preventDefault());
+  // Keep the native menu inside text fields so cut/copy/paste and Select All
+  // still work; only suppress it on the decorative shell surfaces.
+  document.addEventListener('contextmenu', (e) => {
+    if (!e.target.closest('input, textarea, [contenteditable="true"]')) e.preventDefault();
+  });
 
   document.querySelectorAll('.tab-btn').forEach((b) =>
     b.addEventListener('click', () => _switchTab(b.dataset.tab)));
@@ -1410,14 +1414,26 @@ function _wireUI() {
       if (inField && ae !== input) return;
       e.preventDefault();
       _startDialTyping();
-      if (input) input.value += e.key;
+      if (input) {
+        const start = input.selectionStart ?? input.value.length;
+        const end = input.selectionEnd ?? start;
+        input.setRangeText(e.key, start, end, 'end');
+      }
       return;
     }
     if (e.key === 'Backspace') {
       if (inField && ae !== input) return;
       e.preventDefault();
       _startDialTyping();
-      if (input) input.value = input.value.slice(0, -1);
+      if (input) {
+        const start = input.selectionStart ?? input.value.length;
+        const end = input.selectionEnd ?? start;
+        if (start === end) {
+          if (start > 0) input.setRangeText('', start - 1, start, 'end');
+        } else {
+          input.setRangeText('', start, end, 'start');
+        }
+      }
     }
   });
 

@@ -1021,7 +1021,11 @@ function _switchFeedbackSub(which) {
 
 /** Wire up all DOM controls. */
 function _wireUI() {
-  document.addEventListener('contextmenu', (e) => e.preventDefault());
+  // Keep the native menu inside text fields so cut/copy/paste and Select All
+  // still work; only suppress it on the decorative shell surfaces.
+  document.addEventListener('contextmenu', (e) => {
+    if (!e.target.closest('input, textarea, [contenteditable="true"]')) e.preventDefault();
+  });
 
   document.querySelectorAll('.tab-btn').forEach((b) =>
     b.addEventListener('click', () => _switchTab(b.dataset.tab)));
@@ -1063,14 +1067,26 @@ function _wireUI() {
       if (inField && ae !== input) return;
       e.preventDefault();
       _startDialTyping();
-      if (input) input.value += e.key;
+      if (input) {
+        const start = input.selectionStart ?? input.value.length;
+        const end = input.selectionEnd ?? start;
+        input.setRangeText(e.key, start, end, 'end');
+      }
       return;
     }
     if (e.key === 'Backspace') {
       if (inField && ae !== input) return;
       e.preventDefault();
       _startDialTyping();
-      if (input) input.value = input.value.slice(0, -1);
+      if (input) {
+        const start = input.selectionStart ?? input.value.length;
+        const end = input.selectionEnd ?? start;
+        if (start === end) {
+          if (start > 0) input.setRangeText('', start - 1, start, 'end');
+        } else {
+          input.setRangeText('', start, end, 'start');
+        }
+      }
     }
   });
 
