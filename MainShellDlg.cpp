@@ -343,6 +343,12 @@ pjsua_call_id MainShellDlg::ResolveCallId(int requested)
 	if (requested >= 0 && requested < (int)PJSUA_MAX_CALLS && pjsua_call_is_active(requested)) {
 		return requested;
 	}
+	// The modern shell has no selected Messages tab — remember the last call it
+	// showed instead of falling through to the legacy tab-based lookup.
+	if (m_lastCallId >= 0 && m_lastCallId < (int)PJSUA_MAX_CALLS
+		&& pjsua_call_is_active(m_lastCallId)) {
+		return m_lastCallId;
+	}
 	if (mainDlg && IsWindow(mainDlg->m_hWnd)) {
 		pjsua_call_id current = mainDlg->CurrentCallId();
 		if (current >= 0 && current < (int)PJSUA_MAX_CALLS && pjsua_call_is_active(current)) {
@@ -476,11 +482,46 @@ void MainShellDlg::ProcessShellMessage(CString& message)
 		pjsua_call_id id = ResolveCallId(JsInt(root["callId"], -1));
 		CString target = JsStringToCString(root["target"]);
 		target.Trim();
-		if (id != PJSUA_INVALID_ID && !target.IsEmpty()) {
-			CString commands;
-			CString formatted = FormatNumber(target, &commands);
-			pj_str_t pj_uri = MSIP::StrToPjStr(formatted);
-			pjsua_call_xfer(id, &pj_uri, NULL);
+		if (id == PJSUA_INVALID_ID) {
+			PushMessage(_T("Transfer"), _T("No active call to transfer"));
+			return;
+		}
+		if (target.IsEmpty()) {
+			PushMessage(_T("Transfer"), _T("Enter a number to transfer to"));
+			return;
+		}
+
+		// Build the REFER destination exactly like an outbound call does. The old
+		// code used FormatNumber's simple URI (no transport suffix) and silently
+		// discarded the PJSIP result, which made external transfers look dead.
+		CString commands;
+		CString formatted = FormatNumber(target, &commands);
+		int scheme = formatted.Find(_T("sip:"));
+		int at = formatted.Find(_T('@'));
+		if (scheme != -1 && at == scheme + 4) {
+			// A dialPlan that did not match empties the number; never send sip:@domain.
+			formatted = target;
+		}
+		pjsua_acc_id acc_id = PJSUA_INVALID_ID;
+		pj_str_t pj_uri;
+		if (!SelectSIPAccount(formatted, acc_id, pj_uri)) {
+			PushMessage(_T("Transfer"), _T("No SIP account available for transfer"));
+			return;
+		}
+
+		pj_status_t status = pjsua_call_xfer(id, &pj_uri, NULL);
+		if (status == PJ_SUCCESS) {
+			CString message;
+			message.Format(_T("Transferring to %s..."), (LPCTSTR)target);
+			PushMessage(_T("Transfer"), message);
+		}
+		else {
+			char error[PJ_ERR_MSG_SIZE];
+			pj_strerror(status, error, sizeof(error));
+			CString reason(error);
+			CString message;
+			message.Format(_T("Transfer failed: %s"), (LPCTSTR)reason);
+			PushMessage(_T("Transfer"), message);
 		}
 		return;
 	}

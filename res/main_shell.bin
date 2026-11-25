@@ -1472,8 +1472,20 @@ function _wireUI() {
     const holding = document.getElementById('btnHold')?.title === 'Hold';
     MaxCallBridge.hold(undefined, holding);
   });
-  document.getElementById('btnTransfer')?.addEventListener('click', () =>
-    MaxCallBridge.transfer(undefined, document.getElementById('transferTarget')?.value));
+  const transferInput = document.getElementById('transferTarget');
+  const doTransfer = () => {
+    const target = transferInput?.value.trim() || '';
+    if (!target) return;
+    MaxCallBridge.transfer(undefined, target);
+    transferInput.value = '';
+  };
+  document.getElementById('btnTransfer')?.addEventListener('click', doTransfer);
+  transferInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      doTransfer();
+    }
+  });
 
   // One listener for every incoming bar — each button carries its own call id.
   document.getElementById('incomingBars')?.addEventListener('click', (e) => {
